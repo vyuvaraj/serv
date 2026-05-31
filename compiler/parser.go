@@ -15,6 +15,7 @@ const (
 	PRODUCT     // *
 	CALL        // func(x)
 	MEMBER      // obj.field
+	INDEX       // array[index]
 )
 
 var precedences = map[TokenType]int{
@@ -31,6 +32,7 @@ var precedences = map[TokenType]int{
 	TOKEN_SLASH:    PRODUCT,
 	TOKEN_LPAREN:   CALL,
 	TOKEN_DOT:      MEMBER,
+	TOKEN_LBRACKET: INDEX,
 }
 
 type Parser struct {
@@ -77,6 +79,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerInfix(TOKEN_GTE, p.parseInfixExpression)
 	p.registerInfix(TOKEN_LPAREN, p.parseCallExpression)
 	p.registerInfix(TOKEN_DOT, p.parseMemberExpression)
+	p.registerInfix(TOKEN_LBRACKET, p.parseIndexExpression)
 	p.registerInfix(TOKEN_ASSIGN, p.parseAssignmentExpression)
 
 	// Read two tokens so curToken and peekToken are both set
@@ -163,6 +166,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseMatchStatement()
 	case TOKEN_TEST:
 		return p.parseTestStatement()
+	case TOKEN_ENUM:
+		return p.parseEnumStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -835,4 +840,39 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) peekError(t TokenType) {
 	p.errors = append(p.errors, fmt.Sprintf("[Line %d, Col %d] expected next token to be %s, got %s instead", p.peekToken.Line, p.peekToken.Col, t, p.peekToken.Type))
+}
+
+func (p *Parser) parseIndexExpression(left Expression) Expression {
+	expr := &IndexExpr{Token: p.curToken, Left: left}
+	p.nextToken() // skip '['
+	expr.Index = p.parseExpression(LOWEST)
+	if !p.expectPeek(TOKEN_RBRACKET) {
+		return nil
+	}
+	return expr
+}
+
+func (p *Parser) parseEnumStatement() Statement {
+	stmt := &EnumStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Members = []string{}
+	for p.peekToken.Type != TOKEN_RBRACE && p.peekToken.Type != TOKEN_EOF {
+		p.nextToken()
+		if p.curToken.Type == TOKEN_IDENT {
+			stmt.Members = append(stmt.Members, p.curToken.Literal)
+		}
+		if p.peekToken.Type == TOKEN_COMMA {
+			p.nextToken()
+		}
+	}
+	if !p.expectPeek(TOKEN_RBRACE) {
+		return nil
+	}
+	return stmt
 }

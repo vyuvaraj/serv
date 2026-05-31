@@ -480,3 +480,15 @@ type IndexExpr struct {
 func (i *IndexExpr) expressionNode()      {}
 func (i *IndexExpr) TokenLiteral() string { return i.Token.Literal }
 func (i *IndexExpr) String() string       { return "(" + i.Left.String() + "[" + i.Index.String() + "])" }
+
+type EnumStmt struct {
+	Token   Token
+	Name    string
+	Members []string
+}
+
+func (e *EnumStmt) statementNode()       {}
+func (e *EnumStmt) TokenLiteral() string { return e.Token.Literal }
+func (e *EnumStmt) String() string {
+	return "enum " + e.Name + " { " + strings.Join(e.Members, ", ") + " }\n"
+}

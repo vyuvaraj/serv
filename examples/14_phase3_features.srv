@@ -1,0 +1,30 @@
+// Verification test for Phase 3 syntax & optimization features in Serv
+
+enum Status {
+    ACTIVE,
+    INACTIVE
+}
+
+test "implicit type inference" {
+    // Should infer integer
+    let a = 15
+    let b = 25
+    let c = a + b
+    assert c == 40
+
+    // Should infer string
+    let prefix = "Serv "
+    let suffix = "Language"
+    let full = prefix + suffix
+    assert full == "Serv Language"
+
+    // Should infer boolean
+    let flag = true
+    assert flag == true
+}
+
+test "enum constants verification" {
+    let currentStatus = ACTIVE
+    assert currentStatus == ACTIVE
+    assert currentStatus != INACTIVE
+}

@@ -171,6 +171,16 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		out.WriteString("}\n\n")
 		return out.String(), nil
 
+	case *EnumStmt:
+		var rOut bytes.Buffer
+		rOut.WriteString("const (\n")
+		for _, m := range s.Members {
+			c.varTypes[m] = "string"
+			rOut.WriteString(fmt.Sprintf("\t%s = %q\n", m, m))
+		}
+		rOut.WriteString(")\n\n")
+		return rOut.String(), nil
+
 	case *BrokerStmt:
 		val, err := c.genExpression(s.Value)
 		if err != nil {
@@ -337,6 +347,12 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		if s.Type != "" {
 			goType = toGoType(s.Type)
 			c.varTypes[s.Name] = goType
+		} else {
+			inferred := c.getExpressionType(s.Value)
+			if inferred != "interface{}" {
+				goType = inferred
+				c.varTypes[s.Name] = goType
+			}
 		}
 		if c.inFunction {
 			return fmt.Sprintf("var %s %s = %s\n_ = %s\n", s.Name, goType, val, s.Name), nil
