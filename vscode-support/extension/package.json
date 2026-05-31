@@ -10,7 +10,27 @@
   "categories": [
     "Programming Languages"
   ],
+  "main": "./extension.js",
   "icon": "images/icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/serv-lang/Serv.git"
+  },
+  "author": {
+    "name": "Serv Language Team"
+  },
+  "keywords": [
+    "serv",
+    "background services",
+    "dsl",
+    "syntax highlighting",
+    "snippets"
+  ],
+  "bugPreviews": {
+    "url": "https://github.com/serv-lang/Serv/issues"
+  },
+  "homepage": "https://github.com/serv-lang/Serv",
   "contributes": {
     "languages": [
       {

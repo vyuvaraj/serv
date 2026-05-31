@@ -81,6 +81,19 @@ func main() {
 		}
 		runTests(args[0])
 
+	case "lint":
+		lintCmd := flag.NewFlagSet("lint", flag.ExitOnError)
+		if err := lintCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Printf("Error parsing arguments: %v\n", err)
+			os.Exit(1)
+		}
+		args := lintCmd.Args()
+		if len(args) < 1 {
+			fmt.Println("Usage: serv lint <file.srv>")
+			os.Exit(1)
+		}
+		runLint(args[0])
+
 	default:
 		printUsage()
 	}
@@ -92,7 +105,23 @@ func printUsage() {
 	fmt.Println("  serv build <file.srv> [-o <output_binary>]  Compile Serv code to native binary")
 	fmt.Println("  serv run <file.srv> [--watch]              Compile and run Serv code immediately (with optional hot reload)")
 	fmt.Println("  serv test <file.srv>                       Run tests defined in a Serv file")
+	fmt.Println("  serv lint <file.srv>                       Validate syntax of a Serv file")
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
+}
+
+func runLint(srvFile string) {
+	absPath, err := filepath.Abs(srvFile)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	_, err = parseWithDependencies(absPath, make(map[string]bool))
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fmt.Println("OK")
 }
 
 func buildServ(srvFile, outputBinary string) string {

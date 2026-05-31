@@ -11,6 +11,7 @@ type Codegen struct {
 	program      *Program
 	imports      map[string]bool
 	declaredVars map[string]bool
+	varTypes     map[string]string // varName -> type
 	inFunction   bool
 	goExterns    map[string]string // fnName -> pkgPath
 	testFuncs    []string          // collected test functions
@@ -21,6 +22,7 @@ func NewCodegen(program *Program) *Codegen {
 		program:      program,
 		imports:      make(map[string]bool),
 		declaredVars: make(map[string]bool),
+		varTypes:     make(map[string]string),
 		goExterns:    make(map[string]string),
 	}
 }
@@ -92,6 +94,9 @@ func (c *Codegen) Generate() (string, error) {
 	}
 	if c.imports[`"serv/runtime"`] {
 		out.WriteString("var _ = runtime.Noop // ensure runtime is used\n\n")
+	}
+	if c.imports[`"strconv"`] {
+		out.WriteString("var _ = strconv.Atoi // ensure strconv is used\n\n")
 	}
 
 
@@ -309,11 +314,16 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 			return fmt.Sprintf("%s = %s\n_ = %s\n", s.Name, val, s.Name), nil
 		}
 		c.declaredVars[s.Name] = true
+		goType := "interface{}"
+		if s.Type != "" {
+			goType = toGoType(s.Type)
+			c.varTypes[s.Name] = goType
+		}
 		if c.inFunction {
-			return fmt.Sprintf("var %s interface{} = %s\n_ = %s\n", s.Name, val, s.Name), nil
+			return fmt.Sprintf("var %s %s = %s\n_ = %s\n", s.Name, goType, val, s.Name), nil
 		}
 		// Global let
-		return fmt.Sprintf("var %s interface{} = %s\n", s.Name, val), nil
+		return fmt.Sprintf("var %s %s = %s\n", s.Name, goType, val), nil
 
 	case *ReturnStmt:
 		val, err := c.genExpression(s.Value)
@@ -326,9 +336,22 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		c.inFunction = true
 		// Clear local variables for this function scope
 		oldDeclared := c.declaredVars
+		oldVarTypes := c.varTypes
 		c.declaredVars = make(map[string]bool)
-		for _, p := range s.Params {
+		c.varTypes = make(map[string]string)
+		for k, v := range oldVarTypes {
+			c.varTypes[k] = v
+		}
+
+		var params []string
+		for i, p := range s.Params {
 			c.declaredVars[p] = true
+			pt := "interface{}"
+			if i < len(s.ParamTypes) && s.ParamTypes[i] != "" {
+				pt = toGoType(s.ParamTypes[i])
+				c.varTypes[p] = pt
+			}
+			params = append(params, p+" "+pt)
 		}
 
 		bodyStr, err := c.genBlockStatement(s.Body)
@@ -337,11 +360,12 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		}
 
 		c.declaredVars = oldDeclared
+		c.varTypes = oldVarTypes
 		c.inFunction = false
 
-		var params []string
-		for _, p := range s.Params {
-			params = append(params, p+" interface{}")
+		retType := "interface{}"
+		if s.ReturnType != "" {
+			retType = toGoType(s.ReturnType)
 		}
 
 		// Ensure we have a return statement if none is at the end
@@ -355,11 +379,11 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 
 		if !hasReturn {
 			if strings.HasSuffix(bodyStr, "}") {
-				bodyStr = bodyStr[:len(bodyStr)-1] + "\treturn nil\n}"
+				bodyStr = bodyStr[:len(bodyStr)-1] + fmt.Sprintf("\treturn %s\n}", zeroValue(retType))
 			}
 		}
 
-		return fmt.Sprintf("func %s(%s) interface{} %s\n\n", s.Name, strings.Join(params, ", "), bodyStr), nil
+		return fmt.Sprintf("func %s(%s) %s %s\n\n", s.Name, strings.Join(params, ", "), retType, bodyStr), nil
 
 	case *TryCatchStmt:
 		oldDeclared := c.declaredVars
@@ -505,7 +529,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		// For our Request / HTTPResponse structs, they are returned statically.
 		// So we cast: if e.Object is req, we do req.Body.
 		// Let's produce a safe Go dynamic field access or standard access:
-		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member access\n\t\t\tval := interface{}(%s)\n\t\t\tswitch v := val.(type) {\n\t\t\tcase runtime.Request:\n\t\t\t\tif %q == \"Body\" { return v.Body }\n\t\t\t\tif %q == \"Method\" { return v.Method }\n\t\t\t\tif %q == \"Path\" { return v.Path }\n\t\t\tcase runtime.HTTPResponse:\n\t\t\t\tif %q == \"Body\" { return v.Body }\n\t\t\t\tif %q == \"Status\" { return v.Status }\n\t\t\tcase map[string]interface{}:\n\t\t\t\treturn v[%q]\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, field, field, field, field, field, e.Field), nil
+		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member access\n\t\t\tval := interface{}(%s)\n\t\t\tswitch v := val.(type) {\n\t\t\tcase runtime.Request:\n\t\t\t\tif %q == \"Body\" { return v.Body }\n\t\t\t\tif %q == \"Method\" { return v.Method }\n\t\t\t\tif %q == \"Path\" { return v.Path }\n\t\t\tcase runtime.HTTPResponse:\n\t\t\t\tif %q == \"Body\" { return v.Body }\n\t\t\t\tif %q == \"Status\" { return v.Status }\n\t\t\tcase *runtime.SafeMap:\n\t\t\t\treturn v.Get(%q)\n\t\t\tcase map[string]interface{}:\n\t\t\t\treturn v[%q]\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, field, field, field, field, field, e.Field, e.Field), nil
 
 	case *MemberAssignExpr:
 		objStr, err := c.genExpression(e.Object)
@@ -516,7 +540,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member assignment\n\t\t\tif m, ok := interface{}(%s).(map[string]interface{}); ok {\n\t\t\t\tm[%q] = %s\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, e.Field, valStr), nil
+		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member assignment\n\t\t\tif sm, ok := interface{}(%s).(*runtime.SafeMap); ok {\n\t\t\t\tsm.Set(%q, %s)\n\t\t\t} else if m, ok := interface{}(%s).(map[string]interface{}); ok {\n\t\t\t\tm[%q] = %s\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, e.Field, valStr, objStr, e.Field, valStr), nil
 
 	case *CallExpr:
 		funcStr, err := c.genExpression(e.Function)
@@ -560,7 +584,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			}
 			pairs = append(pairs, fmt.Sprintf("%q: %s", k, vStr))
 		}
-		return fmt.Sprintf("map[string]interface{}{\n\t\t%s,\n\t}", strings.Join(pairs, ",\n\t\t")), nil
+		return fmt.Sprintf("runtime.NewSafeMapFromMap(map[string]interface{}{\n\t\t%s,\n\t})", strings.Join(pairs, ",\n\t\t")), nil
 
 	case *InfixExpr:
 		leftStr, err := c.genExpression(e.Left)
@@ -571,6 +595,14 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
+		lt := c.getExpressionType(e.Left)
+		rt := c.getExpressionType(e.Right)
+
+		if lt == rt && (lt == "int" || lt == "float64" || lt == "string" || lt == "bool") {
+			return fmt.Sprintf("(%s %s %s)", leftStr, e.Operator, rightStr), nil
+		}
+
 		// Since operands are interface{} in Serv, we add a utility to add/concatenate/compare if needed.
 		// Comparison operators return bool; arithmetic operators return numeric/string.
 		switch e.Operator {
@@ -602,7 +634,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 		// Generate: if !(cond) { t.Fatalf("assertion failed: %v", cond) }
-		return fmt.Sprintf("func() {\n\t\tif v := %s; v == nil || v == false {\n\t\t\tt.Fatalf(\"assertion failed: %%v\", v)\n\t\t}\n\t}()", condStr), nil
+		return fmt.Sprintf("func() {\n\t\tvar v interface{} = %s\n\t\tif v == nil || v == false {\n\t\t\tt.Fatalf(\"assertion failed: %%v\", v)\n\t\t}\n\t}()", condStr), nil
 
 	default:
 		return "", fmt.Errorf("unknown expression type: %T", expr)
@@ -632,8 +664,23 @@ func (c *Codegen) GenerateTests() string {
 	out.WriteString("import (\n")
 	out.WriteString("\t\"fmt\"\n")
 	out.WriteString("\t\"testing\"\n")
+	for imp := range c.imports {
+		if imp != `"testing"` && imp != `"fmt"` {
+			out.WriteString("\t" + imp + "\n")
+		}
+	}
 	out.WriteString(")\n\n")
-	out.WriteString("var _ = fmt.Sprintf // keep fmt import\n\n")
+	out.WriteString("var _ = fmt.Sprintf // keep fmt import\n")
+	if c.imports[`"time"`] {
+		out.WriteString("var _ = time.Second\n")
+	}
+	if c.imports[`"serv/runtime"`] {
+		out.WriteString("var _ = runtime.Noop\n")
+	}
+	if c.imports[`"strconv"`] {
+		out.WriteString("var _ = strconv.Atoi\n")
+	}
+	out.WriteString("\n")
 	for _, fn := range c.testFuncs {
 		out.WriteString(fn)
 		out.WriteString("\n")
@@ -713,3 +760,64 @@ func (c *Codegen) genFString(str string) (string, error) {
 	}
 	return fmt.Sprintf("fmt.Sprintf(%q, %s)", formatStr, strings.Join(args, ", ")), nil
 }
+
+func toGoType(t string) string {
+	switch t {
+	case "int":
+		return "int"
+	case "string":
+		return "string"
+	case "float":
+		return "float64"
+	case "bool":
+		return "bool"
+	default:
+		return "interface{}"
+	}
+}
+
+func zeroValue(goType string) string {
+	switch goType {
+	case "int":
+		return "0"
+	case "float64":
+		return "0.0"
+	case "bool":
+		return "false"
+	case "string":
+		return `""`
+	default:
+		return "nil"
+	}
+}
+
+func (c *Codegen) getExpressionType(expr Expression) string {
+	switch e := expr.(type) {
+	case *Identifier:
+		if t, ok := c.varTypes[e.Value]; ok {
+			return t
+		}
+		return "interface{}"
+	case *IntegerLiteral:
+		return "int"
+	case *StringLiteral:
+		return "string"
+	case *DurationLiteral:
+		return "string"
+	case *InfixExpr:
+		switch e.Operator {
+		case "==", "!=", "<", ">", "<=", ">=":
+			return "bool"
+		default:
+			lt := c.getExpressionType(e.Left)
+			rt := c.getExpressionType(e.Right)
+			if lt == rt && (lt == "int" || lt == "float64" || lt == "string" || lt == "bool") {
+				return lt
+			}
+			return "interface{}"
+		}
+	default:
+		return "interface{}"
+	}
+}
+

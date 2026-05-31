@@ -27,6 +27,8 @@ Serv is a modern, high-level DSL (Domain-Specific Language) designed specificall
 
 ## Key Features
 
+- **Optional Static Typing & Compiler Optimizations**: Declare static types (`int`, `string`, `bool`) to generate native Go code, bypass interface reflection overhead, and execute mathematical/logic operations directly on Go primitives.
+- **High-Performance Pub/Sub**: Channel-decoupled event queue with a pool of 20 concurrent background workers for low latency and zero blockages.
 - **Declarative Background Workflows**: Native syntax for defining periodic intervals and cron schedules.
 - **Built-in HTTP & Pub/Sub Routing**: Directly declare endpoints, routing, and message queue subscriptions.
 - **Multi-Database Support**: Out-of-the-box integration with SQLite, PostgreSQL, Oracle, and MongoDB.
@@ -109,6 +111,31 @@ database env("DATABASE_URL")
 
 // Setup in-memory cache
 cache "in-memory"
+```
+
+---
+
+### Static Typing & Type Annotations
+
+Serv supports optional static typing on variables and function signatures. Providing types compiles them directly into native Go types, skipping the performance overhead of runtime `interface{}` conversions.
+
+Supported types: `int`, `string`, `bool`.
+
+#### Variable Type Annotations
+Specify types using `: type` after the identifier:
+```serv
+let count: int = 100
+let label: string = "Items in queue"
+let isActive: bool = true
+```
+
+#### Function Signature Type Annotations
+Specify parameter and return types to optimize function calls and compiler math:
+```serv
+fn calculateTotal(base: int, tax: int) -> int {
+    let result: int = base + tax
+    return result
+}
 ```
 
 ---

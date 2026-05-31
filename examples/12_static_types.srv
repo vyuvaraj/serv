@@ -1,0 +1,24 @@
+// Verification test for static typing compilation optimizations in Serv
+
+test "static type math and comparisons" {
+    let a: int = 5
+    let b: int = 10
+    let c: int = a + b
+    assert c == 15
+
+    let greeting: string = "Hello"
+    let name: string = " Serv"
+    let message: string = greeting + name
+    assert message == "Hello Serv"
+
+    let isOk: bool = true
+    let isNotOk: bool = false
+    assert isOk != isNotOk
+
+    let result: int = addInts(15, 25)
+    assert result == 40
+}
+
+fn addInts(x: int, y: int) -> int {
+    return x + y
+}

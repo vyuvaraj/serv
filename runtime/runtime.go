@@ -78,8 +78,10 @@ var (
 
 	// Fallback In-memory Broker
 	subscribers   = make(map[string][]func(string))
-
 	subscribersMu sync.RWMutex
+
+	pubSubQueue      = make(chan pubSubEvent, 10000)
+	pubSubWorkerOnce sync.Once
 
 	// Concurrency Semaphores
 	semaphores   = make(map[string]chan struct{})
@@ -539,21 +541,18 @@ func Publish(topic string, msg interface{}) {
 	}
 
 	// 6. In-memory Fallback
+	startPubSubWorkers()
 	subscribersMu.RLock()
 	subs := subscribers[topic]
 	subscribersMu.RUnlock()
 
 	for _, callback := range subs {
-		cb := callback
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					LogError("Recovered in subscribe callback: ", r)
-				}
-			}()
-			MetricInc("broker_messages_received_total")
-			cb(msgStr)
-		}()
+		select {
+		case pubSubQueue <- pubSubEvent{callback: callback, payload: msgStr}:
+		default:
+			// If queue is completely full, spawn a temporary goroutine fallback to avoid dropping events
+			go executeCallbackSafe(callback, msgStr)
+		}
 	}
 }
 
@@ -702,7 +701,7 @@ func JSONParse(dataVal interface{}) interface{} {
 	if err != nil {
 		panic(fmt.Sprintf("JSON parse error: %s", err.Error()))
 	}
-	return val
+	return ToSafeValue(val)
 }
 
 func JSONStringify(val interface{}) string {
@@ -851,13 +850,13 @@ func DBQuery(query string, args ...interface{}) interface{} {
 			panic(err.Error())
 		}
 
-		row := make(map[string]interface{})
+		row := NewSafeMap()
 		for i, col := range columns {
 			val := values[i]
 			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
+				row.Set(col, string(b))
 			} else {
-				row[col] = val
+				row.Set(col, val)
 			}
 		}
 		results = append(results, row)
@@ -908,7 +907,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 				if oid, ok := row["_id"].(interface{ String() string }); ok {
 					row["_id"] = oid.String()
 				}
-				results = append(results, row)
+				results = append(results, ToSafeValue(row))
 			}
 		}
 		return results
@@ -1034,4 +1033,91 @@ func CacheGet(key string) interface{} {
 		}
 		return entry.value
 	}
+}
+
+// SafeMap implements a thread-safe map using a sync.RWMutex
+type SafeMap struct {
+	mu sync.RWMutex
+	m  map[string]interface{}
+}
+
+func NewSafeMap() *SafeMap {
+	return &SafeMap{m: make(map[string]interface{})}
+}
+
+func NewSafeMapFromMap(m map[string]interface{}) *SafeMap {
+	if m == nil {
+		m = make(map[string]interface{})
+	}
+	return &SafeMap{m: m}
+}
+
+func (s *SafeMap) Set(key string, val interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[key] = val
+}
+
+func (s *SafeMap) Get(key string) interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.m[key]
+}
+
+func (s *SafeMap) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, key)
+}
+
+func (s *SafeMap) MarshalJSON() ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return json.Marshal(s.m)
+}
+
+func ToSafeValue(val interface{}) interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		sm := NewSafeMap()
+		for k, valItem := range v {
+			sm.Set(k, ToSafeValue(valItem))
+		}
+		return sm
+	case []interface{}:
+		res := make([]interface{}, len(v))
+		for i, valItem := range v {
+			res[i] = ToSafeValue(valItem)
+		}
+		return res
+	default:
+		return v
+	}
+}
+
+type pubSubEvent struct {
+	callback func(string)
+	payload  string
+}
+
+func startPubSubWorkers() {
+	pubSubWorkerOnce.Do(func() {
+		for i := 0; i < 20; i++ {
+			go func() {
+				for event := range pubSubQueue {
+					executeCallbackSafe(event.callback, event.payload)
+				}
+			}()
+		}
+	})
+}
+
+func executeCallbackSafe(callback func(string), payload string) {
+	defer func() {
+		if r := recover(); r != nil {
+			LogError("Recovered in subscribe callback: ", r)
+		}
+	}()
+	MetricInc("broker_messages_received_total")
+	callback(payload)
 }

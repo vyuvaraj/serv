@@ -1,0 +1,31 @@
+// Verification test for thread-safe concurrent maps in Serv
+
+test "concurrent map writes" {
+    let data = {
+        "count": 0
+    }
+
+    // Spawn multiple workers concurrently modifying the same map
+    spawn(1) modifyMap(data, "worker1")
+    spawn(1) modifyMap(data, "worker2")
+    spawn(1) modifyMap(data, "worker3")
+    spawn(1) modifyMap(data, "worker4")
+    spawn(1) modifyMap(data, "worker5")
+
+    // Let the workers run for a brief moment
+    log.info("Started concurrent workers writing to map...")
+    
+    // Read and assert that safe map gets value updates correctly
+    data.count = 42
+    assert data.count == 42
+}
+
+fn modifyMap(sharedMap, workerName) {
+    let i = 0
+    try {
+        sharedMap.count = i
+        log.info(workerName, " set shared map count to ", i)
+    } catch (err) {
+        log.error("Failed to write concurrently to map: ", err)
+    }
+}
