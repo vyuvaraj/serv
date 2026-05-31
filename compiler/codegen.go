@@ -154,6 +154,9 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 			if len(parts) >= 2 {
 				scriptPath := parts[0]
 				funcName := parts[1]
+				if absPath, err := filepath.Abs(scriptPath); err == nil {
+					scriptPath = filepath.ToSlash(absPath)
+				}
 				var callArgs []string
 				for _, p := range s.Params {
 					callArgs = append(callArgs, p)

@@ -38,3 +38,11 @@ test "zero-lock map literal verification" {
     assert details.title == "Zero-Lock"
     assert details.speed == "Fast"
 }
+
+extern fn cleanAndFormatText(inputVal) from "python:./examples/helpers.py:clean_text"
+
+test "python daemon interop verification" {
+    let rawText = "    Hello!!! World!!!   "
+    let cleaned = cleanAndFormatText(rawText)
+    assert cleaned == "[Python formatter] Result: 'HELLO WORLD'"
+}

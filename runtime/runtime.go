@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -69,8 +70,15 @@ var (
 	// Cache Instance
 	redisClient *redis.Client
 	ctx         = context.Background()
-	localCache  = make(map[string]localCacheEntry)
+	localCache   = make(map[string]localCacheEntry)
 	localCacheMu sync.RWMutex
+
+	// Python interop daemon state
+	pythonCmd      *exec.Cmd
+	pythonStdin    io.WriteCloser
+	pythonStdout   *bufio.Reader
+	pythonMutex    sync.Mutex
+	pythonInitOnce sync.Once
 
 	// Broker Connection Instances
 	natsClient      *nats.Conn
@@ -664,46 +672,103 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	metricsGauges.RUnlock()
 }
 
-// Call Python Script for extern mappings
-func CallPython(scriptPath string, funcName string, args ...interface{}) interface{} {
-	argsJSON, err := json.Marshal(args)
-	if err != nil {
-		LogError("Failed to marshal python arguments: ", err)
-		return nil
-	}
-
-	wrapperCode := fmt.Sprintf(`
+func initPythonDaemon() {
+	pythonInitOnce.Do(func() {
+		daemonCode := `
 import sys
 import json
 import importlib.util
 
-spec = importlib.util.spec_from_file_location("module", %q)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+modules = {}
 
-fn = getattr(module, %q)
-args = json.loads(%q)
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    try:
+        req = json.loads(line)
+        script_path = req["script_path"]
+        func_name = req["func_name"]
+        args = req["args"]
 
-result = fn(*args)
-print(json.dumps({"result": result}))
-`, scriptPath, funcName, string(argsJSON))
+        if script_path not in modules:
+            spec = importlib.util.spec_from_file_location("module", script_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            modules[script_path] = module
+        else:
+            module = modules[script_path]
 
-	cmd := exec.Command("python", "-c", wrapperCode)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+        fn = getattr(module, func_name)
+        res = fn(*args)
+        print(json.dumps({"result": res}))
+        sys.stdout.flush()
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.stdout.flush()
+`
+		pythonCmd = exec.Command("python", "-u", "-c", daemonCode)
+		var err error
+		pythonStdin, err = pythonCmd.StdinPipe()
+		if err != nil {
+			panic("Failed to create stdin pipe for Python daemon: " + err.Error())
+		}
+		stdoutPipe, err := pythonCmd.StdoutPipe()
+		if err != nil {
+			panic("Failed to create stdout pipe for Python daemon: " + err.Error())
+		}
+		pythonStdout = bufio.NewReader(stdoutPipe)
 
-	err = cmd.Run()
+		if err := pythonCmd.Start(); err != nil {
+			panic("Failed to start Python interop daemon: " + err.Error())
+		}
+	})
+}
+
+// Call Python Script for extern mappings using the persistent daemon
+func CallPython(scriptPath string, funcName string, args ...interface{}) interface{} {
+	initPythonDaemon()
+
+	pythonMutex.Lock()
+	defer pythonMutex.Unlock()
+
+	reqPayload := map[string]interface{}{
+		"script_path": scriptPath,
+		"func_name":   funcName,
+		"args":        args,
+	}
+
+	payloadBytes, err := json.Marshal(reqPayload)
 	if err != nil {
-		LogError("Python script execution failed: ", stderr.String(), " error: ", err)
+		LogError("Failed to marshal Python daemon request: ", err)
+		return nil
+	}
+
+	_, err = pythonStdin.Write(append(payloadBytes, '\n'))
+	if err != nil {
+		LogError("Failed to write request to Python daemon: ", err)
+		return nil
+	}
+
+	line, err := pythonStdout.ReadBytes('\n')
+	if err != nil {
+		LogError("Failed to read response from Python daemon: ", err)
 		return nil
 	}
 
 	var res struct {
 		Result interface{} `json:"result"`
+		Error  string      `json:"error"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
-		return stdout.String()
+
+	if err := json.Unmarshal(line, &res); err != nil {
+		LogError("Failed to unmarshal Python daemon response: ", err)
+		return string(line)
+	}
+
+	if res.Error != "" {
+		LogError("Python daemon execution error: ", res.Error)
+		return nil
 	}
 
 	return res.Result
