@@ -386,6 +386,30 @@ func (i *IntegerLiteral) expressionNode()      {}
 func (i *IntegerLiteral) TokenLiteral() string { return i.Token.Literal }
 func (i *IntegerLiteral) String() string       { return i.Token.Literal }
 
+type FloatLiteral struct {
+	Token Token
+	Value float64
+}
+
+func (f *FloatLiteral) expressionNode()      {}
+func (f *FloatLiteral) TokenLiteral() string { return f.Token.Literal }
+func (f *FloatLiteral) String() string       { return f.Token.Literal }
+
+type ArrayLiteral struct {
+	Token    Token
+	Elements []Expression
+}
+
+func (a *ArrayLiteral) expressionNode()      {}
+func (a *ArrayLiteral) TokenLiteral() string { return a.Token.Literal }
+func (a *ArrayLiteral) String() string {
+	var elements []string
+	for _, el := range a.Elements {
+		elements = append(elements, el.String())
+	}
+	return "[" + strings.Join(elements, ", ") + "]"
+}
+
 type DurationLiteral struct {
 	Token Token
 	Value string // e.g. "5s", "10m"
@@ -446,3 +470,13 @@ type InfixExpr struct {
 func (i *InfixExpr) expressionNode()      {}
 func (i *InfixExpr) TokenLiteral() string { return i.Token.Literal }
 func (i *InfixExpr) String() string       { return "(" + i.Left.String() + " " + i.Operator + " " + i.Right.String() + ")" }
+
+type IndexExpr struct {
+	Token Token // The '[' token
+	Left  Expression
+	Index Expression
+}
+
+func (i *IndexExpr) expressionNode()      {}
+func (i *IndexExpr) TokenLiteral() string { return i.Token.Literal }
+func (i *IndexExpr) String() string       { return "(" + i.Left.String() + "[" + i.Index.String() + "])" }

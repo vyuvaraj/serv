@@ -15,6 +15,7 @@ type Codegen struct {
 	inFunction   bool
 	goExterns    map[string]string // fnName -> pkgPath
 	testFuncs    []string          // collected test functions
+	regexDecls   []string          // collected compiled regex variables
 }
 
 func NewCodegen(program *Program) *Codegen {
@@ -24,6 +25,7 @@ func NewCodegen(program *Program) *Codegen {
 		declaredVars: make(map[string]bool),
 		varTypes:     make(map[string]string),
 		goExterns:    make(map[string]string),
+		regexDecls:   []string{},
 	}
 }
 
@@ -98,7 +100,17 @@ func (c *Codegen) Generate() (string, error) {
 	if c.imports[`"strconv"`] {
 		out.WriteString("var _ = strconv.Atoi // ensure strconv is used\n\n")
 	}
+	if c.imports[`"regexp"`] {
+		out.WriteString("var _ = regexp.MustCompile // ensure regexp is used\n\n")
+	}
 
+	// Pre-compiled regex variables
+	if len(c.regexDecls) > 0 {
+		for _, rDecl := range c.regexDecls {
+			out.WriteString(rDecl + "\n")
+		}
+		out.WriteString("\n")
+	}
 
 	out.WriteString(body.String())
 
@@ -460,6 +472,20 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 	case *IntegerLiteral:
 		return fmt.Sprintf("%d", e.Value), nil
 
+	case *FloatLiteral:
+		return fmt.Sprintf("%f", e.Value), nil
+
+	case *ArrayLiteral:
+		var elements []string
+		for _, el := range e.Elements {
+			elStr, err := c.genExpression(el)
+			if err != nil {
+				return "", err
+			}
+			elements = append(elements, elStr)
+		}
+		return fmt.Sprintf("[]interface{}{%s}", strings.Join(elements, ", ")), nil
+
 	case *DurationLiteral:
 		return fmt.Sprintf("%q", e.Value), nil
 
@@ -543,9 +569,22 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member assignment\n\t\t\tif sm, ok := interface{}(%s).(*runtime.SafeMap); ok {\n\t\t\t\tsm.Set(%q, %s)\n\t\t\t} else if m, ok := interface{}(%s).(map[string]interface{}); ok {\n\t\t\t\tm[%q] = %s\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, e.Field, valStr, objStr, e.Field, valStr), nil
 
 	case *CallExpr:
-		funcStr, err := c.genExpression(e.Function)
-		if err != nil {
-			return "", err
+		var funcStr string
+		var isRegexpCheck bool
+		if memExpr, ok := e.Function.(*MemberExpr); ok {
+			objStr, err := c.genExpression(memExpr.Object)
+			if err == nil && objStr == "regexp" && memExpr.Field == "check" {
+				isRegexpCheck = true
+				funcStr = "regexp.check"
+			}
+		}
+
+		if !isRegexpCheck {
+			var err error
+			funcStr, err = c.genExpression(e.Function)
+			if err != nil {
+				return "", err
+			}
 		}
 
 		var args []string
@@ -570,6 +609,27 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "time.Now().Format(time.RFC3339)", nil
 		}
 
+		if funcStr == "regexp.check" && len(e.Arguments) == 2 {
+			c.imports[`"regexp"`] = true
+			textVal, err := c.genExpression(e.Arguments[1])
+			if err != nil {
+				return "", err
+			}
+			c.imports[`"fmt"`] = true
+			if strLit, ok := e.Arguments[0].(*StringLiteral); ok {
+				varName := fmt.Sprintf("regex_%d_%d", e.Token.Line, e.Token.Col)
+				decl := fmt.Sprintf("var %s = regexp.MustCompile(%q)", varName, strLit.Value)
+				c.regexDecls = append(c.regexDecls, decl)
+				return fmt.Sprintf("%s.MatchString(fmt.Sprint(%s))", varName, textVal), nil
+			} else {
+				patternVal, err := c.genExpression(e.Arguments[0])
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("(func() bool { r, err := regexp.Compile(fmt.Sprint(%s)); if err != nil { return false }; return r.MatchString(fmt.Sprint(%s)) }())", patternVal, textVal), nil
+			}
+		}
+
 		return fmt.Sprintf("%s(%s)", funcStr, strings.Join(args, ", ")), nil
 
 	case *FStringLiteral:
@@ -585,6 +645,20 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			pairs = append(pairs, fmt.Sprintf("%q: %s", k, vStr))
 		}
 		return fmt.Sprintf("runtime.NewSafeMapFromMap(map[string]interface{}{\n\t\t%s,\n\t})", strings.Join(pairs, ",\n\t\t")), nil
+
+	case *IndexExpr:
+		leftStr, err := c.genExpression(e.Left)
+		if err != nil {
+			return "", err
+		}
+		indexStr, err := c.genExpression(e.Index)
+		if err != nil {
+			return "", err
+		}
+		c.imports[`"fmt"`] = true
+		c.imports[`"strconv"`] = true
+		c.imports[`"serv/runtime"`] = true
+		return fmt.Sprintf("func() interface{} {\n\t\t\tval := interface{}(%s)\n\t\t\tswitch v := val.(type) {\n\t\t\tcase []interface{}:\n\t\t\t\tidx, _ := strconv.Atoi(fmt.Sprint(%s))\n\t\t\t\tif idx >= 0 && idx < len(v) {\n\t\t\t\t\treturn v[idx]\n\t\t\t\t}\n\t\t\tcase *runtime.SafeMap:\n\t\t\t\treturn v.Get(fmt.Sprint(%s))\n\t\t\tcase map[string]interface{}:\n\t\t\t\treturn v[fmt.Sprint(%s)]\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", leftStr, indexStr, indexStr, indexStr), nil
 
 	case *InfixExpr:
 		leftStr, err := c.genExpression(e.Left)
@@ -680,6 +754,9 @@ func (c *Codegen) GenerateTests() string {
 	if c.imports[`"strconv"`] {
 		out.WriteString("var _ = strconv.Atoi\n")
 	}
+	if c.imports[`"regexp"`] {
+		out.WriteString("var _ = regexp.MustCompile\n")
+	}
 	out.WriteString("\n")
 	for _, fn := range c.testFuncs {
 		out.WriteString(fn)
@@ -718,7 +795,6 @@ func sanitizeTestName(name string) string {
 
 
 func (c *Codegen) genFString(str string) (string, error) {
-	c.imports[`"fmt"`] = true
 	var formatParts []string
 	var args []string
 
@@ -758,6 +834,7 @@ func (c *Codegen) genFString(str string) (string, error) {
 	if len(args) == 0 {
 		return fmt.Sprintf("%q", formatStr), nil
 	}
+	c.imports[`"fmt"`] = true
 	return fmt.Sprintf("fmt.Sprintf(%q, %s)", formatStr, strings.Join(args, ", ")), nil
 }
 
@@ -800,6 +877,10 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 		return "interface{}"
 	case *IntegerLiteral:
 		return "int"
+	case *FloatLiteral:
+		return "float64"
+	case *ArrayLiteral:
+		return "[]interface{}"
 	case *StringLiteral:
 		return "string"
 	case *DurationLiteral:

@@ -54,9 +54,11 @@ func NewParser(l *Lexer) *Parser {
 	p.prefixParseFns = make(map[TokenType]prefixParseFn)
 	p.registerPrefix(TOKEN_IDENT, p.parseIdentifier)
 	p.registerPrefix(TOKEN_INT, p.parseIntegerLiteral)
+	p.registerPrefix(TOKEN_FLOAT, p.parseFloatLiteral)
 	p.registerPrefix(TOKEN_STRING, p.parseStringLiteral)
 	p.registerPrefix(TOKEN_DURATION, p.parseDurationLiteral)
 	p.registerPrefix(TOKEN_LBRACE, p.parseMapLiteral)
+	p.registerPrefix(TOKEN_LBRACKET, p.parseArrayLiteral)
 	p.registerPrefix(TOKEN_LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(TOKEN_FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(TOKEN_CACHE, p.parseCacheIdentifier)
@@ -597,8 +599,38 @@ func (p *Parser) parseStringLiteral() Expression {
 	return &StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
+func (p *Parser) parseFloatLiteral() Expression {
+	lit := &FloatLiteral{Token: p.curToken}
+	value, err := strconv.ParseFloat(p.curToken.Literal, 64)
+	if err != nil {
+		p.addError(fmt.Sprintf("could not parse %q as float", p.curToken.Literal))
+		return nil
+	}
+	lit.Value = value
+	return lit
+}
+
 func (p *Parser) parseDurationLiteral() Expression {
 	return &DurationLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseArrayLiteral() Expression {
+	a := &ArrayLiteral{Token: p.curToken, Elements: []Expression{}}
+	if p.peekToken.Type == TOKEN_RBRACKET {
+		p.nextToken()
+		return a
+	}
+	p.nextToken() // skip '['
+	a.Elements = append(a.Elements, p.parseExpression(LOWEST))
+	for p.peekToken.Type == TOKEN_COMMA {
+		p.nextToken() // move to comma
+		p.nextToken() // move to expression
+		a.Elements = append(a.Elements, p.parseExpression(LOWEST))
+	}
+	if !p.expectPeek(TOKEN_RBRACKET) {
+		return nil
+	}
+	return a
 }
 
 func (p *Parser) parseMapLiteral() Expression {

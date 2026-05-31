@@ -8,6 +8,7 @@ const (
 	TOKEN_ILLEGAL    TokenType = "ILLEGAL"
 	TOKEN_IDENT      TokenType = "IDENT"
 	TOKEN_INT        TokenType = "INT"
+	TOKEN_FLOAT      TokenType = "FLOAT"
 	TOKEN_STRING     TokenType = "STRING"
 	TOKEN_DURATION   TokenType = "DURATION"
 
@@ -202,12 +203,8 @@ func (l *Lexer) NextToken() Token {
 			tok.Type = lookupIdent(tok.Literal)
 			return tok
 		} else if isDigit(l.ch) {
-			lit, isDur := l.readNumberOrDuration()
-			if isDur {
-				tok.Type = TOKEN_DURATION
-			} else {
-				tok.Type = TOKEN_INT
-			}
+			lit, tokType := l.readNumberOrDurationOrFloat()
+			tok.Type = tokType
 			tok.Literal = lit
 			return tok
 		} else {
@@ -285,17 +282,25 @@ func (l *Lexer) readIdentifier() string {
 	return l.input[position:l.position]
 }
 
-func (l *Lexer) readNumberOrDuration() (string, bool) {
+func (l *Lexer) readNumberOrDurationOrFloat() (string, TokenType) {
 	position := l.position
 	for isDigit(l.ch) {
 		l.readChar()
 	}
+	// Check if float (dot followed by digit)
+	if l.ch == '.' && isDigit(l.peekChar()) {
+		l.readChar() // consume '.'
+		for isDigit(l.ch) {
+			l.readChar()
+		}
+		return l.input[position:l.position], TOKEN_FLOAT
+	}
 	// Check if this is a duration literal (e.g., 5s, 10m, 2h)
 	if l.ch == 's' || l.ch == 'm' || l.ch == 'h' {
 		l.readChar()
-		return l.input[position:l.position], true
+		return l.input[position:l.position], TOKEN_DURATION
 	}
-	return l.input[position:l.position], false
+	return l.input[position:l.position], TOKEN_INT
 }
 
 func (l *Lexer) readString() string {
