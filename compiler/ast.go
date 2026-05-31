@@ -119,6 +119,21 @@ func (r *RouteStmt) String() string {
 	return "route \"" + r.Method + "\" \"" + r.Path + "\" (" + r.Param + ") " + r.Body.String() + "\n"
 }
 
+// Tool Statement
+type ToolStmt struct {
+	Token       Token
+	Name        string
+	Description string
+	Param       string // args object name, e.g. "args"
+	Body        *BlockStmt
+}
+
+func (t *ToolStmt) statementNode()       {}
+func (t *ToolStmt) TokenLiteral() string { return t.Token.Literal }
+func (t *ToolStmt) String() string {
+	return "tool \"" + t.Name + "\" \"" + t.Description + "\" (" + t.Param + ") " + t.Body.String() + "\n"
+}
+
 // Every Statement
 type EveryStmt struct {
 	Token    Token

@@ -52,7 +52,7 @@ func main() {
 		if *watchFlag {
 			runServWatch(args[0])
 		} else {
-			runServ(args[0])
+			runServ(args[0], args[1:])
 		}
 
 	case "dockerize":
@@ -181,7 +181,7 @@ func buildServNoExit(srvFile, outputBinary string) (string, error) {
 	return filepath.Join(filepath.Dir(absPath), outputBinary), nil
 }
 
-func runServ(srvFile string) {
+func runServ(srvFile string, extraArgs []string) {
 	binPath, err := buildServNoExit(srvFile, "temp_service.exe")
 	if err != nil {
 		fmt.Printf("Build failed: %v\n", err)
@@ -190,7 +190,8 @@ func runServ(srvFile string) {
 	defer os.Remove(binPath)
 
 	fmt.Printf("Running native service: %s...\n", binPath)
-	cmd := exec.Command(binPath)
+	cmd := exec.Command(binPath, extraArgs...)
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

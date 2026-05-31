@@ -254,6 +254,13 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		// Wrap returning map or response correctly
 		return fmt.Sprintf("func init() {\n\truntime.AddRoute(%q, %q, func(%s runtime.Request) interface{} %s)\n}\n\n", s.Method, s.Path, s.Param, bodyStr), nil
 
+	case *ToolStmt:
+		bodyStr, err := c.genBlockStatement(s.Body)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func init() {\n\truntime.AddMCPTool(%q, %q, func(%s interface{}) interface{} %s)\n}\n\n", s.Name, s.Description, s.Param, bodyStr), nil
+
 	case *EveryStmt:
 		interval, err := c.genExpression(s.Interval)
 		if err != nil {
@@ -570,6 +577,11 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.CacheSet", nil
 			} else if e.Field == "get" {
 				return "runtime.CacheGet", nil
+			}
+		}
+		if objStr == "mcp" {
+			if e.Field == "call" {
+				return "runtime.InvokeMCPToolForTesting", nil
 			}
 		}
 

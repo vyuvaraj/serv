@@ -137,6 +137,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseServerStatement()
 	case TOKEN_ROUTE:
 		return p.parseRouteStatement()
+	case TOKEN_TOOL:
+		return p.parseToolStatement()
 	case TOKEN_EVERY:
 		return p.parseEveryStatement()
 	case TOKEN_CRON:
@@ -254,6 +256,40 @@ func (p *Parser) parseRouteStatement() Statement {
 		return nil
 	}
 	stmt.Path = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Param = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_RPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+func (p *Parser) parseToolStatement() Statement {
+	stmt := &ToolStmt{Token: p.curToken}
+
+	if !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Description = p.curToken.Literal
 
 	if !p.expectPeek(TOKEN_LPAREN) {
 		return nil

@@ -36,6 +36,7 @@ const (
 	TOKEN_AND        TokenType = "AND"
 	TOKEN_OR         TokenType = "OR"
 	TOKEN_ENUM       TokenType = "ENUM"
+	TOKEN_TOOL       TokenType = "TOOL"
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -366,6 +367,7 @@ var keywords = map[string]TokenType{
 	"test":      TOKEN_TEST,
 	"assert":    TOKEN_ASSERT,
 	"enum":      TOKEN_ENUM,
+	"tool":      TOKEN_TOOL,
 }
 
 func lookupIdent(ident string) TokenType {
