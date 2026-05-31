@@ -1,0 +1,35 @@
+// Serv Example 06: Native JSON support
+// Run this example:
+//   .\serv.exe run examples/06_json_support.srv
+
+every 4s {
+    log.info("Starting JSON demonstration...")
+
+    // 1. Parsing a valid JSON string
+    let jsonString = "{\"name\": \"Serv Background Service\", \"version\": 1, \"active\": true}"
+    let parsedObj = json.parse(jsonString)
+
+    // Log individual fields (using Serv member access)
+    log.info("Parsed name: ", parsedObj.name)
+    log.info("Parsed version: ", parsedObj.version)
+    log.info("Parsed active state: ", parsedObj.active)
+
+    // 2. Modifying fields & serializing back to string
+    // Maps in Serv support direct assignments
+    parsedObj.version = 2
+    parsedObj.newField = "added-at-runtime"
+    
+    let updatedJson = json.stringify(parsedObj)
+    log.info("Updated JSON string: ", updatedJson)
+
+    // 3. Gracefully catching invalid JSON syntax
+    try {
+        log.info("Attempting to parse invalid JSON...")
+        let invalidData = "{invalid-json-string}"
+        let failedObj = json.parse(invalidData)
+    } catch (err) {
+        log.error("Successfully caught JSON parser error: ", err)
+    }
+    
+    log.info("JSON demonstration tick completed.")
+}

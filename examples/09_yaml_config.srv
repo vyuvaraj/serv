@@ -1,0 +1,23 @@
+// Serv Example 09: YAML Config Support
+// Run this example:
+//   .\serv.exe run examples/09_yaml_config.srv --config examples/app_config.yml
+
+let dbUrl = config("database.url")
+let appName = config("app.name")
+let appPort = config("app.port")
+
+database dbUrl
+
+log.info(f"Loaded config values - Name: {appName}, Port: {appPort}, DB: {dbUrl}")
+
+every 4s {
+    log.info("YAML Config Service Heartbeat...")
+    try {
+        db.query("CREATE TABLE IF NOT EXISTS config_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT)")
+        db.query("INSERT INTO config_log (ts) VALUES (?)", time.now())
+        let total = db.query("SELECT count(*) as count FROM config_log")
+        log.info(f"Database logs count: {total}")
+    } catch (err) {
+        log.error(f"Failed to query database: {err}")
+    }
+}

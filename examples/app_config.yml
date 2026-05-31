@@ -1,0 +1,7 @@
+app:
+  port: 2112
+  name: "ServYAMLService"
+database:
+  url: "sqlite://yaml_test_db.db"
+broker:
+  url: "in-memory"

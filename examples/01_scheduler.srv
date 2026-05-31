@@ -1,0 +1,17 @@
+// Serv Example 01: Schedulers
+// Run this example:
+//   $env:BACKUP_CRON="*/10 * * * * *"; .\serv.exe run examples/01_scheduler.srv
+
+// Run a job every 5 seconds
+every 5s {
+    log.info("Task 1: Running healthcheck...")
+    
+    // Simulate checking database
+    log.info("Database connection is healthy.")
+}
+
+// Run a job using a cron expression loaded from an environment variable
+cron env("BACKUP_CRON") {
+    log.warn("Task 2: Cron triggered! Starting database backup...")
+    metric.inc("db_backups_total")
+}

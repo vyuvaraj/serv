@@ -1,0 +1,16 @@
+// Serv Example 04: Python extern bindings
+// Run this example:
+//   .\serv.exe run examples/04_python_binding.srv
+
+// Declare the external Python method mapping
+extern fn cleanAndFormatText(inputVal) from "python:./examples/helpers.py:clean_text"
+
+every 5s {
+    let dirtyText = "    Hello!!! World!!!   "
+    
+    // Call the Python function from Serv
+    let cleanVal = cleanAndFormatText(dirtyText)
+    
+    log.info("Dirty text input: ", dirtyText)
+    log.info("Cleaned Python output: ", cleanVal)
+}

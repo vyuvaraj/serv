@@ -1,0 +1,12 @@
+fn add(a, b) {
+  return a + b
+}
+
+test "addition works" {
+  assert add(1, 2) == 3
+}
+
+test "string concat" {
+  let result = "hello" + " world"
+  assert result == "hello world"
+}

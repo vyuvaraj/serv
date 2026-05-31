@@ -1,0 +1,42 @@
+{
+  "name": "serv-vscode",
+  "displayName": "Serv Language Support",
+  "description": "Syntax highlighting and language configuration for the Serv programming language (.srv files).",
+  "version": "1.0.0",
+  "publisher": "serv-lang",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "icon": "images/icon.png",
+  "contributes": {
+    "languages": [
+      {
+        "id": "serv",
+        "aliases": [
+          "Serv",
+          "serv"
+        ],
+        "extensions": [
+          ".srv"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "serv",
+        "scopeName": "source.srv",
+        "path": "./syntaxes/serv.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "serv",
+        "path": "./snippets/serv.code-snippets"
+      }
+    ]
+  }
+}

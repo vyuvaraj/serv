@@ -1,0 +1,172 @@
+{
+  "Function Declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:functionName}(${2:params}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a new Serv function"
+  },
+  "Variable Declaration": {
+    "prefix": "let",
+    "body": [
+      "let ${1:variableName} = ${2:value}"
+    ],
+    "description": "Declare a variable"
+  },
+  "Every Interval Block": {
+    "prefix": "every",
+    "body": [
+      "every ${1:5s} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Run a block of code periodically"
+  },
+  "Cron Scheduler Block": {
+    "prefix": "cron",
+    "body": [
+      "cron ${1:env(\"CRON_EXPR\")} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Run a block of code on a cron schedule"
+  },
+  "HTTP Route Handler": {
+    "prefix": "route",
+    "body": [
+      "route \"${1:GET}\" \"${2:/path}\" (${3:req}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Create an HTTP route endpoint"
+  },
+  "PubSub Subscribe Block": {
+    "prefix": "subscribe",
+    "body": [
+      "subscribe \"${1:topic}\" (${2:msg}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Subscribe to a message broker topic"
+  },
+  "PubSub Publish Statement": {
+    "prefix": "publish",
+    "body": [
+      "publish \"${1:topic}\" ${2:payload}"
+    ],
+    "description": "Publish a message to a topic"
+  },
+  "Spawn Concurrent Task": {
+    "prefix": "spawn",
+    "body": [
+      "spawn ${1:functionCall}($2)"
+    ],
+    "description": "Spawn a lightweight concurrent task"
+  },
+  "Spawn Rate Limited Concurrent Task": {
+    "prefix": "spawn-limit",
+    "body": [
+      "spawn(${1:workerLimit}) ${2:functionCall}($3)"
+    ],
+    "description": "Spawn a concurrent task with a worker pool limit"
+  },
+  "Database Query Statement": {
+    "prefix": "db.query",
+    "body": [
+      "db.query(\"${1:query}\"${2:, args})"
+    ],
+    "description": "Execute database query"
+  },
+  "Cache Set Key": {
+    "prefix": "cache.set",
+    "body": [
+      "cache.set(\"${1:key}\", ${2:value}, \"${3:5s}\")"
+    ],
+    "description": "Save a value to the in-memory cache"
+  },
+  "Cache Get Key": {
+    "prefix": "cache.get",
+    "body": [
+      "cache.get(\"${1:key}\")"
+    ],
+    "description": "Get a value from the in-memory cache"
+  },
+  "JSON Parse string": {
+    "prefix": "json.parse",
+    "body": [
+      "json.parse(${1:jsonString})"
+    ],
+    "description": "Parse a JSON string to an object"
+  },
+  "JSON Stringify object": {
+    "prefix": "json.stringify",
+    "body": [
+      "json.stringify(${1:object})"
+    ],
+    "description": "Serialize an object to a JSON string"
+  },
+  "Test Block": {
+    "prefix": "test",
+    "body": [
+      "test \"${1:test description}\" {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a test block"
+  },
+  "Assert Check": {
+    "prefix": "assert",
+    "body": [
+      "assert ${1:expression}"
+    ],
+    "description": "Assert expression is truthy"
+  },
+  "Try-Catch Exception Handling": {
+    "prefix": "try",
+    "body": [
+      "try {",
+      "\t$1",
+      "} catch (${2:err}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Try-catch exception handling block"
+  },
+  "Match Block": {
+    "prefix": "match",
+    "body": [
+      "match ${1:variable} {",
+      "\t\"${2:value}\" => {",
+      "\t\t$3",
+      "\t}",
+      "\t_ => {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Pattern matching structure"
+  },
+  "Log Info Statement": {
+    "prefix": "log.info",
+    "body": [
+      "log.info(${1:args})"
+    ],
+    "description": "Write an info log statement"
+  },
+  "Log Error Statement": {
+    "prefix": "log.error",
+    "body": [
+      "log.error(${1:args})"
+    ],
+    "description": "Write an error log statement"
+  },
+  "Log Warn Statement": {
+    "prefix": "log.warn",
+    "body": [
+      "log.warn(${1:args})"
+    ],
+    "description": "Write a warning log statement"
+  }
+}
