@@ -564,6 +564,7 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		var spawnCode string
 		if s.Limit != nil {
 			limStr, err := c.genExpression(s.Limit)
 			if err != nil {
@@ -572,9 +573,14 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 			semID := fmt.Sprintf("spawn_%d_%d", s.Token.Line, s.Token.Col)
 			c.imports[`"fmt"`] = true
 			c.imports[`"strconv"`] = true
-			return fmt.Sprintf("runtime.AcquireSemaphore(%q, func() int {\n\t\t\tval, _ := strconv.Atoi(fmt.Sprint(%s))\n\t\t\tif val <= 0 { return 1 }\n\t\t\treturn val\n\t\t}())\ngo func() {\n\t\tdefer runtime.ReleaseSemaphore(%q)\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\truntime.LogError(\"Recovered in spawned task: \", r)\n\t\t\t}\n\t\t}()\n\t\t%s\n\t}()\n", semID, limStr, semID, call), nil
+			spawnCode = fmt.Sprintf("runtime.AcquireSemaphore(%q, func() int {\n\t\t\tval, _ := strconv.Atoi(fmt.Sprint(%s))\n\t\t\tif val <= 0 { return 1 }\n\t\t\treturn val\n\t\t}())\ngo func() {\n\t\tdefer runtime.ReleaseSemaphore(%q)\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\truntime.LogError(\"Recovered in spawned task: \", r)\n\t\t\t}\n\t\t}()\n\t\t%s\n\t}()\n", semID, limStr, semID, call)
+		} else {
+			spawnCode = fmt.Sprintf("go func() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\truntime.LogError(\"Recovered in spawned task: \", r)\n\t\t\t}\n\t\t}()\n\t\t%s\n\t}()\n", call)
 		}
-		return fmt.Sprintf("go func() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\truntime.LogError(\"Recovered in spawned task: \", r)\n\t\t\t}\n\t\t}()\n\t\t%s\n\t}()\n", call), nil
+		if !c.inFunction {
+			return fmt.Sprintf("func init() {\n\t%s}\n\n", spawnCode), nil
+		}
+		return spawnCode, nil
 
 	case *TestStmt:
 		c.inFunction = true
@@ -942,6 +948,26 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.AtomicSet", nil
 			case "cas":
 				return "runtime.AtomicCAS", nil
+			}
+		}
+
+		// Channel operations
+		if objStr == "channel" {
+			switch e.Field {
+			case "new":
+				return "runtime.ChannelNew", nil
+			case "send":
+				return "runtime.ChannelSend", nil
+			case "receive":
+				return "runtime.ChannelReceive", nil
+			case "tryReceive":
+				return "runtime.ChannelTryReceive", nil
+			case "trySend":
+				return "runtime.ChannelTrySend", nil
+			case "close":
+				return "runtime.ChannelClose", nil
+			case "len":
+				return "runtime.ChannelLen", nil
 			}
 		}
 

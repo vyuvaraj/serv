@@ -2119,6 +2119,89 @@ func SpawnWithTimeout(timeoutMs interface{}, fn func() interface{}) interface{} 
 	}
 }
 
+// Channel operations — Go channels exposed to Serv
+
+// ChannelNew creates a buffered channel with the given capacity.
+// Usage: let ch = channel.new(100)
+func ChannelNew(capacity interface{}) interface{} {
+	cap := toInt(capacity)
+	if cap <= 0 {
+		cap = 1
+	}
+	return make(chan interface{}, cap)
+}
+
+// ChannelSend sends a value to a channel. Blocks if channel is full.
+// Usage: channel.send(ch, value)
+func ChannelSend(ch interface{}, value interface{}) interface{} {
+	if c, ok := ch.(chan interface{}); ok {
+		c <- value
+	}
+	return nil
+}
+
+// ChannelReceive receives a value from a channel. Blocks until a value is available.
+// Usage: let value = channel.receive(ch)
+func ChannelReceive(ch interface{}) interface{} {
+	if c, ok := ch.(chan interface{}); ok {
+		val, ok := <-c
+		if !ok {
+			return nil // channel closed
+		}
+		return val
+	}
+	return nil
+}
+
+// ChannelTryReceive attempts to receive without blocking. Returns nil if nothing available.
+// Usage: let value = channel.tryReceive(ch)
+func ChannelTryReceive(ch interface{}) interface{} {
+	if c, ok := ch.(chan interface{}); ok {
+		select {
+		case val, ok := <-c:
+			if !ok {
+				return nil
+			}
+			return val
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// ChannelTrySend attempts to send without blocking. Returns true if sent, false if full.
+// Usage: let sent = channel.trySend(ch, value)
+func ChannelTrySend(ch interface{}, value interface{}) interface{} {
+	if c, ok := ch.(chan interface{}); ok {
+		select {
+		case c <- value:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// ChannelClose closes a channel. Receivers will get nil after all buffered values are consumed.
+// Usage: channel.close(ch)
+func ChannelClose(ch interface{}) interface{} {
+	if c, ok := ch.(chan interface{}); ok {
+		close(c)
+	}
+	return nil
+}
+
+// ChannelLen returns the number of elements currently buffered in the channel.
+// Usage: let pending = channel.len(ch)
+func ChannelLen(ch interface{}) interface{} {
+	if c, ok := ch.(chan interface{}); ok {
+		return len(c)
+	}
+	return 0
+}
+
 // Helper to configure connection pool from YAML config or Env
 func configureDBPool(db *sql.DB) {
 	maxOpen := 25
