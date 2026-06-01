@@ -122,6 +122,7 @@ type RouteStmt struct {
 	Body        *BlockStmt
 	LimitRate   int
 	LimitPeriod string
+	Middlewares []string // middleware names from "use [auth, logging]"
 }
 
 func (r *RouteStmt) statementNode()       {}
@@ -597,6 +598,16 @@ func (n *NilLiteral) expressionNode()      {}
 func (n *NilLiteral) TokenLiteral() string { return n.Token.Literal }
 func (n *NilLiteral) String() string       { return "nil" }
 
+// Await Expression: await expr or await all([expr1, expr2])
+type AwaitExpr struct {
+	Token Token
+	Value Expression
+}
+
+func (a *AwaitExpr) expressionNode()      {}
+func (a *AwaitExpr) TokenLiteral() string { return a.Token.Literal }
+func (a *AwaitExpr) String() string       { return "await " + a.Value.String() }
+
 // Struct Declaration: struct Name { field: type, ... }
 type StructField struct {
 	Name string
@@ -696,4 +707,18 @@ func (i *InterfaceDecl) String() string {
 		methods = append(methods, "fn "+m.Name+"()")
 	}
 	return "interface " + i.Name + " { " + strings.Join(methods, "; ") + " }\n"
+}
+
+// Middleware Declaration: middleware name(req) { body }
+type MiddlewareDecl struct {
+	Token Token
+	Name  string
+	Param string // request parameter name
+	Body  *BlockStmt
+}
+
+func (m *MiddlewareDecl) statementNode()       {}
+func (m *MiddlewareDecl) TokenLiteral() string { return m.Token.Literal }
+func (m *MiddlewareDecl) String() string {
+	return "middleware " + m.Name + "(" + m.Param + ") " + m.Body.String() + "\n"
 }

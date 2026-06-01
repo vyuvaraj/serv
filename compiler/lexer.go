@@ -50,6 +50,9 @@ const (
 	TOKEN_SELF       TokenType = "SELF"
 	TOKEN_EXPORT     TokenType = "EXPORT"
 	TOKEN_INTERFACE  TokenType = "INTERFACE"
+	TOKEN_MIDDLEWARE TokenType = "MIDDLEWARE"
+	TOKEN_USE        TokenType = "USE"
+	TOKEN_AWAIT      TokenType = "AWAIT"
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -415,6 +418,9 @@ var keywords = map[string]TokenType{
 	"self":      TOKEN_SELF,
 	"export":    TOKEN_EXPORT,
 	"interface": TOKEN_INTERFACE,
+	"middleware": TOKEN_MIDDLEWARE,
+	"use":       TOKEN_USE,
+	"await":     TOKEN_AWAIT,
 }
 
 func lookupIdent(ident string) TokenType {

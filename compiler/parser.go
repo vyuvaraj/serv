@@ -69,6 +69,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(TOKEN_FALSE, p.parseBooleanLiteral)
 	p.registerPrefix(TOKEN_NIL, p.parseNilLiteral)
 	p.registerPrefix(TOKEN_SELF, p.parseSelfExpression)
+	p.registerPrefix(TOKEN_AWAIT, p.parseAwaitExpression)
 
 	p.infixParseFns = make(map[TokenType]infixParseFn)
 	p.registerInfix(TOKEN_PLUS, p.parseInfixExpression)
@@ -184,6 +185,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseStructDeclaration()
 	case TOKEN_INTERFACE:
 		return p.parseInterfaceDeclaration()
+	case TOKEN_MIDDLEWARE:
+		return p.parseMiddlewareDeclaration()
 	case TOKEN_EXPORT:
 		return p.parseExportStatement()
 	default:
@@ -331,6 +334,27 @@ func (p *Parser) parseRouteStatement() Statement {
 			return nil
 		}
 		stmt.LimitPeriod = p.curToken.Literal
+	}
+
+	// Optional middleware: use [auth, logging]
+	if p.peekToken.Type == TOKEN_USE {
+		p.nextToken() // consume 'use'
+		if !p.expectPeek(TOKEN_LBRACKET) {
+			return nil
+		}
+		stmt.Middlewares = []string{}
+		for p.peekToken.Type != TOKEN_RBRACKET && p.peekToken.Type != TOKEN_EOF {
+			p.nextToken()
+			if p.curToken.Type == TOKEN_IDENT {
+				stmt.Middlewares = append(stmt.Middlewares, p.curToken.Literal)
+			}
+			if p.peekToken.Type == TOKEN_COMMA {
+				p.nextToken()
+			}
+		}
+		if !p.expectPeek(TOKEN_RBRACKET) {
+			return nil
+		}
 	}
 
 	if !p.expectPeek(TOKEN_LBRACE) {
@@ -1216,6 +1240,13 @@ func (p *Parser) parseSelfExpression() Expression {
 	return &SelfExpr{Token: p.curToken}
 }
 
+func (p *Parser) parseAwaitExpression() Expression {
+	expr := &AwaitExpr{Token: p.curToken}
+	p.nextToken()
+	expr.Value = p.parseExpression(LOWEST)
+	return expr
+}
+
 // parseStructDeclaration parses: struct Name { field: type, ... }
 func (p *Parser) parseStructDeclaration() Statement {
 	stmt := &StructDecl{Token: p.curToken}
@@ -1256,6 +1287,36 @@ func (p *Parser) parseStructDeclaration() Statement {
 		return nil
 	}
 
+	return stmt
+}
+
+// parseMiddlewareDeclaration parses: middleware name(req) { body }
+func (p *Parser) parseMiddlewareDeclaration() Statement {
+	stmt := &MiddlewareDecl{Token: p.curToken}
+
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Param = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_RPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+
+	stmt.Body = p.parseBlockStatement()
 	return stmt
 }
 
