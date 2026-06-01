@@ -570,6 +570,24 @@ func (p *Parser) parseFnDeclaration() Statement {
 	stmt := &FnDecl{Token: fnToken}
 	stmt.Name = firstName
 
+	// Optional type parameters: fn name[T, U](...)
+	if p.peekToken.Type == TOKEN_LBRACKET {
+		p.nextToken() // consume '['
+		stmt.TypeParams = []string{}
+		for p.peekToken.Type != TOKEN_RBRACKET && p.peekToken.Type != TOKEN_EOF {
+			p.nextToken()
+			if p.curToken.Type == TOKEN_IDENT {
+				stmt.TypeParams = append(stmt.TypeParams, p.curToken.Literal)
+			}
+			if p.peekToken.Type == TOKEN_COMMA {
+				p.nextToken()
+			}
+		}
+		if !p.expectPeek(TOKEN_RBRACKET) {
+			return nil
+		}
+	}
+
 	if !p.expectPeek(TOKEN_LPAREN) {
 		return nil
 	}
@@ -583,7 +601,7 @@ func (p *Parser) parseFnDeclaration() Statement {
 		if p.peekToken.Type == TOKEN_COLON {
 			p.nextToken() // skip ':'
 			p.nextToken() // type identifier
-			stmt.ParamTypes = append(stmt.ParamTypes, p.curToken.Literal)
+			stmt.ParamTypes = append(stmt.ParamTypes, p.parseTypeAnnotation())
 		} else {
 			stmt.ParamTypes = append(stmt.ParamTypes, "")
 		}
@@ -595,7 +613,7 @@ func (p *Parser) parseFnDeclaration() Statement {
 			if p.peekToken.Type == TOKEN_COLON {
 				p.nextToken() // skip ':'
 				p.nextToken() // type identifier
-				stmt.ParamTypes = append(stmt.ParamTypes, p.curToken.Literal)
+				stmt.ParamTypes = append(stmt.ParamTypes, p.parseTypeAnnotation())
 			} else {
 				stmt.ParamTypes = append(stmt.ParamTypes, "")
 			}
@@ -610,7 +628,7 @@ func (p *Parser) parseFnDeclaration() Statement {
 	if p.peekToken.Type == TOKEN_RET_ARROW {
 		p.nextToken() // skip '->'
 		p.nextToken() // type identifier
-		stmt.ReturnType = p.curToken.Literal
+		stmt.ReturnType = p.parseTypeAnnotation()
 	}
 
 	if !p.expectPeek(TOKEN_LBRACE) {
@@ -817,10 +835,34 @@ func (p *Parser) parseExpression(precedence int) Expression {
 func (p *Parser) parseIdentifier() Expression {
 	ident := &Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
+	// Check if this is a generic call: name[Type1, Type2](args...)
+	if p.peekToken.Type == TOKEN_LBRACKET {
+		if p.isGenericCallAhead() {
+			p.nextToken() // consume '['
+			typeArgs := []string{}
+			for p.peekToken.Type != TOKEN_RBRACKET && p.peekToken.Type != TOKEN_EOF {
+				p.nextToken()
+				if p.curToken.Type == TOKEN_IDENT {
+					typeArgs = append(typeArgs, p.curToken.Literal)
+				}
+				if p.peekToken.Type == TOKEN_COMMA {
+					p.nextToken()
+				}
+			}
+			p.nextToken() // consume ']'
+			// Now expect '('
+			if p.peekToken.Type == TOKEN_LPAREN {
+				p.nextToken() // consume '('
+				call := &CallExpr{Token: p.curToken, Function: ident, TypeArgs: typeArgs}
+				call.Arguments = p.parseExpressionList(TOKEN_RPAREN)
+				return call
+			}
+			// If no '(' follows, treat as regular index (shouldn't happen with isGenericCallAhead)
+		}
+	}
+
 	// Check if this is a struct literal: TypeName { field: value, ... }
-	// We detect this when an identifier is followed by '{' and the content starts with IDENT ':'
 	if p.peekToken.Type == TOKEN_LBRACE {
-		// Look ahead to see if it's a struct literal (IDENT : expr pattern)
 		if p.isStructLiteralAhead() {
 			p.nextToken() // consume '{'
 			return p.parseStructLiteral(ident.Value)
@@ -828,6 +870,39 @@ func (p *Parser) parseIdentifier() Expression {
 	}
 
 	return ident
+}
+
+func (p *Parser) isGenericCallAhead() bool {
+	// Clone lexer to look ahead: [IDENT(, IDENT)*](
+	lCopy := NewLexer(p.l.input)
+	lCopy.position = p.l.position
+	lCopy.readPosition = p.l.readPosition
+	lCopy.ch = p.l.ch
+	lCopy.line = p.l.line
+	lCopy.col = p.l.col
+
+	// peekToken is '['. Read tokens until we find ']' or give up
+	depth := 0
+	for i := 0; i < 20; i++ { // limit lookahead
+		t := lCopy.NextToken()
+		if t.Type == TOKEN_LBRACKET {
+			depth++
+		} else if t.Type == TOKEN_RBRACKET {
+			if depth > 0 {
+				depth--
+			} else {
+				// Found matching ']', check if '(' follows
+				next := lCopy.NextToken()
+				return next.Type == TOKEN_LPAREN
+			}
+		} else if t.Type == TOKEN_EOF {
+			return false
+		} else if t.Type != TOKEN_IDENT && t.Type != TOKEN_COMMA {
+			// If we see anything other than IDENT or COMMA inside brackets, it's not a generic call
+			return false
+		}
+	}
+	return false
 }
 
 func (p *Parser) isStructLiteralAhead() bool {
@@ -1249,6 +1324,22 @@ func (p *Parser) parseBooleanLiteral() Expression {
 
 func (p *Parser) parseNilLiteral() Expression {
 	return &NilLiteral{Token: p.curToken}
+}
+
+// parseTypeAnnotation reads a type annotation which can be:
+// - simple: int, string, T
+// - array: []int, []T
+// - pointer: *User (future)
+func (p *Parser) parseTypeAnnotation() string {
+	if p.curToken.Type == TOKEN_LBRACKET {
+		// Array type: []T
+		if p.peekToken.Type == TOKEN_RBRACKET {
+			p.nextToken() // consume ']'
+			p.nextToken() // move to element type
+			return "[]" + p.curToken.Literal
+		}
+	}
+	return p.curToken.Literal
 }
 
 func (p *Parser) parseSelfExpression() Expression {
