@@ -641,12 +641,25 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 			c.varTypes[k] = v
 		}
 
+		// Build a set of type parameter names for this function
+		typeParamSet := make(map[string]bool)
+		for _, tp := range s.TypeParams {
+			typeParamSet[tp] = true
+		}
+
 		var params []string
 		for i, p := range s.Params {
 			c.declaredVars[p] = true
 			pt := "interface{}"
 			if i < len(s.ParamTypes) && s.ParamTypes[i] != "" {
-				pt = toGoType(s.ParamTypes[i])
+				rawType := s.ParamTypes[i]
+				if typeParamSet[rawType] {
+					pt = rawType // generic type param: use as-is
+				} else if strings.HasPrefix(rawType, "[]") && typeParamSet[strings.TrimPrefix(rawType, "[]")] {
+					pt = "[]" + strings.TrimPrefix(rawType, "[]") // slice of generic type
+				} else {
+					pt = toGoType(rawType)
+				}
 				c.varTypes[p] = pt
 			}
 			params = append(params, p+" "+pt)
@@ -664,9 +677,15 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 
 		retType := "interface{}"
 		if s.ReturnType != "" {
-			retType = toGoType(s.ReturnType)
-			if retType == "interface{}" && c.structTypes[s.ReturnType] {
-				retType = "*" + s.ReturnType
+			if typeParamSet[s.ReturnType] {
+				retType = s.ReturnType
+			} else if strings.HasPrefix(s.ReturnType, "[]") && typeParamSet[strings.TrimPrefix(s.ReturnType, "[]")] {
+				retType = "[]" + strings.TrimPrefix(s.ReturnType, "[]")
+			} else {
+				retType = toGoType(s.ReturnType)
+				if retType == "interface{}" && c.structTypes[s.ReturnType] {
+					retType = "*" + s.ReturnType
+				}
 			}
 		}
 		hasReturn := false
@@ -683,7 +702,17 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 			}
 		}
 
-		return fmt.Sprintf("func %s(%s) %s %s\n\n", s.Name, strings.Join(params, ", "), retType, bodyStr), nil
+		// Generate with type parameters if present
+		typeParamStr := ""
+		if len(s.TypeParams) > 0 {
+			var tps []string
+			for _, tp := range s.TypeParams {
+				tps = append(tps, tp+" any")
+			}
+			typeParamStr = "[" + strings.Join(tps, ", ") + "]"
+		}
+
+		return fmt.Sprintf("func %s%s(%s) %s %s\n\n", s.Name, typeParamStr, strings.Join(params, ", "), retType, bodyStr), nil
 
 	case *TryCatchStmt:
 		oldDeclared := c.declaredVars
@@ -1037,7 +1066,13 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			}
 		}
 
-		return fmt.Sprintf("%s(%s)", funcStr, strings.Join(args, ", ")), nil
+		// Emit type arguments if present
+		typeArgStr := ""
+		if len(e.TypeArgs) > 0 {
+			typeArgStr = "[" + strings.Join(e.TypeArgs, ", ") + "]"
+		}
+
+		return fmt.Sprintf("%s%s(%s)", funcStr, typeArgStr, strings.Join(args, ", ")), nil
 
 	case *FStringLiteral:
 		return c.genFString(e.Value)
@@ -1066,6 +1101,17 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
+		// If the left side has a known typed slice type, use direct indexing
+		if ident, ok := e.Left.(*Identifier); ok {
+			if varType, exists := c.varTypes[ident.Value]; exists {
+				if strings.HasPrefix(varType, "[]") && varType != "[]interface{}" {
+					// Typed slice — direct index access
+					return fmt.Sprintf("%s[%s]", leftStr, indexStr), nil
+				}
+			}
+		}
+
 		c.imports[`"fmt"`] = true
 		c.imports[`"strconv"`] = true
 		c.imports[`"serv/runtime"`] = true
@@ -1448,6 +1494,15 @@ func toGoType(t string) string {
 	case "bool":
 		return "bool"
 	default:
+		// Handle array types: []int, []string, []T
+		if strings.HasPrefix(t, "[]") {
+			elemType := toGoType(strings.TrimPrefix(t, "[]"))
+			if elemType == "interface{}" {
+				// Could be a generic type param or struct — pass through
+				elemType = strings.TrimPrefix(t, "[]")
+			}
+			return "[]" + elemType
+		}
 		return "interface{}"
 	}
 }

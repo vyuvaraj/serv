@@ -1,0 +1,29 @@
+// Serv Example 32: Generics
+// Lint: serv lint examples/32_generics.srv
+// Build: serv build examples/32_generics.srv -o test_generics.exe
+
+server "8080"
+
+// Generic function: works with any type
+fn identity[T](value: T) -> T {
+    return value
+}
+
+// Generic pair
+fn makePair[A, B](a: A, b: B) -> string {
+    return f"{a} and {b}"
+}
+
+// Usage with explicit type arguments
+let num = identity[int](42)
+let str = identity[string]("hello")
+let pair = makePair[int, string](1, "one")
+
+log.info("Identity int: ", num)
+log.info("Identity string: ", str)
+log.info("Pair: ", pair)
+
+route "GET" "/generic" (req) {
+    let result = identity[string]("Serv generics work!")
+    return { "message": result }
+}

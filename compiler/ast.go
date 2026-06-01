@@ -336,6 +336,7 @@ func (b *BlockStmt) String() string {
 type FnDecl struct {
 	Token      Token
 	Name       string
+	TypeParams []string // generic type parameters: [T, U]
 	Params     []string
 	ParamTypes []string // optional types for each param
 	ReturnType string   // optional return type
@@ -478,8 +479,9 @@ func (m *MemberExpr) TokenLiteral() string { return m.Token.Literal }
 func (m *MemberExpr) String() string       { return m.Object.String() + "." + m.Field }
 
 type CallExpr struct {
-	Token    Token
-	Function Expression // Identifier or MemberExpr
+	Token     Token
+	Function  Expression // Identifier or MemberExpr
+	TypeArgs  []string   // generic type arguments: name[int, string](...)
 	Arguments []Expression
 }
 
