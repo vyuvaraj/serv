@@ -789,6 +789,14 @@ func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
 	c.inFunction = true
 	defer func() { c.inFunction = oldInFunc }()
 
+	// Create a new scope for variables declared in this block
+	oldDeclared := c.declaredVars
+	c.declaredVars = make(map[string]bool)
+	for k, v := range oldDeclared {
+		c.declaredVars[k] = v
+	}
+	defer func() { c.declaredVars = oldDeclared }()
+
 	var out bytes.Buffer
 	out.WriteString("{\n")
 	for _, s := range block.Statements {
