@@ -424,8 +424,29 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		// Wrap returning map or response correctly
+		if len(s.Middlewares) > 0 {
+			// Generate middleware chain: each middleware is called before the handler
+			var middlewareNames []string
+			for _, mw := range s.Middlewares {
+				middlewareNames = append(middlewareNames, fmt.Sprintf("%q", mw))
+			}
+			return fmt.Sprintf("func init() {\n\truntime.AddRouteWithMiddleware(%q, %q, %d, %q, []string{%s}, func(%s runtime.Request) interface{} %s)\n}\n\n",
+				s.Method, s.Path, s.LimitRate, s.LimitPeriod, strings.Join(middlewareNames, ", "), s.Param, bodyStr), nil
+		}
 		return fmt.Sprintf("func init() {\n\truntime.AddRoute(%q, %q, %d, %q, func(%s runtime.Request) interface{} %s)\n}\n\n", s.Method, s.Path, s.LimitRate, s.LimitPeriod, s.Param, bodyStr), nil
+
+	case *MiddlewareDecl:
+		bodyStr, err := c.genBlockStatement(s.Body)
+		if err != nil {
+			return "", err
+		}
+		// Ensure middleware always has a return nil at the end (means "continue to handler")
+		if !strings.Contains(bodyStr, "return") || strings.Contains(bodyStr, "if") {
+			// Insert return nil before closing brace
+			bodyStr = bodyStr[:len(bodyStr)-1] + "\treturn nil\n}"
+		}
+		// Generate middleware as a named function and register it
+		return fmt.Sprintf("func init() {\n\truntime.RegisterMiddleware(%q, func(%s runtime.Request) interface{} %s)\n}\n\n", s.Name, s.Param, bodyStr), nil
 
 	case *ToolStmt:
 		bodyStr, err := c.genBlockStatement(s.Body)
@@ -1088,6 +1109,33 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 	case *NilLiteral:
 		return "nil", nil
 
+	case *AwaitExpr:
+		// Check if it's await all([...]) pattern
+		if callExpr, ok := e.Value.(*CallExpr); ok {
+			if ident, ok := callExpr.Function.(*Identifier); ok && ident.Value == "all" {
+				// await all([expr1, expr2, ...]) — parallel execution
+				if len(callExpr.Arguments) == 1 {
+					if arr, ok := callExpr.Arguments[0].(*ArrayLiteral); ok {
+						var taskExprs []string
+						for _, elem := range arr.Elements {
+							elemStr, err := c.genExpression(elem)
+							if err != nil {
+								return "", err
+							}
+							taskExprs = append(taskExprs, fmt.Sprintf("func() interface{} { return %s }", elemStr))
+						}
+						return fmt.Sprintf("runtime.AwaitAll([]func() interface{}{%s})", strings.Join(taskExprs, ", ")), nil
+					}
+				}
+			}
+		}
+		// Single await: await expr — run in goroutine, wait for result
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("runtime.Await(func() interface{} { return %s })", valStr), nil
+
 	case *SelfExpr:
 		return "self", nil
 
@@ -1527,6 +1575,8 @@ func stmtToken(stmt Statement) Token {
 	case *MethodDecl:
 		return s.Token
 	case *InterfaceDecl:
+		return s.Token
+	case *MiddlewareDecl:
 		return s.Token
 	case *ExportStmt:
 		return stmtToken(s.Inner)

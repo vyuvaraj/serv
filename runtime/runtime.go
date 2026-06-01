@@ -797,6 +797,82 @@ func AddRoute(method, path string, limitRate int, limitPeriod string, handler fu
 	LogInfo("Registered route: ", method, " ", path)
 }
 
+// Middleware registry
+var (
+	middlewareRegistry   = make(map[string]func(Request) interface{})
+	middlewareRegistryMu sync.RWMutex
+)
+
+// RegisterMiddleware registers a named middleware function.
+func RegisterMiddleware(name string, handler func(Request) interface{}) {
+	middlewareRegistryMu.Lock()
+	defer middlewareRegistryMu.Unlock()
+	middlewareRegistry[name] = handler
+	LogInfo("Registered middleware: ", name)
+}
+
+// Await runs a function asynchronously and blocks until it returns.
+func Await(fn func() interface{}) interface{} {
+	ch := make(chan interface{}, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- nil
+			}
+		}()
+		ch <- fn()
+	}()
+	return <-ch
+}
+
+// AwaitAll runs multiple functions concurrently and returns all results as []interface{}.
+func AwaitAll(fns []func() interface{}) interface{} {
+	results := make([]interface{}, len(fns))
+	var wg sync.WaitGroup
+	wg.Add(len(fns))
+	for i, fn := range fns {
+		go func(idx int, f func() interface{}) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					results[idx] = nil
+				}
+			}()
+			results[idx] = f()
+		}(i, fn)
+	}
+	wg.Wait()
+	return results
+}
+
+// AddRouteWithMiddleware registers a route with a middleware chain.
+// Middlewares are executed in order before the handler.
+// If any middleware returns non-nil, that response is sent and the handler is skipped.
+func AddRouteWithMiddleware(method, path string, limitRate int, limitPeriod string, middlewareNames []string, handler func(Request) interface{}) {
+	wrappedHandler := func(req Request) interface{} {
+		// Execute middleware chain
+		middlewareRegistryMu.RLock()
+		for _, name := range middlewareNames {
+			mw, exists := middlewareRegistry[name]
+			if !exists {
+				LogWarn("Middleware not found: ", name)
+				continue
+			}
+			result := mw(req)
+			if result != nil {
+				middlewareRegistryMu.RUnlock()
+				return result // short-circuit: middleware returned a response
+			}
+		}
+		middlewareRegistryMu.RUnlock()
+
+		// All middlewares passed, execute handler
+		return handler(req)
+	}
+
+	AddRoute(method, path, limitRate, limitPeriod, wrappedHandler)
+}
+
 type MCPTool struct {
 	Name        string
 	Description string
