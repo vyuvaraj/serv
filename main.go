@@ -128,16 +128,17 @@ func main() {
 
 	case "fmt":
 		fmtCmd := flag.NewFlagSet("fmt", flag.ExitOnError)
+		checkOnly := fmtCmd.Bool("check", false, "Check if file is formatted (exit 1 if not)")
 		if err := fmtCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
 		}
 		args := fmtCmd.Args()
 		if len(args) < 1 {
-			fmt.Println("Usage: serv fmt <file.srv>")
+			fmt.Println("Usage: serv fmt [--check] <file.srv>")
 			os.Exit(1)
 		}
-		formatFile(args[0])
+		formatFile(args[0], *checkOnly)
 
 	default:
 		printUsage()
@@ -477,7 +478,7 @@ func buildDirFor(absPath string) string {
 }
 
 // formatFile formats a .srv file with consistent indentation and spacing.
-func formatFile(srvFile string) {
+func formatFile(srvFile string, checkOnly bool) {
 	content, err := os.ReadFile(srvFile)
 	if err != nil {
 		fmt.Printf("Error reading file: %v\n", err)
@@ -489,11 +490,21 @@ func formatFile(srvFile string) {
 	indentLevel := 0
 	indent := "    " // 4 spaces
 	prevEmpty := false
+	prevWasBlock := false // track if previous non-empty line ended a block or was a top-level decl
 
-	for _, line := range lines {
+	// Top-level keywords that should have a blank line before them (if not already)
+	topLevelKeywords := map[string]bool{
+		"server": true, "database": true, "cache": true, "broker": true,
+		"route": true, "fn": true, "every": true, "cron": true,
+		"subscribe": true, "test": true, "struct": true, "interface": true,
+		"middleware": true, "ws": true, "enum": true, "validate": true,
+		"type": true, "export": true,
+	}
+
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Skip multiple consecutive empty lines
+		// Collapse multiple consecutive empty lines into one
 		if trimmed == "" {
 			if !prevEmpty {
 				result = append(result, "")
@@ -503,7 +514,10 @@ func formatFile(srvFile string) {
 		}
 		prevEmpty = false
 
-		// Decrease indent for closing braces
+		// Count braces outside of strings to determine indent changes
+		netBraces := countNetBraces(trimmed)
+
+		// Decrease indent BEFORE writing if line starts with closing brace/bracket
 		if strings.HasPrefix(trimmed, "}") || strings.HasPrefix(trimmed, "]") {
 			indentLevel--
 			if indentLevel < 0 {
@@ -511,29 +525,49 @@ func formatFile(srvFile string) {
 			}
 		}
 
+		// Insert blank line before top-level keywords (at indent 0) if previous wasn't empty
+		if indentLevel == 0 && i > 0 {
+			firstWord := strings.Fields(trimmed)[0]
+			// Strip trailing punctuation
+			firstWord = strings.TrimRight(firstWord, "({[")
+			if topLevelKeywords[firstWord] && !prevEmpty && len(result) > 0 && result[len(result)-1] != "" {
+				if !prevWasBlock {
+					result = append(result, "")
+				}
+			}
+		}
+
 		// Apply indentation
 		formatted := strings.Repeat(indent, indentLevel) + trimmed
 		result = append(result, formatted)
 
-		// Increase indent for opening braces
-		openBraces := strings.Count(trimmed, "{") + strings.Count(trimmed, "[")
-		closeBraces := strings.Count(trimmed, "}") + strings.Count(trimmed, "]")
-		indentLevel += openBraces - closeBraces
-		// Re-adjust if we already decremented for leading close brace
-		if strings.HasPrefix(trimmed, "}") || strings.HasPrefix(trimmed, "]") {
-			indentLevel += 1 // we already decremented above
-			indentLevel += openBraces - closeBraces
-			indentLevel -= 1
-		}
-		if indentLevel < 0 {
-			indentLevel = 0
+		// Track if this line is a closing brace (end of block)
+		prevWasBlock = strings.HasPrefix(trimmed, "}")
+
+		// Increase indent AFTER writing if line has net opening braces
+		if netBraces > 0 {
+			indentLevel += netBraces
+		} else if netBraces < 0 && !strings.HasPrefix(trimmed, "}") && !strings.HasPrefix(trimmed, "]") {
+			// Lines like `} else {` — net is 0, already handled
+			indentLevel += netBraces
+			if indentLevel < 0 {
+				indentLevel = 0
+			}
 		}
 	}
 
-	// Ensure file ends with newline
-	output := strings.Join(result, "\n")
-	if !strings.HasSuffix(output, "\n") {
-		output += "\n"
+	// Remove trailing empty lines, then ensure single newline at end
+	for len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+		result = result[:len(result)-1]
+	}
+	output := strings.Join(result, "\n") + "\n"
+
+	if checkOnly {
+		if output != string(content) {
+			fmt.Printf("%s: not formatted\n", srvFile)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if err := os.WriteFile(srvFile, []byte(output), 0644); err != nil {
@@ -541,6 +575,42 @@ func formatFile(srvFile string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Formatted: %s\n", srvFile)
+}
+
+// countNetBraces counts opening minus closing braces/brackets in a line,
+// ignoring braces inside string literals and comments.
+func countNetBraces(line string) int {
+	net := 0
+	inString := false
+	stringChar := byte(0)
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if inString {
+			if ch == '\\' && i+1 < len(line) {
+				i++ // skip escaped char
+				continue
+			}
+			if ch == stringChar {
+				inString = false
+			}
+			continue
+		}
+		// Check for comment start
+		if ch == '/' && i+1 < len(line) && line[i+1] == '/' {
+			break // rest of line is comment
+		}
+		if ch == '"' || ch == '\'' || ch == '`' {
+			inString = true
+			stringChar = ch
+			continue
+		}
+		if ch == '{' {
+			net++
+		} else if ch == '}' {
+			net--
+		}
+	}
+	return net
 }
 
 // addPackage generates a .srv.d declaration file for a Go package.

@@ -15,7 +15,7 @@ Tracking remaining work to make Serv production-ready and competitive.
 |--------|------|-------------|----------|
 | ✅ | Package manager | `serv add <pkg>` — auto-generates `.srv.d` declarations from Go packages | High |
 | ⬜ | REPL | `serv repl` — interactive shell for quick experiments | Medium |
-| ⬜ | Formatter | `serv fmt` — opinionated auto-formatter | Medium |
+| ✅ | Formatter | `serv fmt` — opinionated auto-formatter | Medium |
 | ⬜ | Playground | Web-based editor (like Go Playground) | Low |
 | ⬜ | Better errors | Diagnostics with suggestions ("did you mean X?") | Medium |
 
