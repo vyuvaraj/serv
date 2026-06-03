@@ -1,0 +1,30 @@
+// Serv Standard Library: HTTP Client Helpers
+// Import: import { getJSON, postJSON, isSuccess, isClientError } from "stdlib/http_client.srv"
+
+// GET request that auto-parses JSON response
+export fn getJSON(url) {
+    let response = http.get(url)
+    return json.parse(response.body)
+}
+
+// POST request with JSON body
+export fn postJSON(url, data) {
+    let body = json.stringify(data)
+    let response = http.post(url, body)
+    return json.parse(response.body)
+}
+
+// Check if HTTP status indicates success (2xx)
+export fn isSuccess(status) {
+    return status >= 200
+}
+
+// Check if HTTP status indicates client error (4xx)
+export fn isClientError(status) {
+    return status >= 400
+}
+
+// Check if HTTP status indicates server error (5xx)
+export fn isServerError(status) {
+    return status >= 500
+}

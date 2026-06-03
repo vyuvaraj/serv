@@ -1,0 +1,24 @@
+// Serv Standard Library: In-Process Event Bus
+// Import: import { emit, on } from "stdlib/events.srv"
+//
+// Simple pub/sub within a single service. For cross-service messaging,
+// use the built-in broker/subscribe/publish keywords instead.
+
+// Event registry (stores event name -> handler mapping)
+let _handlers = {}
+
+// Register an event handler
+export fn on(eventName, handler) {
+    registry.set(f"event_{eventName}", handler)
+}
+
+// Emit an event — calls the registered handler if any
+export fn emit(eventName, data) {
+    let handler = registry.call(f"event_{eventName}", data)
+    return handler
+}
+
+// Check if an event has a handler registered
+export fn hasHandler(eventName) {
+    return registry.has(f"event_{eventName}")
+}
