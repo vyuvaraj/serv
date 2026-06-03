@@ -8,27 +8,30 @@
 //   Invoke-RestMethod -Uri "http://localhost:8081/metrics"
 
 // Expose server on PORT env variable
+
 server env("PORT")
 
 // Expose GET healthcheck endpoint
+
 route "GET" "/health" (req) {
     log.info("Checking API status...")
     return { "status": "ok", "time": time.now() }
 }
 
 // Expose POST orders endpoint
+
 route "POST" "/orders" (req) {
     let body = req.body
     log.info("Received new order request: ", body)
 
     // Call external API using native HTTP client
     let postResponse = http.post("https://httpbin.org/post", body)
-    
+
     // Record a custom metric counter
     metric.inc("orders_processed_total")
-    
-    return { 
-        "message": "Order processed successfully", 
-        "provider_status": postResponse.status 
+
+    return {
+        "message": "Order processed successfully",
+        "provider_status": postResponse.status
     }
 }

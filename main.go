@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -128,16 +129,20 @@ func main() {
 
 	case "fmt":
 		fmtCmd := flag.NewFlagSet("fmt", flag.ExitOnError)
+		checkOnly := fmtCmd.Bool("check", false, "Check if file is formatted (exit 1 if not)")
 		if err := fmtCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
 		}
 		args := fmtCmd.Args()
 		if len(args) < 1 {
-			fmt.Println("Usage: serv fmt <file.srv>")
+			fmt.Println("Usage: serv fmt [--check] <file.srv>")
 			os.Exit(1)
 		}
-		formatFile(args[0])
+		formatFile(args[0], *checkOnly)
+
+	case "repl":
+		runREPL()
 
 	default:
 		printUsage()
@@ -152,6 +157,7 @@ func printUsage() {
 	fmt.Println("  serv test <file.srv>                       Run tests defined in a Serv file")
 	fmt.Println("  serv lint <file.srv>                       Validate syntax of a Serv file")
 	fmt.Println("  serv fmt <file.srv>                        Format a Serv file")
+	fmt.Println("  serv repl                                  Interactive shell for quick experiments")
 	fmt.Println("  serv add <go-package>                      Generate .srv.d declaration for a Go package")
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
 }
@@ -477,7 +483,7 @@ func buildDirFor(absPath string) string {
 }
 
 // formatFile formats a .srv file with consistent indentation and spacing.
-func formatFile(srvFile string) {
+func formatFile(srvFile string, checkOnly bool) {
 	content, err := os.ReadFile(srvFile)
 	if err != nil {
 		fmt.Printf("Error reading file: %v\n", err)
@@ -489,11 +495,21 @@ func formatFile(srvFile string) {
 	indentLevel := 0
 	indent := "    " // 4 spaces
 	prevEmpty := false
+	prevWasBlock := false // track if previous non-empty line ended a block or was a top-level decl
 
-	for _, line := range lines {
+	// Top-level keywords that should have a blank line before them (if not already)
+	topLevelKeywords := map[string]bool{
+		"server": true, "database": true, "cache": true, "broker": true,
+		"route": true, "fn": true, "every": true, "cron": true,
+		"subscribe": true, "test": true, "struct": true, "interface": true,
+		"middleware": true, "ws": true, "enum": true, "validate": true,
+		"type": true, "export": true,
+	}
+
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Skip multiple consecutive empty lines
+		// Collapse multiple consecutive empty lines into one
 		if trimmed == "" {
 			if !prevEmpty {
 				result = append(result, "")
@@ -503,7 +519,10 @@ func formatFile(srvFile string) {
 		}
 		prevEmpty = false
 
-		// Decrease indent for closing braces
+		// Count braces outside of strings to determine indent changes
+		netBraces := countNetBraces(trimmed)
+
+		// Decrease indent BEFORE writing if line starts with closing brace/bracket
 		if strings.HasPrefix(trimmed, "}") || strings.HasPrefix(trimmed, "]") {
 			indentLevel--
 			if indentLevel < 0 {
@@ -511,29 +530,49 @@ func formatFile(srvFile string) {
 			}
 		}
 
+		// Insert blank line before top-level keywords (at indent 0) if previous wasn't empty
+		if indentLevel == 0 && i > 0 {
+			firstWord := strings.Fields(trimmed)[0]
+			// Strip trailing punctuation
+			firstWord = strings.TrimRight(firstWord, "({[")
+			if topLevelKeywords[firstWord] && !prevEmpty && len(result) > 0 && result[len(result)-1] != "" {
+				if !prevWasBlock {
+					result = append(result, "")
+				}
+			}
+		}
+
 		// Apply indentation
 		formatted := strings.Repeat(indent, indentLevel) + trimmed
 		result = append(result, formatted)
 
-		// Increase indent for opening braces
-		openBraces := strings.Count(trimmed, "{") + strings.Count(trimmed, "[")
-		closeBraces := strings.Count(trimmed, "}") + strings.Count(trimmed, "]")
-		indentLevel += openBraces - closeBraces
-		// Re-adjust if we already decremented for leading close brace
-		if strings.HasPrefix(trimmed, "}") || strings.HasPrefix(trimmed, "]") {
-			indentLevel += 1 // we already decremented above
-			indentLevel += openBraces - closeBraces
-			indentLevel -= 1
-		}
-		if indentLevel < 0 {
-			indentLevel = 0
+		// Track if this line is a closing brace (end of block)
+		prevWasBlock = strings.HasPrefix(trimmed, "}")
+
+		// Increase indent AFTER writing if line has net opening braces
+		if netBraces > 0 {
+			indentLevel += netBraces
+		} else if netBraces < 0 && !strings.HasPrefix(trimmed, "}") && !strings.HasPrefix(trimmed, "]") {
+			// Lines like `} else {` — net is 0, already handled
+			indentLevel += netBraces
+			if indentLevel < 0 {
+				indentLevel = 0
+			}
 		}
 	}
 
-	// Ensure file ends with newline
-	output := strings.Join(result, "\n")
-	if !strings.HasSuffix(output, "\n") {
-		output += "\n"
+	// Remove trailing empty lines, then ensure single newline at end
+	for len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+		result = result[:len(result)-1]
+	}
+	output := strings.Join(result, "\n") + "\n"
+
+	if checkOnly {
+		if output != string(content) {
+			fmt.Printf("%s: not formatted\n", srvFile)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if err := os.WriteFile(srvFile, []byte(output), 0644); err != nil {
@@ -541,6 +580,224 @@ func formatFile(srvFile string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Formatted: %s\n", srvFile)
+}
+
+// countNetBraces counts opening minus closing braces/brackets in a line,
+// ignoring braces inside string literals and comments.
+func countNetBraces(line string) int {
+	net := 0
+	inString := false
+	stringChar := byte(0)
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if inString {
+			if ch == '\\' && i+1 < len(line) {
+				i++ // skip escaped char
+				continue
+			}
+			if ch == stringChar {
+				inString = false
+			}
+			continue
+		}
+		// Check for comment start
+		if ch == '/' && i+1 < len(line) && line[i+1] == '/' {
+			break // rest of line is comment
+		}
+		if ch == '"' || ch == '\'' || ch == '`' {
+			inString = true
+			stringChar = ch
+			continue
+		}
+		if ch == '{' {
+			net++
+		} else if ch == '}' {
+			net--
+		}
+	}
+	return net
+}
+
+// runREPL starts an interactive Serv shell.
+// Expressions are evaluated immediately, variable declarations persist across lines.
+func runREPL() {
+	fmt.Println("Serv REPL v1.0 — type expressions, 'let' declarations, or 'exit' to quit")
+	fmt.Println("Examples: let x = 5, x + 10, \"hello\".toUpper(), log.info(\"hi\")")
+	fmt.Println()
+
+	goPath, err := resolveGoPath()
+	if err != nil {
+		fmt.Printf("Cannot find Go compiler: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Build directory for REPL sessions (inside project so go.mod is found)
+	replDir := filepath.Join(".build", "repl")
+	os.MkdirAll(replDir, 0755)
+
+	// Accumulated state: variable declarations and function definitions
+	var declarations []string
+	scanner := bufio.NewScanner(os.Stdin)
+
+	for {
+		fmt.Print("serv> ")
+		if !scanner.Scan() {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if line == "exit" || line == "quit" {
+			fmt.Println("Bye!")
+			break
+		}
+		if line == "clear" {
+			declarations = nil
+			fmt.Println("(state cleared)")
+			continue
+		}
+		if line == "state" {
+			if len(declarations) == 0 {
+				fmt.Println("(no declarations)")
+			} else {
+				for _, d := range declarations {
+					fmt.Println("  " + d)
+				}
+			}
+			continue
+		}
+
+		// Parse the input
+		lexer := compiler.NewLexer(line)
+		parser := compiler.NewParser(lexer)
+		program := parser.ParseProgram()
+
+		if len(parser.Errors()) > 0 {
+			for _, e := range parser.Errors() {
+				fmt.Println("  error:", e)
+			}
+			continue
+		}
+
+		if len(program.Statements) == 0 {
+			continue
+		}
+
+		// Determine if this is a declaration (let, fn) or an expression to evaluate
+		stmt := program.Statements[0]
+		isDecl := false
+		switch stmt.(type) {
+		case *compiler.LetStmt, *compiler.FnDecl, *compiler.DestructureLetStmt:
+			isDecl = true
+		}
+
+		// Build a temporary Serv program that includes all prior state + current line
+		var srvSource strings.Builder
+		for _, d := range declarations {
+			srvSource.WriteString(d + "\n")
+		}
+
+		if isDecl {
+			srvSource.WriteString(line + "\n")
+		} else {
+			// Expression: wrap in a let so it gets evaluated
+			srvSource.WriteString(fmt.Sprintf("let _result = %s\n", line))
+		}
+
+		// Compile and run
+		tmpFile := filepath.Join(replDir, "repl_input.srv")
+		os.WriteFile(tmpFile, []byte(srvSource.String()), 0644)
+
+		// Determine what to print
+		printExpr := ""
+		if isDecl {
+			if letStmt, ok := stmt.(*compiler.LetStmt); ok {
+				printExpr = letStmt.Name
+			}
+		} else {
+			printExpr = "_result"
+		}
+
+		output, buildErr := compileAndRunREPL(goPath, tmpFile, replDir, printExpr)
+		if buildErr != nil {
+			fmt.Printf("  error: %s\n", buildErr)
+			continue
+		}
+
+		// Print output
+		output = strings.TrimSpace(output)
+		if output != "" {
+			fmt.Println(output)
+		}
+
+		// If it was a declaration, save it to state
+		if isDecl {
+			declarations = append(declarations, line)
+		}
+	}
+
+	// .build/repl acts as a cache, no cleanup needed
+}
+
+// compileAndRunREPL compiles a temporary .srv file and runs it briefly to capture output.
+func compileAndRunREPL(goPath, srvFile, workDir string, printExpr string) (string, error) {
+	// Parse and generate
+	program, err := parseWithDependencies(srvFile, make(map[string]bool))
+	if err != nil {
+		return "", err
+	}
+
+	cg := compiler.NewCodegen(program)
+	goCode, err := cg.Generate()
+	if err != nil {
+		return "", err
+	}
+
+	goCode += "\n" + cg.GenerateHelpers()
+
+	// REPL main: print the result expression, then exit
+	if printExpr != "" {
+		goCode += fmt.Sprintf("\nfunc main() {\n\tfmt.Println(%s)\n}\n", printExpr)
+	} else {
+		goCode += "\nfunc main() {}\n"
+	}
+
+	// Write Go file
+	mainFile := filepath.Join(workDir, "main.go")
+	os.WriteFile(mainFile, []byte(goCode), 0644)
+
+	// Remove stale binary to force rebuild
+	absWorkDir, _ := filepath.Abs(workDir)
+	binPath := filepath.Join(absWorkDir, "repl_bin.exe")
+	os.Remove(binPath)
+
+	// Build from module root
+	buildCmd := exec.Command(goPath, "build", "-o", binPath, "./"+workDir)
+	var buildErr bytes.Buffer
+	buildCmd.Stderr = &buildErr
+	if err := buildCmd.Run(); err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(buildErr.String()))
+	}
+
+	// Run the compiled binary and capture output
+	runCmd := exec.Command(binPath)
+	output, runErr := runCmd.CombinedOutput()
+	if runErr != nil {
+		// Ignore exit errors (timeouts etc) — just return what we got
+		if len(output) > 0 {
+			return string(output), nil
+		}
+	}
+
+	return string(output), nil
+}
+
+func copyFileIfExists(src, dst string) {
+	data, err := os.ReadFile(src)
+	if err == nil {
+		os.WriteFile(dst, data, 0644)
+	}
 }
 
 // addPackage generates a .srv.d declaration file for a Go package.
@@ -810,7 +1067,8 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 	program := parser.ParseProgram()
 
 	if len(parser.Errors()) > 0 {
-		return nil, fmt.Errorf("errors parsing %s:\n%s", filePath, strings.Join(parser.Errors(), "\n"))
+		diagnostics := compiler.FormatDiagnostics(parser.Errors(), string(content))
+		return nil, fmt.Errorf("errors parsing %s:\n%s", filePath, diagnostics)
 	}
 
 	var mergedStatements []compiler.Statement
