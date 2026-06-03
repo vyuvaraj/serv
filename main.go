@@ -880,7 +880,8 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 	program := parser.ParseProgram()
 
 	if len(parser.Errors()) > 0 {
-		return nil, fmt.Errorf("errors parsing %s:\n%s", filePath, strings.Join(parser.Errors(), "\n"))
+		diagnostics := compiler.FormatDiagnostics(parser.Errors(), string(content))
+		return nil, fmt.Errorf("errors parsing %s:\n%s", filePath, diagnostics)
 	}
 
 	var mergedStatements []compiler.Statement

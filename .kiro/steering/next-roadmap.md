@@ -17,7 +17,7 @@ Tracking remaining work to make Serv production-ready and competitive.
 | ⬜ | REPL | `serv repl` — interactive shell for quick experiments | Medium |
 | ✅ | Formatter | `serv fmt` — opinionated auto-formatter | Medium |
 | ⬜ | Playground | Web-based editor (like Go Playground) | Low |
-| ⬜ | Better errors | Diagnostics with suggestions ("did you mean X?") | Medium |
+| ✅ | Better errors | Diagnostics with suggestions ("did you mean X?") | Medium |
 
 ---
 
