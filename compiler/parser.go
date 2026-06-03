@@ -814,7 +814,8 @@ func (p *Parser) parseMatchStatement() Statement {
 			c.Value = nil
 			p.nextToken() // skip "_"
 		} else {
-			c.Value = p.parseExpression(LOWEST)
+			// Parse at ASSIGN precedence so we stop before => (which has ASSIGN precedence)
+			c.Value = p.parseExpression(ASSIGN)
 			p.nextToken()
 		}
 

@@ -56,6 +56,10 @@ func (c *Codegen) Generate() (string, error) {
 		c.imports[`"time"`] = true
 	}
 
+	// fmt and runtime are always needed by helper functions and main()
+	c.imports[`"fmt"`] = true
+	c.imports[`"serv/runtime"`] = true
+
 	// Pre-pass: collect struct type names and function return types
 	for _, stmt := range c.program.Statements {
 		switch s := stmt.(type) {
@@ -950,7 +954,8 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			} else if e.Field == "sleep" {
 				return "runtime.Sleep", nil
 			} else if e.Field == "unix" {
-				return "func() interface{} { return time.Now().Unix() }", nil
+				c.imports[`"time"`] = true
+				return "func() int { return int(time.Now().Unix()) }", nil
 			}
 		}
 
