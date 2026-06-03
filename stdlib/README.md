@@ -53,6 +53,11 @@ import { requireAuth, bearerToken } from "stdlib/auth.srv"
 | `tenant.srv` | `extractTenant`, `tenantConfig`, `isTenantActive`, `tenantCacheKey`, `tenantFilter` | Multi-tenancy |
 | `dlq.srv` | `createDLQ`, `sendToDLQ`, `dlqSize`, `dlqHasItems`, `clearDLQ` | Reliability |
 | `audit.srv` | `auditLog`, `auditAction`, `auditAccess`, `auditAuth`, `auditDenied` | Compliance |
+| `cache_patterns.srv` | `cacheKey`, `cacheGet`, `cacheSet`, `invalidate`, `invalidatePrefix`, `cacheTTL`, `computeIfAbsent` | Caching |
+| `pagination_cursor.srv` | `encodeCursor`, `decodeCursor`, `hasCursor`, `extractCursor`, `cursorResponse`, `cursorResponseWith` | HTTP |
+| `timeout.srv` | `withDeadline`, `isTimedOut`, `remainingTime`, `startTimer`, `elapsed`, `hasExceeded` | Resilience |
+| `ip.srv` | `extractIP`, `isPrivate`, `isTrustedProxy`, `rateLimitKey`, `anonymizeIP` | Security |
+| `mask.srv` | `maskEmail`, `maskPhone`, `maskCard`, `maskString`, `redact` | Security |
 
 ---
 
