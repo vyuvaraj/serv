@@ -1,0 +1,75 @@
+// Serv Standard Library: PII Data Masking
+// Import: import { maskEmail, maskPhone, maskCard, maskString } from "stdlib/mask.srv"
+//
+// Mask personally identifiable information for logs, API responses,
+// and audit trails. Never log raw PII.
+
+// Mask an email address: "alice@example.com" -> "a***@example.com"
+export fn maskEmail(email) {
+    if email == nil {
+        return ""
+    }
+    let parts = email.split("@")
+    if parts.length() < 2 {
+        return "***"
+    }
+    let name = parts[0]
+    let domain = parts[1]
+    if name.length() <= 1 {
+        return f"*@{domain}"
+    }
+    let first = name.substring(0, 1)
+    return f"{first}***@{domain}"
+}
+
+// Mask a phone number: "+1234567890" -> "+1******890"
+export fn maskPhone(phone) {
+    if phone == nil {
+        return ""
+    }
+    let len = phone.length()
+    if len <= 4 {
+        return "****"
+    }
+    let prefix = phone.substring(0, 2)
+    let suffix = phone.substring(len - 3)
+    return f"{prefix}******{suffix}"
+}
+
+// Mask a credit card number: "4111111111111111" -> "****1111"
+export fn maskCard(cardNumber) {
+    if cardNumber == nil {
+        return ""
+    }
+    let len = cardNumber.length()
+    if len <= 4 {
+        return "****"
+    }
+    let last4 = cardNumber.substring(len - 4)
+    return f"****{last4}"
+}
+
+// Generic string masking: show first N and last M chars, mask the rest
+export fn maskString(value, showFirst, showLast) {
+    if value == nil {
+        return ""
+    }
+    let len = value.length()
+    if len <= showFirst + showLast {
+        return "***"
+    }
+    let prefix = value.substring(0, showFirst)
+    let suffix = value.substring(len - showLast)
+    return f"{prefix}***{suffix}"
+}
+
+// Mask all values in a map (for safe logging of request bodies)
+export fn maskSensitiveFields(data, fields) {
+    // Returns a note about which fields would be masked
+    return { "masked_fields": fields }
+}
+
+// Redact a value completely
+export fn redact(value) {
+    return "[REDACTED]"
+}

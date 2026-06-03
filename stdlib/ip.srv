@@ -1,0 +1,81 @@
+// Serv Standard Library: IP Address Helpers
+// Import: import { extractIP, isPrivate, isTrustedProxy, parseForwarded } from "stdlib/ip.srv"
+//
+// Extract client IPs from requests, detect private networks,
+// and handle proxy headers for rate-limiting and security.
+
+// Extract client IP from request (checks X-Forwarded-For, X-Real-IP, then remote)
+export fn extractIP(req) {
+    // Try X-Forwarded-For first (may be comma-separated list)
+    let forwarded = req.params.x_forwarded_for
+    if forwarded != nil {
+        let parts = forwarded.split(",")
+        if parts.length() > 0 {
+            return parts[0].trim()
+        }
+    }
+
+    // Try X-Real-IP
+    let realIP = req.params.x_real_ip
+    if realIP != nil {
+        return realIP
+    }
+
+    // Fallback to direct remote address
+    let remote = req.params.remote_addr
+    if remote != nil {
+        return remote
+    }
+
+    return "unknown"
+}
+
+// Check if an IP is in a private/internal range
+export fn isPrivate(ip) {
+    if ip.startsWith("10.") {
+        return true
+    }
+    if ip.startsWith("172.16.") {
+        return true
+    }
+    if ip.startsWith("172.17.") {
+        return true
+    }
+    if ip.startsWith("172.18.") {
+        return true
+    }
+    if ip.startsWith("192.168.") {
+        return true
+    }
+    if ip.startsWith("127.") {
+        return true
+    }
+    if ip == "::1" {
+        return true
+    }
+    return false
+}
+
+// Check if an IP is in a trusted proxy list
+export fn isTrustedProxy(ip, trustedList) {
+    for trusted in trustedList {
+        if ip == trusted {
+            return true
+        }
+    }
+    return false
+}
+
+// Build a rate-limit key from IP
+export fn rateLimitKey(ip, endpoint) {
+    return f"rl:{ip}:{endpoint}"
+}
+
+// Anonymize an IP for logging (mask last octet)
+export fn anonymizeIP(ip) {
+    let parts = ip.split(".")
+    if parts.length() == 4 {
+        return f"{parts[0]}.{parts[1]}.{parts[2]}.xxx"
+    }
+    return "anonymized"
+}

@@ -1,0 +1,55 @@
+// Serv Standard Library: Timeout Helpers
+// Import: import { withDeadline, isTimedOut, remainingTime, startTimer } from "stdlib/timeout.srv"
+//
+// Track operation deadlines and timeouts for request handling.
+
+// Create a deadline (Unix timestamp of when the operation should end)
+export fn withDeadline(timeoutSeconds) {
+    let now = time.unix()
+    return now + timeoutSeconds
+}
+
+// Check if a deadline has passed
+export fn isTimedOut(deadline) {
+    let now = time.unix()
+    return now >= deadline
+}
+
+// Get remaining time in seconds before deadline
+export fn remainingTime(deadline) {
+    let now = time.unix()
+    let remaining = deadline - now
+    if remaining < 0 {
+        return 0
+    }
+    return remaining
+}
+
+// Start a timer and return the start timestamp
+export fn startTimer() {
+    return time.unix()
+}
+
+// Get elapsed time since a timer started (in seconds)
+export fn elapsed(startTime) {
+    let now = time.unix()
+    return now - startTime
+}
+
+// Check if elapsed time exceeds a threshold
+export fn hasExceeded(startTime, maxSeconds) {
+    return elapsed(startTime) > maxSeconds
+}
+
+// Default timeout values
+export fn defaultRequestTimeout() {
+    return 30
+}
+
+export fn defaultDBTimeout() {
+    return 10
+}
+
+export fn defaultHTTPTimeout() {
+    return 15
+}

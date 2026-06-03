@@ -1,0 +1,67 @@
+// Serv Standard Library: Cursor-Based Pagination
+// Import: import { encodeCursor, decodeCursor, cursorResponse, hasCursor } from "stdlib/pagination_cursor.srv"
+//
+// Better than offset pagination for large/realtime datasets.
+// The cursor is an opaque token encoding the last seen item's position.
+
+// Encode a cursor from a value (typically last item ID or timestamp)
+export fn encodeCursor(value) {
+    return f"cursor_{value}"
+}
+
+// Decode a cursor back to the underlying value
+export fn decodeCursor(cursor) {
+    if cursor == nil {
+        return nil
+    }
+    if cursor.startsWith("cursor_") {
+        return cursor.substring(7)
+    }
+    return cursor
+}
+
+// Check if the request has a cursor parameter
+export fn hasCursor(req) {
+    let cursor = req.params.cursor
+    return cursor != nil
+}
+
+// Extract cursor from request params (nil if first page)
+export fn extractCursor(req) {
+    let cursor = req.params.cursor
+    if cursor == nil {
+        return nil
+    }
+    return decodeCursor(cursor)
+}
+
+// Build a cursor-based pagination response
+export fn cursorResponse(items, pageSize) {
+    let hasMore = items.length() >= pageSize
+    let nextCursor = nil
+
+    if hasMore {
+        let lastItem = items[items.length() - 1]
+        nextCursor = encodeCursor(lastItem)
+    }
+
+    return {
+        "items": items,
+        "pageSize": pageSize,
+        "hasMore": hasMore,
+        "nextCursor": nextCursor
+    }
+}
+
+// Build a cursor response with explicit next cursor value
+export fn cursorResponseWith(items, nextCursorValue, hasMore) {
+    let nextCursor = nil
+    if hasMore {
+        nextCursor = encodeCursor(nextCursorValue)
+    }
+    return {
+        "items": items,
+        "hasMore": hasMore,
+        "nextCursor": nextCursor
+    }
+}
