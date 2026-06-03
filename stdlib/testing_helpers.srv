@@ -1,0 +1,41 @@
+// Serv Standard Library: Testing Helpers
+// Import: import { assertEqual, assertNotNil, assertContains } from "stdlib/testing_helpers.srv"
+//
+// Use inside test blocks for more expressive assertions.
+
+// Assert two values are equal
+export fn assertEqual(actual, expected) {
+    assert actual == expected
+}
+
+// Assert value is not nil
+export fn assertNotNil(value) {
+    assert value != nil
+}
+
+// Assert value is nil
+export fn assertNil(value) {
+    assert value == nil
+}
+
+// Assert a string contains a substring
+export fn assertContains(text, substring) {
+    let result = text.includes(substring)
+    assert result == true
+}
+
+// Assert a value is truthy
+export fn assertTrue(value) {
+    assert value == true
+}
+
+// Assert a value is falsy
+export fn assertFalse(value) {
+    assert value == false
+}
+
+// Assert a collection has expected length
+export fn assertLength(collection, expected) {
+    let len = collection.length()
+    assert len == expected
+}

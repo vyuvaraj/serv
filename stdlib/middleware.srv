@@ -1,0 +1,32 @@
+// Serv Standard Library: Common Middleware Presets
+// Import: import { corsHeaders, requestId, logRequest } from "stdlib/middleware.srv"
+//
+// Note: These are helper functions to use INSIDE middleware declarations.
+// Define your middleware using the `middleware` keyword and call these inside.
+
+// Generate CORS headers map
+export fn corsHeaders(origin) {
+    if origin == nil {
+        origin = "*"
+    }
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
+}
+
+// Generate a unique request ID
+export fn requestId() {
+    return f"req_{time.now()}"
+}
+
+// Format a log line for request tracking
+export fn logRequest(method, path, status, duration) {
+    return f"{method} {path} -> {status} ({duration}ms)"
+}
+
+// Check if a request is a preflight CORS request
+export fn isPreflight(req) {
+    return req.method == "OPTIONS"
+}

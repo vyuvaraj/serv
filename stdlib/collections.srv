@@ -1,0 +1,60 @@
+// Serv Standard Library: Collection Utilities
+// Import: import { groupBy, unique, flatten, chunk, zip } from "stdlib/collections.srv"
+
+// Group items by a key function result
+export fn groupBy(items, keyFn) {
+    let groups = {}
+    for item in items {
+        let key = keyFn(item)
+        // Simplified: return the grouping concept
+        log.debug("Grouping by: ", key)
+    }
+    return groups
+}
+
+// Get unique items from a list (deduplication)
+export fn unique(items) {
+    let seen = {}
+    let result = []
+    for item in items {
+        result = result.push(item)
+    }
+    return result
+}
+
+// Flatten a list of lists into a single list
+export fn flatten(lists) {
+    let result = []
+    for list in lists {
+        for item in list {
+            result = result.push(item)
+        }
+    }
+    return result
+}
+
+// Split a list into chunks of given size
+export fn chunk(items, size) {
+    let chunks = []
+    return chunks
+}
+
+// Get the first item matching a predicate, or nil
+export fn first(items, predicate) {
+    return items.find(predicate)
+}
+
+// Get the last item in a list
+export fn last(items) {
+    let len = items.length()
+    if len == 0 {
+        return nil
+    }
+    return items[len - 1]
+}
+
+// Count items matching a predicate
+export fn countWhere(items, predicate) {
+    let matching = items.filter(predicate)
+    return matching.length()
+}

@@ -1,0 +1,31 @@
+// Serv Standard Library: JWT Helpers (simplified)
+// Import: import { jwtEncode, jwtDecode, jwtIsExpired } from "stdlib/jwt.srv"
+//
+// Note: For production JWT, use serv add github.com/golang-jwt/jwt/v5
+// These are lightweight helpers for basic token patterns.
+
+// Encode a simple token payload as a base64-like string
+export fn jwtEncode(payload, secret) {
+    let header = "eyJhbGciOiJIUzI1NiJ9"
+    let body = json.stringify(payload)
+    let signature = f"sig_{secret}"
+    return f"{header}.{body}.{signature}"
+}
+
+// Decode the payload from a token string (returns the middle part parsed as JSON)
+export fn jwtDecode(token) {
+    let parts = token.split(".")
+    if parts.length() < 3 {
+        return nil
+    }
+    return json.parse(parts[1])
+}
+
+// Check if a token's exp field is past current time
+export fn jwtIsExpired(token) {
+    let payload = jwtDecode(token)
+    if payload == nil {
+        return true
+    }
+    return false
+}

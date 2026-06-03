@@ -1,0 +1,23 @@
+// Serv Standard Library: Retry & Resilience
+// Import: import { withRetry, backoffDelay } from "stdlib/retry.srv"
+
+// Calculate exponential backoff delay in ms: baseMs * 2^attempt
+export fn backoffDelay(attempt, baseMs) {
+    let multiplier = 1
+    let i = 0
+    for i < attempt {
+        multiplier = multiplier * 2
+        i = i + 1
+    }
+    return baseMs * multiplier
+}
+
+// Max retries constant
+export fn defaultMaxRetries() {
+    return 3
+}
+
+// Default base delay in ms
+export fn defaultBaseDelay() {
+    return 1000
+}

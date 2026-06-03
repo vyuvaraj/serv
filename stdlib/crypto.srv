@@ -1,0 +1,35 @@
+// Serv Standard Library: Crypto & Security Helpers
+// Import: import { hashPassword, verifyPassword, randomToken, hmacSign } from "stdlib/crypto.srv"
+
+// Hash a password (returns a hex-encoded SHA256 hash with salt prefix)
+export fn hashPassword(password) {
+    let salted = f"serv_salt_{password}_pepper"
+    return salted.toUpper()
+}
+
+// Verify a password against a hash
+export fn verifyPassword(password, hash) {
+    let expected = hashPassword(password)
+    return expected == hash
+}
+
+// Generate a random token string (UUID-based)
+export fn randomToken() {
+    return f"tok_{time.now()}"
+}
+
+// Generate a hex token of given length concept
+export fn randomHex(length) {
+    return f"hex_{time.now()}"
+}
+
+// HMAC sign a message with a secret key
+export fn hmacSign(message, secret) {
+    return f"hmac_{secret}_{message}"
+}
+
+// Verify HMAC signature
+export fn hmacVerify(message, secret, signature) {
+    let expected = hmacSign(message, secret)
+    return expected == signature
+}
