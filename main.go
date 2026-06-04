@@ -78,16 +78,17 @@ func main() {
 
 	case "test":
 		testCmd := flag.NewFlagSet("test", flag.ExitOnError)
+		coverFlag := testCmd.Bool("cover", false, "Report test coverage")
 		if err := testCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
 		}
 		args := testCmd.Args()
 		if len(args) < 1 {
-			fmt.Println("Usage: serv test <file.srv>")
+			fmt.Println("Usage: serv test [--cover] <file.srv>")
 			os.Exit(1)
 		}
-		runTests(args[0])
+		runTests(args[0], *coverFlag)
 
 	case "lint":
 		lintCmd := flag.NewFlagSet("lint", flag.ExitOnError)
@@ -359,7 +360,7 @@ func runServWatch(srvFile string) {
 	}
 }
 
-func runTests(srvFile string) {
+func runTests(srvFile string, withCoverage bool) {
 	absPath, err := filepath.Abs(srvFile)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -391,7 +392,7 @@ func runTests(srvFile string) {
 	}
 
 	// Clean stale Go files from previous builds to prevent conflicts
-	for _, name := range []string{"main.go", "service.go", "serv_test.go"} {
+	for _, name := range []string{"main.go", "service.go", "serv_test.go", "coverage.out"} {
 		_ = os.Remove(filepath.Join(buildDir, name))
 	}
 
@@ -423,12 +424,47 @@ func runTests(srvFile string) {
 		fmt.Printf("Cannot find Go compiler: %v\n", err)
 		os.Exit(1)
 	}
-	cmd := exec.Command(goPath, "test", "-v", "./...")
+
+	// Build go test command with appropriate flags
+	testArgs := []string{"test", "-v"}
+	if withCoverage {
+		coverFile := filepath.Join(buildDir, "coverage.out")
+		testArgs = append(testArgs, "-coverprofile="+coverFile)
+	}
+	testArgs = append(testArgs, "./...")
+
+	cmd := exec.Command(goPath, testArgs...)
 	cmd.Dir = buildDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("Tests failed: %v\n", err)
+	testErr := cmd.Run()
+
+	// Show coverage summary if requested
+	if withCoverage {
+		coverFile := filepath.Join(buildDir, "coverage.out")
+		if _, statErr := os.Stat(coverFile); statErr == nil {
+			fmt.Println()
+			fmt.Println("--- Coverage ---")
+			coverCmd := exec.Command(goPath, "tool", "cover", "-func="+coverFile)
+			coverCmd.Dir = buildDir
+			var coverOut bytes.Buffer
+			coverCmd.Stdout = &coverOut
+			coverCmd.Stderr = os.Stderr
+			if err := coverCmd.Run(); err == nil {
+				// Extract just the total line
+				lines := strings.Split(coverOut.String(), "\n")
+				for _, line := range lines {
+					if strings.Contains(line, "total:") {
+						fmt.Println(strings.TrimSpace(line))
+					}
+				}
+			}
+			fmt.Printf("Coverage profile: %s\n", coverFile)
+		}
+	}
+
+	if testErr != nil {
+		fmt.Printf("Tests failed: %v\n", testErr)
 		os.Exit(1)
 	}
 }

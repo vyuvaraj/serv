@@ -135,8 +135,8 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 | 3.1 | **Emit native ops for known types** | Medium | ✅ Done — typed variables emit direct Go operators |
 | 3.2 | **Direct field access for typed structs** | Medium | ✅ Done — `user.name` on typed struct emits `user.Name` |
 | 3.3 | **Skip `toSlice()` for typed arrays** | Small | ✅ Done — known `[]interface{}` vars use direct `range` |
-| 3.4 | **Bounded prepared statement cache** | Small | ⬜ Not started |
-| 3.5 | **Conditional OTEL compilation** | Medium | ⬜ Not started |
+| 3.4 | **Bounded prepared statement cache** | Small | ✅ Done — LRU eviction with configurable max size |
+| 3.5 | **Conditional OTEL compilation** | Medium | ✅ Done — all Trace* functions gate on `if !otelEnabled` (no-op) |
 | 3.6 | **SafeMap only when shared** | Large | ⬜ Not started |
 
 ### Phase 4: Error Handling Rework (Medium Priority)
@@ -174,7 +174,7 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 |---|------|--------|--------|
 | 7.1 | **Structured assertions** | Small | ✅ Done — `assert x == 5` prints "got 3, want 5" |
 | 7.2 | **Test isolation** | Medium | ✅ Done — each test is its own `func Test_X(t *testing.T)` scope |
-| 7.3 | **Test coverage** | Medium | ⬜ Not started |
+| 7.3 | **Test coverage** | Medium | ✅ Done — `serv test --cover` reports statement coverage % |
 | 7.4 | **Setup/teardown** | Small | ⬜ Not started |
 | 7.5 | **Test timeout** | Small | ⬜ Not started |
 
