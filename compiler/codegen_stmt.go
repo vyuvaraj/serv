@@ -179,7 +179,9 @@ func (c *Codegen) genForStmt(s *ForStmt) (string, error) {
 		// Map iteration: for key, value in map
 		if s.KeyVar != "" {
 			c.varTypes[s.KeyVar] = "string"
-			return fmt.Sprintf("for %s, %s := range runtime.ToMap(%s) %s\n", s.KeyVar, s.Variable, iterStr, bodyStr), nil
+			// Inject blank-identifier guards to prevent "declared and not used" errors
+			guardedBody := fmt.Sprintf("{\n\t_ = %s\n\t_ = %s\n", s.KeyVar, s.Variable) + bodyStr[2:]
+			return fmt.Sprintf("for %s, %s := range runtime.ToMap(%s) %s\n", s.KeyVar, s.Variable, iterStr, guardedBody), nil
 		}
 
 		if iterType == "[]interface{}" || strings.HasPrefix(iterType, "[]") {
@@ -210,7 +212,7 @@ func (c *Codegen) genStructDecl(s *StructDecl) (string, error) {
 	out.WriteString(fmt.Sprintf("type %s struct {\n", s.Name))
 	for _, f := range s.Fields {
 		goType := toGoType(f.Type)
-		if goType == "interface{}" {
+		if goType == "interface{}" && !strings.HasSuffix(f.Type, "?") && !strings.Contains(f.Type, "|") {
 			goType = f.Type
 		}
 		out.WriteString(fmt.Sprintf("\t%s %s\n", capitalizeFirst(f.Name), goType))
@@ -255,7 +257,7 @@ func (c *Codegen) genMethodDecl(s *MethodDecl) (string, error) {
 	retType := "interface{}"
 	if s.ReturnType != "" {
 		retType = toGoType(s.ReturnType)
-		if retType == "interface{}" {
+		if retType == "interface{}" && !strings.HasSuffix(s.ReturnType, "?") && !strings.Contains(s.ReturnType, "|") {
 			retType = s.ReturnType
 		}
 	}
@@ -511,7 +513,90 @@ func (c *Codegen) genTestStmt(s *TestStmt) (string, error) {
 	}
 	c.inFunction = false
 	c.inConcurrentContext = oldConcurrent
-	c.testFuncs = append(c.testFuncs, fmt.Sprintf("func %s(t *testing.T) %s\n", funcName, bodyStr))
+
+	// Build the test function body: beforeEach + body + afterEach
+	// Strip outer braces from bodyStr to get the inner content
+	inner := ""
+	if len(bodyStr) > 2 {
+		inner = bodyStr[2 : len(bodyStr)-1] // strip "{\n" and "}"
+	}
+
+	var finalBody strings.Builder
+	finalBody.WriteString("{\n")
+
+	// BeforeEach blocks
+	for _, before := range c.beforeEachBlocks {
+		finalBody.WriteString(before)
+	}
+
+	// Test body
+	finalBody.WriteString(inner)
+
+	// AfterEach blocks
+	for _, after := range c.afterEachBlocks {
+		finalBody.WriteString(after)
+	}
+
+	finalBody.WriteString("}")
+
+	if s.Timeout != "" {
+		// Wrap in timeout
+		c.imports[`"time"`] = true
+		var wrapped strings.Builder
+		wrapped.WriteString("{\n")
+		wrapped.WriteString(fmt.Sprintf("\t_timeout, _ := time.ParseDuration(%q)\n", s.Timeout))
+		wrapped.WriteString("\t_done := make(chan struct{})\n")
+		wrapped.WriteString("\tgo func() {\n")
+		wrapped.WriteString("\t\tdefer close(_done)\n")
+		// Indent the inner body content
+		for _, line := range strings.Split(finalBody.String()[2:len(finalBody.String())-1], "\n") {
+			if strings.TrimSpace(line) != "" {
+				wrapped.WriteString("\t\t" + strings.TrimPrefix(line, "\t") + "\n")
+			}
+		}
+		wrapped.WriteString("\t}()\n")
+		wrapped.WriteString("\tselect {\n")
+		wrapped.WriteString("\tcase <-_done:\n")
+		wrapped.WriteString("\tcase <-time.After(_timeout):\n")
+		wrapped.WriteString("\t\tt.Fatalf(\"test timed out after %s\", _timeout)\n")
+		wrapped.WriteString("\t}\n")
+		wrapped.WriteString("}")
+
+		c.testFuncs = append(c.testFuncs, fmt.Sprintf("func %s(t *testing.T) %s\n", funcName, wrapped.String()))
+	} else {
+		c.testFuncs = append(c.testFuncs, fmt.Sprintf("func %s(t *testing.T) %s\n", funcName, finalBody.String()))
+	}
+	return "", nil
+}
+
+func (c *Codegen) genBeforeEachStmt(s *BeforeEachStmt) (string, error) {
+	c.inFunction = true
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	c.inFunction = false
+	// Store the inner content (without the outer braces) for injection into tests
+	inner := ""
+	if len(bodyStr) > 2 {
+		inner = bodyStr[2 : len(bodyStr)-1]
+	}
+	c.beforeEachBlocks = append(c.beforeEachBlocks, inner)
+	return "", nil
+}
+
+func (c *Codegen) genAfterEachStmt(s *AfterEachStmt) (string, error) {
+	c.inFunction = true
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	c.inFunction = false
+	inner := ""
+	if len(bodyStr) > 2 {
+		inner = bodyStr[2 : len(bodyStr)-1]
+	}
+	c.afterEachBlocks = append(c.afterEachBlocks, inner)
 	return "", nil
 }
 
@@ -539,6 +624,20 @@ func (c *Codegen) genDestructureLetStmt(s *DestructureLetStmt) (string, error) {
 }
 
 func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
+	// Special case: let x = expr? — error propagation
+	if errProp, ok := s.Value.(*ErrorPropExpr); ok {
+		innerVal, err := c.genExpression(errProp.Value)
+		if err != nil {
+			return "", err
+		}
+		c.declaredVars[s.Name] = true
+		// Generate: _val, _err := TryCallWithError(fn); if _err != nil { return nil, _err }; x = _val
+		tmpVal := fmt.Sprintf("_prop_val_%d", errProp.Token.Line)
+		tmpErr := fmt.Sprintf("_prop_err_%d", errProp.Token.Line)
+		return fmt.Sprintf("%s, %s := runtime.TryCallWithError(func() interface{} { return %s })\nif %s != nil {\n\treturn nil\n}\nvar %s interface{} = %s\n_ = %s\n",
+			tmpVal, tmpErr, innerVal, tmpErr, s.Name, tmpVal, s.Name), nil
+	}
+
 	val, err := c.genExpression(s.Value)
 	if err != nil {
 		return "", err
@@ -565,7 +664,8 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 	goType := "interface{}"
 	if s.Type != "" {
 		goType = toGoType(s.Type)
-		if goType == "interface{}" {
+		if goType == "interface{}" && !strings.HasSuffix(s.Type, "?") && !strings.Contains(s.Type, "|") {
+			// Only use pointer-to-struct for plain struct type names
 			goType = "*" + s.Type
 		}
 		c.varTypes[s.Name] = s.Type
@@ -670,6 +770,16 @@ func (c *Codegen) genFnDecl(s *FnDecl) (string, error) {
 			retType = toGoType(s.ReturnType)
 			if retType == "interface{}" && c.structTypes[s.ReturnType] {
 				retType = "*" + s.ReturnType
+			}
+		}
+	}
+	// If any parameter has an optional/union type, the function likely returns interface{} values
+	// since those params are interface{} in Go and may be returned directly
+	if retType != "interface{}" {
+		for _, pt := range s.ParamTypes {
+			if strings.HasSuffix(pt, "?") || strings.Contains(pt, "|") {
+				retType = "interface{}"
+				break
 			}
 		}
 	}

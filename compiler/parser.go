@@ -45,6 +45,7 @@ var precedences = map[TokenType]int{
 	TOKEN_DOT:             MEMBER,
 	TOKEN_QUESTION_DOT:    MEMBER,
 	TOKEN_LBRACKET:        INDEX,
+	TOKEN_QUESTION:        CALL,
 }
 
 type Parser struct {
@@ -84,6 +85,8 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(TOKEN_AWAIT, p.parseAwaitExpression)
 	p.registerPrefix(TOKEN_FN, p.parseFnLiteral)
 	p.registerPrefix(TOKEN_VALIDATE, p.parseValidateIdentifier)
+	p.registerPrefix(TOKEN_MINUS, p.parsePrefixExpression)
+	p.registerPrefix(TOKEN_BANG, p.parsePrefixExpression)
 
 	p.infixParseFns = make(map[TokenType]infixParseFn)
 	p.registerInfix(TOKEN_PLUS, p.parseInfixExpression)
@@ -113,6 +116,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerInfix(TOKEN_SLASH_ASSIGN, p.parseCompoundAssignExpression)
 	p.registerInfix(TOKEN_PERCENT_ASSIGN, p.parseCompoundAssignExpression)
 	p.registerInfix(TOKEN_ARROW, p.parseArrowFunction)
+	p.registerInfix(TOKEN_QUESTION, p.parseErrorPropExpression)
 
 	// Read two tokens so curToken and peekToken are both set
 	p.nextToken()
@@ -231,6 +235,10 @@ func (p *Parser) parseStatement() Statement {
 		return &BreakStmt{Token: p.curToken}
 	case TOKEN_CONTINUE:
 		return &ContinueStmt{Token: p.curToken}
+	case TOKEN_BEFORE_EACH:
+		return p.parseBeforeEachStatement()
+	case TOKEN_AFTER_EACH:
+		return p.parseAfterEachStatement()
 	default:
 		return p.parseExpressionStatement()
 	}

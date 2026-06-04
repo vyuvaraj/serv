@@ -78,16 +78,17 @@ func main() {
 
 	case "test":
 		testCmd := flag.NewFlagSet("test", flag.ExitOnError)
+		coverFlag := testCmd.Bool("cover", false, "Report test coverage")
 		if err := testCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
 		}
 		args := testCmd.Args()
 		if len(args) < 1 {
-			fmt.Println("Usage: serv test <file.srv>")
+			fmt.Println("Usage: serv test [--cover] <file.srv>")
 			os.Exit(1)
 		}
-		runTests(args[0])
+		runTests(args[0], *coverFlag)
 
 	case "lint":
 		lintCmd := flag.NewFlagSet("lint", flag.ExitOnError)
@@ -359,7 +360,7 @@ func runServWatch(srvFile string) {
 	}
 }
 
-func runTests(srvFile string) {
+func runTests(srvFile string, withCoverage bool) {
 	absPath, err := filepath.Abs(srvFile)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -391,7 +392,7 @@ func runTests(srvFile string) {
 	}
 
 	// Clean stale Go files from previous builds to prevent conflicts
-	for _, name := range []string{"main.go", "service.go", "serv_test.go"} {
+	for _, name := range []string{"main.go", "service.go", "serv_test.go", "coverage.out"} {
 		_ = os.Remove(filepath.Join(buildDir, name))
 	}
 
@@ -423,12 +424,47 @@ func runTests(srvFile string) {
 		fmt.Printf("Cannot find Go compiler: %v\n", err)
 		os.Exit(1)
 	}
-	cmd := exec.Command(goPath, "test", "-v", "./...")
+
+	// Build go test command with appropriate flags
+	testArgs := []string{"test", "-v"}
+	if withCoverage {
+		coverFile := filepath.Join(buildDir, "coverage.out")
+		testArgs = append(testArgs, "-coverprofile="+coverFile)
+	}
+	testArgs = append(testArgs, "./...")
+
+	cmd := exec.Command(goPath, testArgs...)
 	cmd.Dir = buildDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("Tests failed: %v\n", err)
+	testErr := cmd.Run()
+
+	// Show coverage summary if requested
+	if withCoverage {
+		coverFile := filepath.Join(buildDir, "coverage.out")
+		if _, statErr := os.Stat(coverFile); statErr == nil {
+			fmt.Println()
+			fmt.Println("--- Coverage ---")
+			coverCmd := exec.Command(goPath, "tool", "cover", "-func="+coverFile)
+			coverCmd.Dir = buildDir
+			var coverOut bytes.Buffer
+			coverCmd.Stdout = &coverOut
+			coverCmd.Stderr = os.Stderr
+			if err := coverCmd.Run(); err == nil {
+				// Extract just the total line
+				lines := strings.Split(coverOut.String(), "\n")
+				for _, line := range lines {
+					if strings.Contains(line, "total:") {
+						fmt.Println(strings.TrimSpace(line))
+					}
+				}
+			}
+			fmt.Printf("Coverage profile: %s\n", coverFile)
+		}
+	}
+
+	if testErr != nil {
+		fmt.Printf("Tests failed: %v\n", testErr)
 		os.Exit(1)
 	}
 }
@@ -1093,9 +1129,51 @@ func goTypeToServType(goType string) string {
 	}
 }
 
+// resolveImportPath resolves a Serv import path to an absolute file path.
+// Supports:
+//   - Relative paths: "./models/user.srv", "../stdlib/auth.srv"
+//   - Stdlib shorthand: "stdlib/auth.srv" or "stdlib/auth" (resolved from project root)
+//   - Absolute-looking paths with .srv extension get resolved relative to the importer
+func resolveImportPath(importerPath, importStr string) string {
+	// Strip .srv extension if missing (allow "stdlib/auth" as shorthand for "stdlib/auth.srv")
+	if !strings.HasSuffix(importStr, ".srv") && !strings.HasSuffix(importStr, ".srv.d") {
+		importStr = importStr + ".srv"
+	}
+
+	// If path starts with "stdlib/" — resolve from project root (walk up to find stdlib dir)
+	if strings.HasPrefix(importStr, "stdlib/") {
+		// Try relative to the working directory first
+		if _, err := os.Stat(importStr); err == nil {
+			abs, _ := filepath.Abs(importStr)
+			return abs
+		}
+		// Try from project root (same directory as go.mod)
+		dir := filepath.Dir(importerPath)
+		for i := 0; i < 10; i++ {
+			candidate := filepath.Join(dir, importStr)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+			// Check if we found the project root (has go.mod or stdlib/)
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return filepath.Join(dir, importStr)
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// Default: resolve relative to the importing file's directory
+	return filepath.Join(filepath.Dir(importerPath), importStr)
+}
+
 func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.Program, error) {
 	if visited[filePath] {
-		return &compiler.Program{}, nil // Prevent circular imports
+		// Circular dependency detected — build the cycle path for the error message
+		return nil, fmt.Errorf("circular import detected: %s is already being imported (import cycle)", filepath.Base(filePath))
 	}
 	visited[filePath] = true
 
@@ -1139,7 +1217,7 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 			continue
 		}
 		if imp, ok := stmt.(*compiler.ImportStmt); ok {
-			importPath := filepath.Join(filepath.Dir(filePath), imp.Path)
+			importPath := resolveImportPath(filePath, imp.Path)
 			subProgram, err := parseWithDependencies(importPath, visited)
 			if err != nil {
 				return nil, err

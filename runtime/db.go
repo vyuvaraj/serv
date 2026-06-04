@@ -258,12 +258,12 @@ func DBQuery(query string, args ...interface{}) interface{} {
 	}
 
 	if dbInstance == nil {
-		panic("Database is not initialized. Declare database 'sqlite://...', 'postgres://...', or 'oracle://...' first.")
+		return [2]interface{}{nil, "Database is not initialized. Declare database 'sqlite://...', 'postgres://...', or 'oracle://...' first."}
 	}
 
 	stmt, err := getCachedStmt(query)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to prepare database statement: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("Failed to prepare database statement: %s", err.Error())}
 	}
 
 	queryLower := strings.ToLower(strings.TrimSpace(query))
@@ -272,7 +272,7 @@ func DBQuery(query string, args ...interface{}) interface{} {
 		strings.HasPrefix(queryLower, "replace") {
 		res, err := stmt.ExecContext(dbCtx, args...)
 		if err != nil {
-			panic(fmt.Sprintf("Database exec error: %s", err.Error()))
+			return [2]interface{}{nil, fmt.Sprintf("Database exec error: %s", err.Error())}
 		}
 		lastInsertID, _ := res.LastInsertId()
 		rowsAffected, _ := res.RowsAffected()
@@ -284,13 +284,13 @@ func DBQuery(query string, args ...interface{}) interface{} {
 
 	rows, err := stmt.QueryContext(dbCtx, args...)
 	if err != nil {
-		panic(fmt.Sprintf("Database query error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("Database query error: %s", err.Error())}
 	}
 	defer rows.Close()
 
 	columns, err := rows.Columns()
 	if err != nil {
-		panic(err.Error())
+		return [2]interface{}{nil, err.Error()}
 	}
 
 	var results []interface{}
@@ -302,7 +302,7 @@ func DBQuery(query string, args ...interface{}) interface{} {
 		}
 
 		if err := rows.Scan(valuePtrs...); err != nil {
-			panic(err.Error())
+			return [2]interface{}{nil, err.Error()}
 		}
 
 		row := NewSafeMap()
@@ -326,7 +326,7 @@ func DBQueryPage(collection string, args ...interface{}) interface{} {
 	defer endSpan()
 
 	if mongoDB == nil {
-		panic("MongoDB not initialized for paginated queries")
+		return [2]interface{}{nil, "MongoDB not initialized for paginated queries"}
 	}
 
 	var filter interface{} = bson.M{}
@@ -359,14 +359,14 @@ func DBQueryPage(collection string, args ...interface{}) interface{} {
 	// Count total
 	total, err := coll.CountDocuments(dbCtx, filter)
 	if err != nil {
-		panic(fmt.Sprintf("MongoDB count error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("MongoDB count error: %s", err.Error())}
 	}
 
 	// Find with skip/limit
 	opts := options.Find().SetSkip(int64(page * pageSize)).SetLimit(int64(pageSize))
 	cursor, err := coll.Find(dbCtx, filter, opts)
 	if err != nil {
-		panic(fmt.Sprintf("MongoDB find error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("MongoDB find error: %s", err.Error())}
 	}
 	defer cursor.Close(dbCtx)
 
@@ -394,7 +394,7 @@ func DBFindOne(collection string, args ...interface{}) interface{} {
 	defer endSpan()
 
 	if mongoDB == nil {
-		panic("MongoDB not initialized")
+		return [2]interface{}{nil, "MongoDB not initialized"}
 	}
 
 	var filter interface{} = bson.M{}
@@ -417,7 +417,7 @@ func DBFindOne(collection string, args ...interface{}) interface{} {
 		if err.Error() == "mongo: no documents in result" {
 			return nil
 		}
-		panic(fmt.Sprintf("MongoDB findOne error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("MongoDB findOne error: %s", err.Error())}
 	}
 	return ToSafeValue(result)
 }
@@ -428,7 +428,7 @@ func DBCount(collection string, args ...interface{}) interface{} {
 	endSpan := TraceDB("count", collection)
 	defer endSpan()
 	if mongoDB == nil {
-		panic("MongoDB not initialized")
+		return [2]interface{}{nil, "MongoDB not initialized"}
 	}
 
 	var filter interface{} = bson.M{}
@@ -447,7 +447,7 @@ func DBCount(collection string, args ...interface{}) interface{} {
 	coll := mongoDB.Collection(collection)
 	count, err := coll.CountDocuments(dbCtx, filter)
 	if err != nil {
-		panic(fmt.Sprintf("MongoDB count error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("MongoDB count error: %s", err.Error())}
 	}
 	return count
 }
@@ -458,10 +458,10 @@ func DBUpsert(collection string, args ...interface{}) interface{} {
 	endSpan := TraceDB("upsert", collection)
 	defer endSpan()
 	if mongoDB == nil {
-		panic("MongoDB not initialized")
+		return [2]interface{}{nil, "MongoDB not initialized"}
 	}
 	if len(args) < 2 {
-		panic("db.upsert requires filter and update arguments")
+		return [2]interface{}{nil, "db.upsert requires filter and update arguments"}
 	}
 
 	var filter interface{} = bson.M{}
@@ -493,7 +493,7 @@ func DBUpsert(collection string, args ...interface{}) interface{} {
 	opts := options.Update().SetUpsert(true)
 	result, err := coll.UpdateOne(dbCtx, filter, update, opts)
 	if err != nil {
-		panic(fmt.Sprintf("MongoDB upsert error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("MongoDB upsert error: %s", err.Error())}
 	}
 
 	return map[string]interface{}{
@@ -505,11 +505,11 @@ func DBUpsert(collection string, args ...interface{}) interface{} {
 
 func runMongoQuery(action string, args ...interface{}) interface{} {
 	if len(args) < 1 {
-		panic("MongoDB query requires collection name as the first argument, e.g. db.query(\"find\", \"users\", \"{}\")")
+		return [2]interface{}{nil, "MongoDB query requires collection name as the first argument"}
 	}
 	collName, ok := args[0].(string)
 	if !ok {
-		panic("MongoDB collection name must be a string")
+		return [2]interface{}{nil, "MongoDB collection name must be a string"}
 	}
 
 	collection := mongoDB.Collection(collName)
@@ -536,7 +536,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 	case "find":
 		cursor, err := collection.Find(dbCtx, filter)
 		if err != nil {
-			panic(fmt.Sprintf("MongoDB Find error: %s", err.Error()))
+			return [2]interface{}{nil, fmt.Sprintf("MongoDB Find error: %s", err.Error())}
 		}
 		defer cursor.Close(dbCtx)
 		var results []interface{}
@@ -554,7 +554,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 	case "insert", "insertone":
 		res, err := collection.InsertOne(dbCtx, filter)
 		if err != nil {
-			panic(fmt.Sprintf("MongoDB Insert error: %s", err.Error()))
+			return [2]interface{}{nil, fmt.Sprintf("MongoDB Insert error: %s", err.Error())}
 		}
 		return map[string]interface{}{
 			"inserted_id": fmt.Sprint(res.InsertedID),
@@ -562,7 +562,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 
 	case "update", "updateone":
 		if len(args) < 3 {
-			panic("MongoDB update requires update document as the third argument")
+			return [2]interface{}{nil, "MongoDB update requires update document as the third argument"}
 		}
 		var update interface{}
 		updateStr, ok := args[2].(string)
@@ -571,7 +571,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 			if err := json.Unmarshal([]byte(updateStr), &u); err == nil {
 				update = u
 			} else {
-				panic("MongoDB update document is invalid JSON")
+				return [2]interface{}{nil, "MongoDB update document is invalid JSON"}
 			}
 		} else {
 			update = args[2]
@@ -579,7 +579,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 
 		res, err := collection.UpdateOne(dbCtx, filter, update)
 		if err != nil {
-			panic(fmt.Sprintf("MongoDB Update error: %s", err.Error()))
+			return [2]interface{}{nil, fmt.Sprintf("MongoDB Update error: %s", err.Error())}
 		}
 		return map[string]interface{}{
 			"matched_count":  res.MatchedCount,
@@ -589,7 +589,7 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 	case "delete", "deleteone":
 		res, err := collection.DeleteOne(dbCtx, filter)
 		if err != nil {
-			panic(fmt.Sprintf("MongoDB Delete error: %s", err.Error()))
+			return [2]interface{}{nil, fmt.Sprintf("MongoDB Delete error: %s", err.Error())}
 		}
 		return map[string]interface{}{
 			"deleted_count": res.DeletedCount,
@@ -598,12 +598,12 @@ func runMongoQuery(action string, args ...interface{}) interface{} {
 	case "count":
 		count, err := collection.CountDocuments(dbCtx, filter)
 		if err != nil {
-			panic(fmt.Sprintf("MongoDB Count error: %s", err.Error()))
+			return [2]interface{}{nil, fmt.Sprintf("MongoDB Count error: %s", err.Error())}
 		}
 		return count
 
 	default:
-		panic(fmt.Sprintf("Unsupported MongoDB action: %s. Supported actions: find, insert, update, delete, count", action))
+		return [2]interface{}{nil, fmt.Sprintf("Unsupported MongoDB action: %s. Supported: find, insert, update, delete, count", action)}
 	}
 }
 

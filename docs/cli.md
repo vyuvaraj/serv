@@ -30,10 +30,13 @@ serv run <file.srv> [--watch]
 Run tests defined in a `.srv` file.
 
 ```bash
-serv test <file.srv>
+serv test <file.srv>            # Run tests
+serv test --cover <file.srv>    # Run tests with coverage report
 ```
 
 Runs all `test "name" { ... }` blocks and reports results.
+
+**With `--cover`:** Shows statement coverage percentage and saves a coverage profile to `.build/<hash>/coverage.out`.
 
 ## serv lint
 

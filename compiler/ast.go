@@ -244,9 +244,10 @@ type MatchStmt struct {
 
 // Test Statement
 type TestStmt struct {
-	Token Token
-	Name  string // test name
-	Body  *BlockStmt
+	Token   Token
+	Name    string // test name
+	Timeout string // optional timeout duration (e.g. "5s"), empty if none
+	Body    *BlockStmt
 }
 
 func (t *TestStmt) statementNode() {}
@@ -270,6 +271,26 @@ func (a *AssertExpr) TokenLiteral() string { return a.Token.Literal }
 func (a *AssertExpr) String() string {
     return "assert " + a.Cond.String()
 }
+
+// BeforeEachStmt: beforeEach { ... } — runs before each test
+type BeforeEachStmt struct {
+	Token Token
+	Body  *BlockStmt
+}
+
+func (b *BeforeEachStmt) statementNode()       {}
+func (b *BeforeEachStmt) TokenLiteral() string { return b.Token.Literal }
+func (b *BeforeEachStmt) String() string       { return "beforeEach " + b.Body.String() + "\n" }
+
+// AfterEachStmt: afterEach { ... } — runs after each test
+type AfterEachStmt struct {
+	Token Token
+	Body  *BlockStmt
+}
+
+func (a *AfterEachStmt) statementNode()       {}
+func (a *AfterEachStmt) TokenLiteral() string { return a.Token.Literal }
+func (a *AfterEachStmt) String() string       { return "afterEach " + a.Body.String() + "\n" }
 
 func (m *MatchStmt) statementNode()       {}
 func (m *MatchStmt) TokenLiteral() string { return m.Token.Literal }
@@ -535,6 +556,17 @@ func (i *InfixExpr) expressionNode()      {}
 func (i *InfixExpr) TokenLiteral() string { return i.Token.Literal }
 func (i *InfixExpr) String() string       { return "(" + i.Left.String() + " " + i.Operator + " " + i.Right.String() + ")" }
 
+// PrefixExpr: -x, !x
+type PrefixExpr struct {
+	Token    Token
+	Operator string
+	Right    Expression
+}
+
+func (p *PrefixExpr) expressionNode()      {}
+func (p *PrefixExpr) TokenLiteral() string { return p.Token.Literal }
+func (p *PrefixExpr) String() string       { return "(" + p.Operator + p.Right.String() + ")" }
+
 type IndexExpr struct {
 	Token Token // The '[' token
 	Left  Expression
@@ -681,6 +713,16 @@ type AwaitExpr struct {
 func (a *AwaitExpr) expressionNode()      {}
 func (a *AwaitExpr) TokenLiteral() string { return a.Token.Literal }
 func (a *AwaitExpr) String() string       { return "await " + a.Value.String() }
+
+// ErrorPropExpr: expr? — if the expression returns an error, propagate it (return early)
+type ErrorPropExpr struct {
+	Token Token
+	Value Expression
+}
+
+func (e *ErrorPropExpr) expressionNode()      {}
+func (e *ErrorPropExpr) TokenLiteral() string { return e.Token.Literal }
+func (e *ErrorPropExpr) String() string       { return e.Value.String() + "?" }
 
 // Function Literal Expression: fn(x, y) { body } or x => expr
 type FnLiteral struct {

@@ -102,6 +102,7 @@ const (
 	TOKEN_GTE        TokenType = ">="
 	TOKEN_BANG       TokenType = "!"
 	TOKEN_QUESTION_DOT TokenType = "?."
+	TOKEN_QUESTION     TokenType = "?"
 	TOKEN_SPREAD     TokenType = "..."
 	TOKEN_TYPE       TokenType = "TYPE"
 	TOKEN_VALIDATE   TokenType = "VALIDATE"
@@ -109,6 +110,9 @@ const (
 	// Keywords
 	TOKEN_BREAK      TokenType = "BREAK"
 	TOKEN_CONTINUE   TokenType = "CONTINUE"
+	TOKEN_BEFORE_EACH TokenType = "BEFORE_EACH"
+	TOKEN_AFTER_EACH  TokenType = "AFTER_EACH"
+	TOKEN_TIMEOUT    TokenType = "TIMEOUT"
 )
 
 type Token struct {
@@ -270,8 +274,8 @@ func (l *Lexer) NextToken() Token {
 			tok.Literal = "?."
 			return tok
 		}
-		tok.Type = TOKEN_ILLEGAL
-		tok.Literal = string(l.ch)
+		tok.Type = TOKEN_QUESTION
+		tok.Literal = "?"
 	case ':':
 		tok.Type = TOKEN_COLON
 		tok.Literal = string(l.ch)
@@ -538,6 +542,9 @@ var keywords = map[string]TokenType{
 	"validate":  TOKEN_VALIDATE,
 	"break":     TOKEN_BREAK,
 	"continue":  TOKEN_CONTINUE,
+	"beforeEach": TOKEN_BEFORE_EACH,
+	"afterEach":  TOKEN_AFTER_EACH,
+	"timeout":   TOKEN_TIMEOUT,
 }
 
 func lookupIdent(ident string) TokenType {

@@ -33,12 +33,51 @@ let val, err = riskyFunction()   // Multi-return
 | `nil` | `nil` |
 | `[]T` | `[1, 2, 3]` |
 | `map` | `{ "key": "value" }` |
+| `T?` | Optional (nullable) type |
+| `T \| U` | Union type |
 
 ### Type Aliases
 
 ```serv
 type UserID = int
 type Email = string
+```
+
+### Optional Types (Null Safety)
+
+Types suffixed with `?` allow `nil` values. Without `?`, assigning `nil` is a compile error.
+
+```serv
+let name: string = "Alice"     // Cannot be nil
+let email: string? = nil       // OK — optional type
+
+fn findUser(id: int) -> User? {
+    let row = db.query("SELECT * FROM users WHERE id = ?", id)
+    if row == nil { return nil }
+    return User { name: row.name }
+}
+```
+
+**Compile error example:**
+```serv
+let x: int = nil   // error: cannot assign nil to non-optional type 'int' (use 'int?' to allow nil)
+```
+
+### Union Types
+
+Union types allow a value to be one of several types:
+
+```serv
+fn divide(a: int, b: int) -> int | error {
+    if b == 0 {
+        return "division by zero"
+    }
+    return a / b
+}
+
+fn process(input: string | int) {
+    log.info(input)
+}
 ```
 
 ## Functions
@@ -262,6 +301,7 @@ let all = await all([task1(), task2(), task3()])
 ## Error Handling
 
 ```serv
+// Try/catch (traditional)
 try {
     let result = http.get("http://api.example.com/data")
     log.info(result.body)
@@ -274,7 +314,18 @@ let data, err = riskyCall()
 if err != nil {
     log.error(err)
 }
+
+// ? operator — early return on error (recommended)
+fn loadUser(id: int) -> User? {
+    let row = db.query("SELECT * FROM users WHERE id = ?", id)?
+    let parsed = json.parse(row)?
+    return User { name: parsed.name }
+}
 ```
+
+The `?` operator calls the expression and:
+- If it returns `nil` or an error, returns `nil` from the enclosing function
+- If it succeeds, unwraps the value and continues
 
 ## Middleware
 
@@ -371,17 +422,27 @@ let sub = text[0:5]          // "hello"
 ## Imports & Modules
 
 ```serv
-// Import a local .srv module
+// Import a local .srv module (relative path)
 import "models/user.srv"
 import { User, Role } from "models/user.srv"
+
+// Import from stdlib (no relative path needed)
+import { ok, notFound } from "stdlib/response"
+import { requireAuth } from "stdlib/auth"
+import { hashPassword } from "stdlib/crypto"
 
 // Import a Go package
 import uuid from "github.com/google/uuid"
 let id = uuid.New()
 
-// Use stdlib modules
-import { ok, notFound } from "../stdlib/response.srv"
+// .srv extension is optional for stdlib imports
+import { maskEmail } from "stdlib/mask.srv"   // also works
 ```
+
+**Import resolution order:**
+1. `stdlib/X` — resolved from project root's `stdlib/` directory
+2. `./path` or `../path` — resolved relative to the importing file
+3. Bare path — resolved relative to the importing file
 
 ## External Function Bindings
 

@@ -1,0 +1,26 @@
+{
+    "version": "1.0.0",
+    "description": "Programming language for background services, schedulers, and APIs",
+    "homepage": "https://github.com/user/serv-lang",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/user/serv-lang/releases/download/v1.0.0/serv-windows-amd64.zip",
+            "hash": "REPLACE_WITH_ACTUAL_SHA256"
+        }
+    },
+    "bin": [
+        "serv.exe",
+        "serv-lsp.exe"
+    ],
+    "checkver": {
+        "github": "https://github.com/user/serv-lang"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/user/serv-lang/releases/download/v$version/serv-windows-amd64.zip"
+            }
+        }
+    }
+}

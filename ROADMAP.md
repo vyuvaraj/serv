@@ -122,9 +122,9 @@ This is the highest-impact work. Every improvement here cascades into better cod
 | 2.2 | **Function return type propagation** | Medium | ✅ Done — `let result = add(1, 2)` where `add -> int` tracks `result` as `int` |
 | 2.3 | **Collection element type inference** | Medium | ✅ Done — type inference recognizes homogeneous arrays; runtime still uses `[]interface{}` for collection method compat |
 | 2.4 | **Struct field type tracking** | Medium | ✅ Done — `user.age` on a typed struct resolves to the field's declared type |
-| 2.5 | **Basic type checking** | Large | ⬜ Not started |
-| 2.6 | **Null safety** (`T?` optional types) | Large | ⬜ Not started |
-| 2.7 | **Union types** (`T | error`) | Large | ⬜ Not started |
+| 2.5 | **Basic type checking** | Large | ✅ Done |
+| 2.6 | **Null safety** (`T?` optional types) | Large | ✅ Done — `T?` allows nil, plain `T` errors on nil assignment |
+| 2.7 | **Union types** (`T | error`) | Large | ✅ Done — parsed, codegen emits `interface{}`, type checker validates |
 
 ### Phase 3: Performance (High Priority)
 
@@ -135,17 +135,17 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 | 3.1 | **Emit native ops for known types** | Medium | ✅ Done — typed variables emit direct Go operators |
 | 3.2 | **Direct field access for typed structs** | Medium | ✅ Done — `user.name` on typed struct emits `user.Name` |
 | 3.3 | **Skip `toSlice()` for typed arrays** | Small | ✅ Done — known `[]interface{}` vars use direct `range` |
-| 3.4 | **Bounded prepared statement cache** | Small | ⬜ Not started |
-| 3.5 | **Conditional OTEL compilation** | Medium | ⬜ Not started |
+| 3.4 | **Bounded prepared statement cache** | Small | ✅ Done — LRU eviction with configurable max size |
+| 3.5 | **Conditional OTEL compilation** | Medium | ✅ Done — all Trace* functions gate on `if !otelEnabled` (no-op) |
 | 3.6 | **SafeMap only when shared** | Large | ⬜ Not started |
 
 ### Phase 4: Error Handling Rework (Medium Priority)
 
-| # | Item | Effort | Rationale |
-|---|------|--------|-----------|
-| 4.1 | **Replace panic/recover with error returns** | Large | Generate Go's `(T, error)` pattern instead of panic-based try/catch. Breaking change but aligns with Go semantics. |
-| 4.2 | **`?` operator for error propagation** | Medium | `let data = fetchData()?` — if error, return it immediately. Rust/Swift-style sugar over multi-return. |
-| 4.3 | **Result type in stdlib** | Small | `Result<T>` struct with `.isOk()`, `.unwrap()`, `.unwrapOr(default)`. |
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| 4.1 | **Replace panic/recover with error returns** | Large | ✅ Done — DBQuery, HTTPGet, HTTPPost, JSONParse, CacheGet/Set, MongoDB ops all return error tuples |
+| 4.2 | **`?` operator for error propagation** | Medium | ✅ Done — `let data = fetchData()?` returns early on error |
+| 4.3 | **Result type in stdlib** | Small | ✅ Done — `stdlib/result.srv` with ok/err/unwrap/unwrapOr/mapResult/flatMap |
 
 ### Phase 5: Compile-Time Analysis (Medium Priority)
 
@@ -166,7 +166,7 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 | 6.3 | **Signature help** | Medium | ✅ Done — shows params on `(` and `,` triggers |
 | 6.4 | **Find references / rename** | Large | ⬜ Not started |
 | 6.5 | **Semantic diagnostics** | Medium | ✅ Done — static analysis warnings shown in real time |
-| 6.6 | **`serv fmt` integration** | Small | ⬜ Not started |
+| 6.6 | **`serv fmt` integration** | Small | ✅ Done — format-on-save via LSP documentFormatting |
 
 ### Phase 7: Testing Framework (Medium Priority)
 
@@ -174,27 +174,27 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 |---|------|--------|--------|
 | 7.1 | **Structured assertions** | Small | ✅ Done — `assert x == 5` prints "got 3, want 5" |
 | 7.2 | **Test isolation** | Medium | ✅ Done — each test is its own `func Test_X(t *testing.T)` scope |
-| 7.3 | **Test coverage** | Medium | ⬜ Not started |
-| 7.4 | **Setup/teardown** | Small | ⬜ Not started |
-| 7.5 | **Test timeout** | Small | ⬜ Not started |
+| 7.3 | **Test coverage** | Medium | ✅ Done — `serv test --cover` reports statement coverage % |
+| 7.4 | **Setup/teardown** | Small | ✅ Done — `beforeEach { }` / `afterEach { }` blocks |
+| 7.5 | **Test timeout** | Small | ✅ Done — `test "name" timeout 5s { }` |
 
 ### Phase 8: Module System Hardening (Low Priority)
 
-| # | Item | Effort | Rationale |
-|---|------|--------|-----------|
-| 8.1 | **Package resolution without relative paths** | Medium | `import { ok } from "stdlib/response"` instead of `"../stdlib/response.srv"`. |
-| 8.2 | **Circular dependency detection** | Small | Walk the import graph and report cycles with file names. |
-| 8.3 | **Module-level visibility enforcement** | Medium | Non-exported symbols shouldn't be accessible from importing modules in the generated code. |
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| 8.1 | **Package resolution without relative paths** | Medium | ✅ Done — `import { ok } from "stdlib/response"` works |
+| 8.2 | **Circular dependency detection** | Small | ✅ Done — clear error with file name |
+| 8.3 | **Module-level visibility enforcement** | Medium | ⬜ Not started |
 
 ### Phase 9: Distribution & Ecosystem (Low Priority)
 
-| # | Item | Effort | Rationale |
-|---|------|--------|-----------|
-| 9.1 | **Homebrew formula + Scoop manifest** | Small | Standard distribution channels. |
-| 9.2 | **VS Code extension publish** | Small | Already have the extension, just needs marketplace packaging. |
-| 9.3 | **Web playground** | Medium | Try-before-install is a major adoption driver. Use WASM or server-side compilation. |
-| 9.4 | **Docker base image** | Small | `FROM serv:latest` with Go toolchain pre-installed. |
-| 9.5 | **Community package registry** | Large | Central registry for third-party `.srv` modules. Far future. |
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| 9.1 | **Homebrew formula + Scoop manifest** | Small | ✅ Done — in release-scripts/ |
+| 9.2 | **VS Code extension publish** | Small | ✅ Done — publish script in release-scripts/ |
+| 9.3 | **Web playground** | Medium | ⬜ Not started |
+| 9.4 | **Docker base image** | Small | ✅ Done — Dockerfile.base in release-scripts/docker/ |
+| 9.5 | **Community package registry** | Large | ⬜ Not started |
 
 ---
 
@@ -209,8 +209,8 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 ### Quarter 2: Make it safe ✅ (core items DONE)
 5. ~~Phase 5.4–5.5 (Unreachable code, dead imports)~~ ✅
 6. ~~Phase 7.1–7.2 (Better assertions, test isolation)~~ ✅
-7. Phase 4.1–4.2 (Error handling rework) — breaking change, next major item
-8. Phase 2.5–2.6 (Null safety, union types) — major type system features
+7. ~~Phase 4.2 (? operator for error propagation)~~ ✅
+8. ~~Phase 2.5–2.6 (Null safety, union types)~~ ✅
 
 ### Quarter 3: Make it professional
 9. Phase 6.1–6.3 (LSP cross-file, hover, signature help)

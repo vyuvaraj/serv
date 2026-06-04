@@ -3,6 +3,14 @@ package compiler
 import "strings"
 
 func toGoType(t string) string {
+	// Handle optional types: int? -> interface{} (can be nil)
+	if strings.HasSuffix(t, "?") {
+		return "interface{}"
+	}
+	// Handle union types: int|string -> interface{}
+	if strings.Contains(t, "|") {
+		return "interface{}"
+	}
 	switch t {
 	case "int":
 		return "int"
@@ -267,10 +275,18 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 			return varType
 		}
 		return "interface{}"
+	case *PrefixExpr:
+		if e.Operator == "!" {
+			return "bool"
+		}
+		// Negation preserves the type
+		return c.getExpressionType(e.Right)
 	case *AssertExpr:
 		return "interface{}"
 	case *AwaitExpr:
 		return "interface{}"
+	case *ErrorPropExpr:
+		return c.getExpressionType(e.Value)
 	case *FnLiteral:
 		return "interface{}"
 	default:

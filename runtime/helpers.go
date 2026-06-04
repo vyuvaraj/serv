@@ -35,7 +35,7 @@ func MetricGauge(name string, val float64) {
 }
 
 // HTTP Client
-func HTTPGet(url string) HTTPResponse {
+func HTTPGet(url string) interface{} {
 	endSpan := TraceHTTPClient("GET", url)
 	start := time.Now()
 	MetricInc("http_client_requests_total")
@@ -43,7 +43,7 @@ func HTTPGet(url string) HTTPResponse {
 	if err != nil {
 		MetricInc("http_client_errors_total")
 		endSpan(0)
-		panic(fmt.Sprintf("HTTP GET request failed for %s: %s", url, err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("HTTP GET request failed for %s: %s", url, err.Error())}
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -55,7 +55,7 @@ func HTTPGet(url string) HTTPResponse {
 	return HTTPResponse{Status: resp.StatusCode, Body: string(body)}
 }
 
-func HTTPPost(url string, body interface{}) HTTPResponse {
+func HTTPPost(url string, body interface{}) interface{} {
 	endSpan := TraceHTTPClient("POST", url)
 	start := time.Now()
 	MetricInc("http_client_requests_total")
@@ -71,7 +71,7 @@ func HTTPPost(url string, body interface{}) HTTPResponse {
 	if err != nil {
 		MetricInc("http_client_errors_total")
 		endSpan(0)
-		panic(fmt.Sprintf("HTTP POST request failed for %s: %s", url, err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("HTTP POST request failed for %s: %s", url, err.Error())}
 	}
 	defer resp.Body.Close()
 	bodyBytes, _ := io.ReadAll(resp.Body)
@@ -83,33 +83,14 @@ func HTTPPost(url string, body interface{}) HTTPResponse {
 	return HTTPResponse{Status: resp.StatusCode, Body: string(bodyBytes)}
 }
 
-// Safe variants that return [2]interface{}{value, error} tuples for multi-return support.
+// HTTPGetSafe is kept for backward compatibility — now just calls HTTPGet directly.
 func HTTPGetSafe(url string) interface{} {
-	var result interface{}
-	var errVal interface{}
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				errVal = fmt.Sprint(rec)
-			}
-		}()
-		result = HTTPGet(url)
-	}()
-	return [2]interface{}{result, errVal}
+	return HTTPGet(url)
 }
 
+// HTTPPostSafe is kept for backward compatibility — now just calls HTTPPost directly.
 func HTTPPostSafe(url string, body interface{}) interface{} {
-	var result interface{}
-	var errVal interface{}
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				errVal = fmt.Sprint(rec)
-			}
-		}()
-		result = HTTPPost(url, body)
-	}()
-	return [2]interface{}{result, errVal}
+	return HTTPPost(url, body)
 }
 
 // JSON native support
@@ -118,7 +99,7 @@ func JSONParse(dataVal interface{}) interface{} {
 	var val interface{}
 	err := json.Unmarshal([]byte(data), &val)
 	if err != nil {
-		panic(fmt.Sprintf("JSON parse error: %s", err.Error()))
+		return [2]interface{}{nil, fmt.Sprintf("JSON parse error: %s", err.Error())}
 	}
 	return ToSafeValue(val)
 }
@@ -126,23 +107,14 @@ func JSONParse(dataVal interface{}) interface{} {
 func JSONStringify(val interface{}) string {
 	b, err := json.Marshal(val)
 	if err != nil {
-		panic(fmt.Sprintf("JSON stringify error: %s", err.Error()))
+		return ""
 	}
 	return string(b)
 }
 
+// JSONParseSafe is kept for backward compatibility — now just calls JSONParse directly.
 func JSONParseSafe(dataVal interface{}) interface{} {
-	var result interface{}
-	var errVal interface{}
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				errVal = fmt.Sprint(rec)
-			}
-		}()
-		result = JSONParse(dataVal)
-	}()
-	return [2]interface{}{result, errVal}
+	return JSONParse(dataVal)
 }
 
 // Registry — generic named function map for dynamic dispatch.

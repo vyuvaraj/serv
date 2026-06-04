@@ -49,7 +49,7 @@ func CacheSet(key string, value interface{}, durationStr string) {
 		b, _ := json.Marshal(value)
 		err := redisClient.Set(dbCtx, key, string(b), duration).Err()
 		if err != nil {
-			panic(fmt.Sprintf("Redis SET error: %s", err.Error()))
+			LogError("Redis SET error: ", err.Error())
 		}
 	} else {
 		localCacheMu.Lock()
@@ -70,7 +70,8 @@ func CacheGet(key string) interface{} {
 		if err == redis.Nil {
 			return nil
 		} else if err != nil {
-			panic(fmt.Sprintf("Redis GET error: %s", err.Error()))
+			LogError("Redis GET error: ", err.Error())
+			return nil
 		}
 		var parsed interface{}
 		if err := json.Unmarshal([]byte(val), &parsed); err == nil {
