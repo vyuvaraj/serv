@@ -49,7 +49,7 @@ Write-Host "--------------------"
 
 $examples = Get-ChildItem examples\*.srv | Sort-Object Name
 foreach ($file in $examples) {
-    $null = & .\serv.exe build $file.FullName -o examples\regression_test.exe 2>&1
+    $null = & .\serv.exe build $file.FullName -o regression_test.exe 2>&1
     if ($LASTEXITCODE -eq 0) {
         $pass++
         Write-Result $file.Name "PASS" "compiled"
@@ -58,7 +58,7 @@ foreach ($file in $examples) {
         Write-Result $file.Name "FAIL" "compilation failed"
     }
 }
-Remove-Item examples\regression_test.exe -ErrorAction SilentlyContinue
+Remove-Item regression_test.exe -ErrorAction SilentlyContinue
 Write-Host ""
 
 if ($CompileOnly) {
@@ -127,22 +127,30 @@ $needsExternal = @(
 foreach ($test in $serverTests) {
     $file = "examples\$($test.File)"
     $port = $test.Port
+    $binPath = "smoke_test_$($test.Port).exe"
 
     # Build
-    $null = & .\serv.exe build $file -o examples\smoke_test.exe 2>&1
+    $null = & .\serv.exe build $file -o $binPath 2>&1
     if ($LASTEXITCODE -ne 0) {
         $fail++
         Write-Result "$($test.File) (smoke)" "FAIL" "build failed"
         continue
     }
 
+    if (-not (Test-Path $binPath)) {
+        $fail++
+        Write-Result "$($test.File) (smoke)" "FAIL" "binary not found after build"
+        continue
+    }
+
     # Start the server in background
-    $proc = Start-Process -FilePath ".\examples\smoke_test.exe" -PassThru -WindowStyle Hidden
+    $proc = Start-Process -FilePath (Resolve-Path $binPath) -PassThru -WindowStyle Hidden
     Start-Sleep -Seconds 2
 
     if ($proc.HasExited) {
         $skip++
         Write-Result "$($test.File) (smoke)" "SKIP" "server exited immediately (may need external deps)"
+        Remove-Item $binPath -ErrorAction SilentlyContinue
         continue
     }
 
@@ -162,6 +170,7 @@ foreach ($test in $serverTests) {
     # Stop the server
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
+    Remove-Item $binPath -ErrorAction SilentlyContinue
 
     if ($allPassed) {
         $pass++
@@ -172,7 +181,7 @@ foreach ($test in $serverTests) {
     }
 }
 
-Remove-Item examples\smoke_test.exe -ErrorAction SilentlyContinue
+Remove-Item smoke_test_*.exe -ErrorAction SilentlyContinue
 Write-Host ""
 
 # --- Summary ---
