@@ -3089,6 +3089,163 @@ func GetField(obj interface{}, field string) interface{} {
 	return nil
 }
 
+// --- Performance-optimized runtime helpers ---
+// These replace inline closures in generated code for better performance.
+
+// Equal compares two interface{} values for equality without fmt.Sprintf allocation.
+func Equal(a, b interface{}) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	switch av := a.(type) {
+	case int:
+		if bv, ok := b.(int); ok { return av == bv }
+		if bv, ok := b.(int64); ok { return int64(av) == bv }
+		if bv, ok := b.(float64); ok { return float64(av) == bv }
+	case int64:
+		if bv, ok := b.(int64); ok { return av == bv }
+		if bv, ok := b.(int); ok { return av == int64(bv) }
+	case float64:
+		if bv, ok := b.(float64); ok { return av == bv }
+		if bv, ok := b.(int); ok { return av == float64(bv) }
+	case string:
+		if bv, ok := b.(string); ok { return av == bv }
+	case bool:
+		if bv, ok := b.(bool); ok { return av == bv }
+	}
+	// Fallback: compare string representations
+	return fmt.Sprint(a) == fmt.Sprint(b)
+}
+
+// Compare performs ordered comparison (<, >, <=, >=) on two interface{} values.
+func Compare(a, b interface{}, op string) bool {
+	switch av := a.(type) {
+	case int:
+		bv, ok := b.(int)
+		if !ok { return false }
+		switch op {
+		case "<": return av < bv
+		case ">": return av > bv
+		case "<=": return av <= bv
+		case ">=": return av >= bv
+		}
+	case int64:
+		bv, ok := b.(int64)
+		if !ok { return false }
+		switch op {
+		case "<": return av < bv
+		case ">": return av > bv
+		case "<=": return av <= bv
+		case ">=": return av >= bv
+		}
+	case float64:
+		bv, ok := b.(float64)
+		if !ok { return false }
+		switch op {
+		case "<": return av < bv
+		case ">": return av > bv
+		case "<=": return av <= bv
+		case ">=": return av >= bv
+		}
+	case string:
+		bv, ok := b.(string)
+		if !ok { return false }
+		switch op {
+		case "<": return av < bv
+		case ">": return av > bv
+		case "<=": return av <= bv
+		case ">=": return av >= bv
+		}
+	}
+	return false
+}
+
+// Arith performs arithmetic on two interface{} values.
+func Arith(a, b interface{}, op string) interface{} {
+	switch av := a.(type) {
+	case int:
+		if bv, ok := b.(int); ok {
+			switch op {
+			case "+": return av + bv
+			case "-": return av - bv
+			case "*": return av * bv
+			case "/": if bv != 0 { return av / bv }
+			}
+		}
+		if bv, ok := b.(float64); ok {
+			switch op {
+			case "+": return float64(av) + bv
+			case "-": return float64(av) - bv
+			case "*": return float64(av) * bv
+			case "/": if bv != 0 { return float64(av) / bv }
+			}
+		}
+	case int64:
+		if bv, ok := b.(int64); ok {
+			switch op {
+			case "+": return av + bv
+			case "-": return av - bv
+			case "*": return av * bv
+			case "/": if bv != 0 { return av / bv }
+			}
+		}
+	case float64:
+		if bv, ok := b.(float64); ok {
+			switch op {
+			case "+": return av + bv
+			case "-": return av - bv
+			case "*": return av * bv
+			case "/": if bv != 0 { return av / bv }
+			}
+		}
+		if bv, ok := b.(int); ok {
+			switch op {
+			case "+": return av + float64(bv)
+			case "-": return av - float64(bv)
+			case "*": return av * float64(bv)
+			case "/": if bv != 0 { return av / float64(bv) }
+			}
+		}
+	case string:
+		if op == "+" {
+			if bv, ok := b.(string); ok { return av + bv }
+			return av + fmt.Sprint(b)
+		}
+	}
+	return nil
+}
+
+// MemberAccess retrieves a field from a dynamic object (Request, SafeMap, map, struct).
+func MemberAccess(obj interface{}, field string) interface{} {
+	if obj == nil {
+		return nil
+	}
+	switch v := obj.(type) {
+	case Request:
+		switch field {
+		case "body", "Body": return v.Body
+		case "method", "Method": return v.Method
+		case "path", "Path": return v.Path
+		case "params", "Params": return v.Params
+		}
+	case HTTPResponse:
+		switch field {
+		case "body", "Body": return v.Body
+		case "status", "Status": return v.Status
+		}
+	case *SafeMap:
+		return v.Get(field)
+	case map[string]interface{}:
+		return v[field]
+	default:
+		return GetField(obj, field)
+	}
+	return nil
+}
+
 // MergeMaps merges multiple maps into a single map[string]interface{}.
 // Later maps override earlier ones. Supports map[string]interface{}, *SafeMap, and interface{} values.
 // Usage from Serv: { ...defaults, ...overrides, extra: "value" }
