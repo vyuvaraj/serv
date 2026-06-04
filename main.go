@@ -568,7 +568,10 @@ func formatFile(srvFile string, checkOnly bool) {
 	output := strings.Join(result, "\n") + "\n"
 
 	if checkOnly {
-		if output != string(content) {
+		// Normalize line endings for cross-platform comparison
+		normalizedOutput := strings.ReplaceAll(output, "\r\n", "\n")
+		normalizedContent := strings.ReplaceAll(string(content), "\r\n", "\n")
+		if normalizedOutput != normalizedContent {
 			fmt.Printf("%s: not formatted\n", srvFile)
 			os.Exit(1)
 		}
