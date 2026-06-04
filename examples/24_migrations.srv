@@ -10,14 +10,13 @@ migration "20260531_init" {
 
 test "database migrations execution" {
     runMigrations()
-    
+
     // Test table created by migration
     db.query("INSERT INTO test_users (id, name) VALUES (1, 'Alice')")
     let users = db.query("SELECT name FROM test_users WHERE id = 1")
     assert users[0].name == "Alice"
-    
+
     // Verify migration record
     let records = db.query("SELECT version FROM schema_migrations WHERE version = '20260531_init'")
     assert records[0].version == "20260531_init"
 }
-

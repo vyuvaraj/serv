@@ -12,45 +12,48 @@
 server "8080"
 
 // Validate request body against a schema
+
 route "POST" "/api/users" (req) {
     let errors = validate(req.body, {
         "name": "required,string",
         "email": "required,email",
         "age": "int"
     })
-    
+
     if errors != nil {
         return { "status": "error", "errors": errors }
     }
-    
+
     return { "status": "created", "message": "User created successfully" }
 }
 
 // Validate with minimal schema
+
 route "POST" "/api/login" (req) {
     let errors = validate(req.body, {
         "username": "required",
         "password": "required"
     })
-    
+
     if errors != nil {
         return { "status": "error", "errors": errors }
     }
-    
+
     return { "status": "ok", "token": "jwt-token-here" }
 }
 
 // Validate with type checking
+
 route "POST" "/api/settings" (req) {
     let errors = validate(req.body, {
         "theme": "required,string",
         "notifications": "required,bool",
         "fontSize": "int"
     })
-    
+
     if errors != nil {
         return { "status": "error", "errors": errors }
     }
-    
+
     return { "status": "saved" }
 }

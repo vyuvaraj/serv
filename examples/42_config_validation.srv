@@ -14,6 +14,7 @@
 server "8080"
 
 // Fail fast if required config is missing
+
 validate {
     required "db.host",
     required "db.port",

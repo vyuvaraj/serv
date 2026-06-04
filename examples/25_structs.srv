@@ -5,6 +5,7 @@
 server "8080"
 
 // Define a struct
+
 struct User {
     id: int
     name: string
@@ -13,6 +14,7 @@ struct User {
 }
 
 // Define a method on User
+
 fn User.display() -> string {
     return f"{self.name} <{self.email}>"
 }
@@ -34,6 +36,7 @@ log.info("Name: ", alice.name)
 log.info("Email: ", bob.email)
 
 // Use in a route
+
 route "GET" "/users" (req) {
     return { "users": [alice.display(), bob.display()] }
 }

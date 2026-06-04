@@ -5,22 +5,24 @@
 broker "in-memory"
 
 // Scheduled job publishing notification messages
+
 every 4s {
     log.info("Cron: Firing event...")
     publish "events.logs" "System Status check: OK"
 }
 
 // Subscription that receives events and schedules concurrent processing
+
 subscribe "events.logs" (message) {
     log.info("Broker: Received log event: ", message)
-    
+
     // Spawn a lightweight concurrent task (Go goroutine)
     spawn processLogData(message)
 }
 
 fn processLogData(logLine) {
     log.info("[Worker] Starting log indexing for: ", logLine)
-    
+
     // Simulating processing delay
     log.info("[Worker] Finished log indexing.")
 }

@@ -8,6 +8,7 @@
 server "8080"
 
 // Optional chaining on nested maps
+
 route "GET" "/api/user" (req) {
     let user = {
         "name": "Alice",
@@ -16,26 +17,28 @@ route "GET" "/api/user" (req) {
             "zip": "97201"
         }
     }
-    
+
     // Safe access — works fine
     let city = user?.address?.city
     log.info("City: ", city)
-    
+
     return { "city": city }
 }
 
 // Optional chaining with nil values
+
 route "GET" "/api/missing" (req) {
     let user = { "name": "Bob" }
-    
+
     // user.address is nil, so ?.city returns nil instead of crashing
     let city = user?.address?.city
     log.info("City (should be nil): ", city)
-    
+
     return { "city": city }
 }
 
 // Optional chaining on function results
+
 fn findUser(id) {
     if id == "1" {
         return { "name": "Alice", "profile": { "bio": "Developer" } }
@@ -46,9 +49,9 @@ fn findUser(id) {
 route "GET" "/api/profile" (req) {
     let result = findUser("1")
     let bio = result?.profile?.bio
-    
+
     let missing = findUser("999")
     let noBio = missing?.profile?.bio
-    
+
     return { "bio": bio, "noBio": noBio }
 }

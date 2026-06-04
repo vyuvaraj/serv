@@ -17,17 +17,19 @@ fn fetchNotifications(id: int) -> string {
 }
 
 // Single await
+
 route "GET" "/user/:id" (req) {
     let data = await fetchUserData(1)
     return { "user": data }
 }
 
 // Parallel await — all tasks run concurrently
+
 route "GET" "/dashboard" (req) {
     let results = await all([
-        fetchUserData(1),
-        fetchOrders(1),
-        fetchNotifications(1)
-    ])
-    return { "dashboard": results }
+    fetchUserData(1),
+    fetchOrders(1),
+    fetchNotifications(1)
+])
+return { "dashboard": results }
 }

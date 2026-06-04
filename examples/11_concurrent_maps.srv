@@ -14,7 +14,7 @@ test "concurrent map writes" {
 
     // Let the workers run for a brief moment
     log.info("Started concurrent workers writing to map...")
-    
+
     // Read and assert that safe map gets value updates correctly
     data.count = 42
     assert data.count == 42
@@ -26,6 +26,6 @@ fn modifyMap(sharedMap, workerName) {
         sharedMap.count = i
         log.info(workerName, " set shared map count to ", i)
     } catch (err) {
-        log.error("Failed to write concurrently to map: ", err)
-    }
+    log.error("Failed to write concurrently to map: ", err)
+}
 }

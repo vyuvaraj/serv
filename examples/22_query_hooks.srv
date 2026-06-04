@@ -10,8 +10,8 @@ fn myQueryLog(query, args) {
 
 test "database query hooks" {
     db.beforeQuery(myQueryLog)
-    
+
     db.query("SELECT 1")
-    
+
     assert lastQuery == "SELECT 1"
 }

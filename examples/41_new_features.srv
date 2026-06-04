@@ -9,10 +9,13 @@
 server "8080"
 
 // Type aliases
+
 type UserID = int
+
 type Email = string
 
 // Enums with explicit integer values
+
 enum HttpStatus {
     OK = 200,
     Created = 201,
@@ -22,6 +25,7 @@ enum HttpStatus {
 }
 
 // Enums with string values
+
 enum Role {
     Admin = "admin",
     Editor = "editor",
@@ -29,6 +33,7 @@ enum Role {
 }
 
 // Traditional enum (string name auto-values)
+
 enum Color {
     Red,
     Green,

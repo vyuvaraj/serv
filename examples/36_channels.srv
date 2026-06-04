@@ -10,6 +10,7 @@ server "8080"
 let jobQueue = channel.new(50)
 
 // Producer: push work items onto the channel
+
 every 5s {
     log.info("Producing work items...")
     channel.send(jobQueue, "task-1")
@@ -19,6 +20,7 @@ every 5s {
 }
 
 // Worker pool: 3 workers consuming from the channel
+
 fn startWorker(id: int) {
     for true {
         let task = channel.receive(jobQueue)
@@ -38,6 +40,7 @@ spawn startWorker(2)
 spawn startWorker(3)
 
 // Non-blocking receive example
+
 route "GET" "/queue/peek" (req) {
     let item = channel.tryReceive(jobQueue)
     if item == nil {
@@ -47,6 +50,7 @@ route "GET" "/queue/peek" (req) {
 }
 
 // Non-blocking send example
+
 route "POST" "/queue/push" (req) {
     let sent = channel.trySend(jobQueue, req.body)
     if sent == false {
