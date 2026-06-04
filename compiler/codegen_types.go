@@ -78,6 +78,22 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 	case *FloatLiteral:
 		return "float64"
 	case *ArrayLiteral:
+		// Infer element type from homogeneous arrays
+		if len(e.Elements) > 0 {
+			firstType := c.getExpressionType(e.Elements[0])
+			if firstType != "interface{}" {
+				homogeneous := true
+				for _, el := range e.Elements[1:] {
+					if c.getExpressionType(el) != firstType {
+						homogeneous = false
+						break
+					}
+				}
+				if homogeneous {
+					return "[]" + firstType
+				}
+			}
+		}
 		return "[]interface{}"
 	case *StringLiteral:
 		return "string"
@@ -104,12 +120,37 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 				if goType != "interface{}" {
 					return goType
 				}
+				// If it's a struct type
+				if c.structTypes[retType] {
+					return retType
+				}
 			}
 		}
 		// Infer return type from collection/string method calls
 		if memExpr, ok := e.Function.(*MemberExpr); ok {
+			// Struct method calls: check if the receiver type has a known method return type
+			if ident, ok := memExpr.Object.(*Identifier); ok {
+				if objType, exists := c.varTypes[ident.Value]; exists && c.structTypes[objType] {
+					// Look up method return type
+					methodKey := objType + "." + memExpr.Field
+					if retType, exists := c.funcReturnTypes[methodKey]; exists {
+						goType := toGoType(retType)
+						if goType != "interface{}" {
+							return goType
+						}
+					}
+				}
+			}
 			switch memExpr.Field {
-			case "filter", "map":
+			case "filter":
+				// filter preserves the collection type
+				if ident, ok := memExpr.Object.(*Identifier); ok {
+					if varType, exists := c.varTypes[ident.Value]; exists && strings.HasPrefix(varType, "[]") {
+						return varType
+					}
+				}
+				return "[]interface{}"
+			case "map":
 				return "[]interface{}"
 			case "find":
 				return "interface{}"
@@ -131,11 +172,39 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 		}
 		return "interface{}"
 	case *MemberExpr:
-		// Known struct field access
+		// Struct field access: if the object has a known struct type, look up field type
 		if ident, ok := e.Object.(*Identifier); ok {
 			if objType, exists := c.varTypes[ident.Value]; exists {
-				if c.structTypes[objType] {
-					return "interface{}" // struct fields are dynamic for now
+				if fields, ok := c.structFields[objType]; ok {
+					for _, f := range fields {
+						if f.Name == e.Field {
+							goType := toGoType(f.Type)
+							if goType != "interface{}" {
+								return goType
+							}
+							// Check if field type is a known struct
+							if c.structTypes[f.Type] {
+								return f.Type
+							}
+							return "interface{}"
+						}
+					}
+				}
+			}
+		}
+		// Self field access
+		if _, isSelf := e.Object.(*SelfExpr); isSelf {
+			if selfType, ok := c.varTypes["self"]; ok {
+				if fields, ok := c.structFields[selfType]; ok {
+					for _, f := range fields {
+						if f.Name == e.Field {
+							goType := toGoType(f.Type)
+							if goType != "interface{}" {
+								return goType
+							}
+							return "interface{}"
+						}
+					}
 				}
 			}
 		}
@@ -148,6 +217,10 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 		switch e.Operator {
 		case "==", "!=", "<", ">", "<=", ">=":
 			return "bool"
+		case "&", "|", "^", "<<", ">>":
+			return "int"
+		case "%":
+			return "int"
 		default:
 			lt := c.getExpressionType(e.Left)
 			rt := c.getExpressionType(e.Right)
@@ -174,6 +247,24 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 					return strings.TrimPrefix(varType, "[]")
 				}
 			}
+		}
+		return "interface{}"
+	case *SliceExpr:
+		// Slicing preserves the type
+		if ident, ok := e.Left.(*Identifier); ok {
+			if varType, exists := c.varTypes[ident.Value]; exists {
+				if strings.HasPrefix(varType, "[]") {
+					return varType
+				}
+				if varType == "string" {
+					return "string"
+				}
+			}
+		}
+		return "interface{}"
+	case *CompoundAssignExpr:
+		if varType, ok := c.varTypes[e.Name]; ok {
+			return varType
 		}
 		return "interface{}"
 	case *AssertExpr:

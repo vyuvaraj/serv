@@ -119,6 +119,7 @@ func Arith(a, b interface{}, op string) interface{} {
 			case "-": return av - bv
 			case "*": return av * bv
 			case "/": if bv != 0 { return av / bv }
+			case "%": if bv != 0 { return av % bv }
 			}
 		}
 		if bv, ok := b.(float64); ok {
@@ -136,6 +137,7 @@ func Arith(a, b interface{}, op string) interface{} {
 			case "-": return av - bv
 			case "*": return av * bv
 			case "/": if bv != 0 { return av / bv }
+			case "%": if bv != 0 { return av % bv }
 			}
 		}
 	case float64:
@@ -160,6 +162,83 @@ func Arith(a, b interface{}, op string) interface{} {
 			if bv, ok := b.(string); ok { return av + bv }
 			return av + fmt.Sprint(b)
 		}
+	}
+	return nil
+}
+
+// Bitwise performs bitwise operations on two interface{} values.
+func Bitwise(a, b interface{}, op string) interface{} {
+	ai := toInt(a)
+	bi := toInt(b)
+	switch op {
+	case "&":
+		return ai & bi
+	case "|":
+		return ai | bi
+	case "^":
+		return ai ^ bi
+	case "<<":
+		if bi >= 0 {
+			return ai << uint(bi)
+		}
+		return 0
+	case ">>":
+		if bi >= 0 {
+			return ai >> uint(bi)
+		}
+		return 0
+	}
+	return 0
+}
+
+// ToMap converts an interface{} to map[string]interface{} for map iteration.
+func ToMap(v interface{}) map[string]interface{} {
+	if v == nil {
+		return nil
+	}
+	switch m := v.(type) {
+	case map[string]interface{}:
+		return m
+	case *SafeMap:
+		return m.All()
+	}
+	return nil
+}
+
+// Slice extracts a sub-slice from an interface{} value.
+func Slice(v interface{}, start interface{}, end interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
+	switch arr := v.(type) {
+	case []interface{}:
+		s := 0
+		e := len(arr)
+		if start != nil {
+			s = toInt(start)
+			if s < 0 { s = 0 }
+			if s > len(arr) { s = len(arr) }
+		}
+		if end != nil {
+			e = toInt(end)
+			if e < 0 { e = 0 }
+			if e > len(arr) { e = len(arr) }
+		}
+		return arr[s:e]
+	case string:
+		s := 0
+		e := len(arr)
+		if start != nil {
+			s = toInt(start)
+			if s < 0 { s = 0 }
+			if s > len(arr) { s = len(arr) }
+		}
+		if end != nil {
+			e = toInt(end)
+			if e < 0 { e = 0 }
+			if e > len(arr) { e = len(arr) }
+		}
+		return arr[s:e]
 	}
 	return nil
 }
