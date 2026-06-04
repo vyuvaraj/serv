@@ -18,6 +18,6 @@ every 4s {
         let total = db.query("SELECT count(*) as count FROM config_log")
         log.info(f"Database logs count: {total}")
     } catch (err) {
-        log.error(f"Failed to query database: {err}")
-    }
+    log.error(f"Failed to query database: {err}")
+}
 }

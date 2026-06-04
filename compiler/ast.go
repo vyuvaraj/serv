@@ -337,13 +337,14 @@ func (b *BlockStmt) String() string {
 
 // Fn Declaration Statement
 type FnDecl struct {
-	Token      Token
-	Name       string
-	TypeParams []string // generic type parameters: [T, U]
-	Params     []string
-	ParamTypes []string // optional types for each param
-	ReturnType string   // optional return type
-	Body       *BlockStmt
+	Token           Token
+	Name            string
+	TypeParams      []string // generic type parameters: [T, U]
+	TypeConstraints []string // constraints for each type param: [Comparable, Numeric] (empty = any)
+	Params          []string
+	ParamTypes      []string // optional types for each param
+	ReturnType      string   // optional return type
+	Body            *BlockStmt
 }
 
 func (f *FnDecl) statementNode()       {}

@@ -130,6 +130,24 @@ var (
 // Noop is a no-op sentinel used by generated test files to satisfy the runtime import.
 func Noop() {}
 
+// getCliFlag parses a --flag value from os.Args.
+// Returns empty string if not found.
+func getCliFlag(name string) string {
+	prefix := "--" + name + "="
+	flagWithSpace := "--" + name
+	for i, arg := range os.Args {
+		// --port=9090
+		if strings.HasPrefix(arg, prefix) {
+			return strings.TrimPrefix(arg, prefix)
+		}
+		// --port 9090
+		if arg == flagWithSpace && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	return ""
+}
+
 // Collection methods — operate on []interface{} slices
 
 // Filter returns elements where the callback returns true.
@@ -1510,6 +1528,15 @@ func StartServer() interface{} {
 
 	RunMigrations()
 	initOtel()
+
+	// Port resolution priority: --port flag > PORT env > config("server.port") > source declaration
+	if cliPort := getCliFlag("port"); cliPort != "" {
+		serverPort = cliPort
+	} else if envPort := os.Getenv("PORT"); envPort != "" {
+		serverPort = envPort
+	} else if cfgPort := Config("server.port"); cfgPort != "" {
+		serverPort = cfgPort
+	}
 
 	if serverPort == "" {
 		serverPort = "2112"

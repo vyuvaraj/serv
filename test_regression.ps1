@@ -1,7 +1,13 @@
 # Serv Regression Test Suite
 # Runs all examples: compilation check, test execution, and server smoke tests.
 #
-# Usage: powershell -ExecutionPolicy Bypass -File test_regression.ps1
+# Usage:
+#   powershell -ExecutionPolicy Bypass -File test_regression.ps1              # Run all phases
+#   powershell -ExecutionPolicy Bypass -File test_regression.ps1 -Phase 1    # Compilation only
+#   powershell -ExecutionPolicy Bypass -File test_regression.ps1 -Phase 2    # Unit tests only
+#   powershell -ExecutionPolicy Bypass -File test_regression.ps1 -Phase 3    # Server smoke tests only
+#   powershell -ExecutionPolicy Bypass -File test_regression.ps1 -CompileOnly  # Same as -Phase 1
+#   powershell -ExecutionPolicy Bypass -File test_regression.ps1 -Verbose    # Show details
 #
 # Requirements:
 # - serv.exe built (go build -o serv.exe main.go)
@@ -9,8 +15,12 @@
 
 param(
     [switch]$Verbose,
-    [switch]$CompileOnly
+    [switch]$CompileOnly,
+    [int]$Phase = 0  # 0 = all, 1 = compile, 2 = unit tests, 3 = smoke tests
 )
+
+# -CompileOnly is shorthand for -Phase 1
+if ($CompileOnly) { $Phase = 1 }
 
 $ErrorActionPreference = "Continue"
 $pass = 0
@@ -44,12 +54,13 @@ Write-Host "=== Serv Regression Tests ===" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Phase 1: Compilation ---
+if ($Phase -eq 0 -or $Phase -eq 1) {
 Write-Host "Phase 1: Compilation" -ForegroundColor White
 Write-Host "--------------------"
 
 $examples = Get-ChildItem examples\*.srv | Sort-Object Name
 foreach ($file in $examples) {
-    $null = & .\serv.exe build $file.FullName -o examples\regression_test.exe 2>&1
+    $null = & .\serv.exe build $file.FullName -o regression_test.exe 2>&1
     if ($LASTEXITCODE -eq 0) {
         $pass++
         Write-Result $file.Name "PASS" "compiled"
@@ -60,15 +71,10 @@ foreach ($file in $examples) {
 }
 Remove-Item examples\regression_test.exe -ErrorAction SilentlyContinue
 Write-Host ""
-
-if ($CompileOnly) {
-    Write-Host "=== Results (compile only) ===" -ForegroundColor Cyan
-    Write-Host "  Pass: $pass | Fail: $fail | Skip: $skip"
-    if ($fail -gt 0) { exit 1 }
-    exit 0
-}
+} # end Phase 1
 
 # --- Phase 2: Unit Tests (test-only files) ---
+if ($Phase -eq 0 -or $Phase -eq 2) {
 Write-Host "Phase 2: Unit Tests (serv test)" -ForegroundColor White
 Write-Host "--------------------------------"
 
@@ -93,20 +99,23 @@ foreach ($name in $testFiles) {
     }
 }
 Write-Host ""
+} # end Phase 2
 
 # --- Phase 3: Server Smoke Tests ---
+if ($Phase -eq 0 -or $Phase -eq 3) {
 Write-Host "Phase 3: Server Smoke Tests (start → /health → stop)" -ForegroundColor White
 Write-Host "------------------------------------------------------"
 
 # Files that start a server and have routes we can hit
+# Each uses port 8080, so we override PORT env var to avoid conflicts
 $serverTests = @(
-    @{ File="02_rest_api.srv"; Port="8080"; Endpoints=@("/health") },
-    @{ File="37_structured_logging.srv"; Port="8080"; Endpoints=@("/health", "/api/users") },
-    @{ File="38_destructuring.srv"; Port="8080"; Endpoints=@("/health") },
-    @{ File="39_optional_chaining.srv"; Port="8080"; Endpoints=@("/health", "/api/user") },
-    @{ File="40_spread_operator.srv"; Port="8080"; Endpoints=@("/health", "/api/config") },
-    @{ File="41_new_features.srv"; Port="8080"; Endpoints=@("/health", "/api/status") },
-    @{ File="43_request_validation.srv"; Port="8080"; Endpoints=@("/health") }
+    @{ File="02_rest_api.srv"; Port="9001"; Endpoints=@("/health") },
+    @{ File="37_structured_logging.srv"; Port="9002"; Endpoints=@("/health", "/api/users") },
+    @{ File="38_destructuring.srv"; Port="9003"; Endpoints=@("/health") },
+    @{ File="39_optional_chaining.srv"; Port="9004"; Endpoints=@("/health", "/api/user") },
+    @{ File="40_spread_operator.srv"; Port="9005"; Endpoints=@("/health", "/api/config") },
+    @{ File="41_new_features.srv"; Port="9006"; Endpoints=@("/health", "/api/status") },
+    @{ File="43_request_validation.srv"; Port="9007"; Endpoints=@("/health") }
 )
 
 # Files needing external deps (DB, broker, etc.) — skip server tests
@@ -127,22 +136,36 @@ $needsExternal = @(
 foreach ($test in $serverTests) {
     $file = "examples\$($test.File)"
     $port = $test.Port
+    $binName = "smoke_$($test.File -replace '\.srv$', '.exe')"
+    $binPath = "examples\$binName"
 
-    # Build
-    $null = & .\serv.exe build $file -o examples\smoke_test.exe 2>&1
+    # Clean previous
+    Remove-Item $binPath -ErrorAction SilentlyContinue
+
+    # Build (serv places output relative to the .srv file's directory)
+    $null = & .\serv.exe build $file -o $binName 2>&1
     if ($LASTEXITCODE -ne 0) {
         $fail++
         Write-Result "$($test.File) (smoke)" "FAIL" "build failed"
         continue
     }
 
-    # Start the server in background
-    $proc = Start-Process -FilePath ".\examples\smoke_test.exe" -PassThru -WindowStyle Hidden
-    Start-Sleep -Seconds 2
+    if (-not (Test-Path $binPath)) {
+        $fail++
+        Write-Result "$($test.File) (smoke)" "FAIL" "binary not found at $binPath"
+        continue
+    }
+
+    # Start the server in background with unique port via PORT env var
+    $env:PORT = $port
+    $proc = Start-Process -FilePath (Resolve-Path $binPath) -PassThru -WindowStyle Hidden
+    $env:PORT = $null
+    Start-Sleep -Seconds 3
 
     if ($proc.HasExited) {
         $skip++
         Write-Result "$($test.File) (smoke)" "SKIP" "server exited immediately (may need external deps)"
+        Remove-Item $binPath -ErrorAction SilentlyContinue
         continue
     }
 
@@ -161,7 +184,8 @@ foreach ($test in $serverTests) {
 
     # Stop the server
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Seconds 2
+    Remove-Item $binPath -ErrorAction SilentlyContinue
 
     if ($allPassed) {
         $pass++
@@ -172,8 +196,8 @@ foreach ($test in $serverTests) {
     }
 }
 
-Remove-Item examples\smoke_test.exe -ErrorAction SilentlyContinue
 Write-Host ""
+} # end Phase 3
 
 # --- Summary ---
 Write-Host "=== Summary ===" -ForegroundColor Cyan
@@ -188,7 +212,11 @@ Write-Host ""
 if ($fail -gt 0) {
     Write-Host "Failed tests:" -ForegroundColor Red
     $results | Where-Object { $_.Status -eq "FAIL" } | ForEach-Object { Write-Host "  - $($_.Name): $($_.Detail)" -ForegroundColor Red }
-    exit 1
 }
 
+# Final cleanup — remove any leftover test binaries
+Remove-Item examples\smoke_*.exe -ErrorAction SilentlyContinue
+Remove-Item examples\regression_test.exe -ErrorAction SilentlyContinue
+
+if ($fail -gt 0) { exit 1 }
 exit 0

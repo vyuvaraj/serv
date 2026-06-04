@@ -5,6 +5,7 @@
 server "8080"
 
 // Define middleware
+
 middleware auth(req) {
     let token = req.body
     if token == "" {
@@ -17,16 +18,19 @@ middleware logging(req) {
 }
 
 // Public route — no middleware
+
 route "GET" "/health" (req) {
     return { "status": "ok" }
 }
 
 // Protected route — requires auth
+
 route "GET" "/admin" (req) use [auth, logging] {
     return { "data": "admin panel", "secret": "42" }
 }
 
 // Route with just logging
+
 route "GET" "/users" (req) use [logging] {
     return { "users": ["Alice", "Bob"] }
 }

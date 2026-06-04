@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feature/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build serv compiler
+        run: go build -o serv.exe main.go
+
+      - name: Compile all examples
+        shell: pwsh
+        run: |
+          $failed = @()
+          Get-ChildItem examples\*.srv | ForEach-Object {
+            & .\serv.exe build $_.FullName -o examples\test_bin.exe 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { $failed += $_.Name }
+          }
+          Remove-Item examples\test_bin.exe -ErrorAction SilentlyContinue
+          if ($failed.Count -gt 0) {
+            Write-Host "Failed to compile: $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "All $((Get-ChildItem examples\*.srv).Count) examples compiled successfully"
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $testFiles = @("examples\12_static_types.srv", "examples\14_phase3_features.srv", "examples\20_raw_strings.srv")
+          $failed = @()
+          foreach ($file in $testFiles) {
+            if (Test-Path $file) {
+              & .\serv.exe test $file 2>&1 | Out-Null
+              if ($LASTEXITCODE -ne 0) { $failed += $file }
+            }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "Failed tests: $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "All unit tests passed"
+
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $unformatted = @()
+          Get-ChildItem examples\*.srv | ForEach-Object {
+            & .\serv.exe fmt --check $_.FullName 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { $unformatted += $_.Name }
+          }
+          if ($unformatted.Count -gt 0) {
+            Write-Host "Unformatted files: $($unformatted -join ', ')"
+            Write-Host "Run 'serv fmt' to fix"
+            # Warning only — don't fail the build
+          }
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build serv compiler (Linux)
+        run: go build -o serv main.go
+
+      - name: Compile examples (Linux)
+        run: |
+          failed=0
+          for f in examples/*.srv; do
+            ./serv build "$f" -o /tmp/test_bin 2>/dev/null
+            if [ $? -ne 0 ]; then
+              echo "FAIL: $f"
+              failed=$((failed+1))
+            fi
+          done
+          if [ $failed -gt 0 ]; then
+            echo "$failed examples failed to compile"
+            exit 1
+          fi
+          echo "All examples compiled on Linux"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-test, build-linux]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: linux
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build release binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -ldflags="-s -w" -o serv-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} main.go
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: serv-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: serv-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}

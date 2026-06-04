@@ -18,7 +18,7 @@ every 4s {
     // Maps in Serv support direct assignments
     parsedObj.version = 2
     parsedObj.newField = "added-at-runtime"
-    
+
     let updatedJson = json.stringify(parsedObj)
     log.info("Updated JSON string: ", updatedJson)
 
@@ -28,8 +28,8 @@ every 4s {
         let invalidData = "{invalid-json-string}"
         let failedObj = json.parse(invalidData)
     } catch (err) {
-        log.error("Successfully caught JSON parser error: ", err)
-    }
-    
-    log.info("JSON demonstration tick completed.")
+    log.error("Successfully caught JSON parser error: ", err)
+}
+
+log.info("JSON demonstration tick completed.")
 }

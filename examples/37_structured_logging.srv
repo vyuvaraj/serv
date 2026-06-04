@@ -23,6 +23,7 @@ log.debug("Debug details — only visible at debug level")
 let logger = log.with("service", "user-api", "version", "1.2.0")
 
 // Use the context logger — fields are included automatically
+
 route "GET" "/api/users" (req) {
     logger.info("Listing users")
     logger.debug("Fetching from database")
@@ -32,20 +33,21 @@ route "GET" "/api/users" (req) {
 route "POST" "/api/users" (req) {
     // Create a request-scoped logger with additional fields
     let reqLogger = log.with("service", "user-api", "endpoint", "/api/users", "method", "POST")
-    
+
     reqLogger.info("Creating user")
-    
+
     // Simulate validation
     if req.body == nil {
         reqLogger.warn("Empty request body")
         return { "error": "body required" }
     }
-    
+
     reqLogger.info("User created successfully")
     return { "status": "created" }
 }
 
 // Using log.fields() with a map
+
 route "GET" "/api/health" (req) {
     let healthLogger = log.fields({ "component": "health", "version": "1.0" })
     healthLogger.info("Health check requested")
@@ -53,6 +55,7 @@ route "GET" "/api/health" (req) {
 }
 
 // Runtime level management
+
 route "PUT" "/api/log-level" (req) {
     let level = req.body
     log.setLevel(level)
@@ -61,6 +64,7 @@ route "PUT" "/api/log-level" (req) {
 }
 
 // Legacy log.with() still works — odd args = immediate log with fields
+
 route "GET" "/api/legacy" (req) {
     log.with("endpoint", "/api/legacy", "method", "GET", "Request handled")
     return { "ok": true }

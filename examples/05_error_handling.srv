@@ -4,17 +4,17 @@
 
 every 4s {
     log.info("Attempting connection to a down server...")
-    
+
     try {
         // This request will fail because the port/url is invalid
         let response = http.get("http://localhost:9999/does-not-exist")
-        
+
         log.info("Request succeeded! Status: ", response.status)
     } catch (err) {
-        // The failure is caught here
-        log.error("Gracefully caught HTTP error: ", err)
-        metric.inc("captured_errors_total")
-    }
-    
-    log.info("Timer execution finished successfully (did not crash).")
+    // The failure is caught here
+    log.error("Gracefully caught HTTP error: ", err)
+    metric.inc("captured_errors_total")
+}
+
+log.info("Timer execution finished successfully (did not crash).")
 }

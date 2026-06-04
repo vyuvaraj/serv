@@ -5,11 +5,13 @@
 server "8080"
 
 // Generic function: works with any type
+
 fn identity[T](value: T) -> T {
     return value
 }
 
 // Generic pair
+
 fn makePair[A, B](a: A, b: B) -> string {
     return f"{a} and {b}"
 }
