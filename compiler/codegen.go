@@ -159,744 +159,108 @@ func (c *Codegen) Generate() (string, error) {
 
 
 func (c *Codegen) genStatement(stmt Statement) (string, error) {
-	switch s := stmt.(type) {
-	case *ImportStmt:
-		// Local imports are handled at parser stage by merging ASTs, so nothing to output here
-		return "", nil
-
-	case *GoPackageImport:
-		// Register the Go package import and alias for codegen
-		c.imports[`"`+s.Path+`"`] = true
-		// Store alias -> package mapping for member expression resolution
-		pkgName := filepath.Base(s.Path)
-		c.goPackageAliases[s.Alias] = pkgName
-		return "", nil
-
-	case *DeclareModuleStmt:
-		// Declaration files don't generate code â€” they inform the type system
-		// Register the package functions for later resolution
-		pkgName := filepath.Base(s.PkgPath)
-		for _, fn := range s.Functions {
-			key := s.PkgPath + ":" + fn.Name
-			c.declaredGoFuncs[key] = pkgName + "." + fn.Name
-			if fn.MultiReturn {
-				c.goMultiReturnFuncs[pkgName+"."+fn.Name] = true
-			}
-		}
-		return "", nil
-
-	case *ExportStmt:
-		// Export is a visibility marker; generate the inner statement normally
-		return c.genStatement(s.Inner)
-
-	case *ExternFnStmt:
-		// Generate the Go wrapper function
-		var out bytes.Buffer
-		out.WriteString(fmt.Sprintf("func %s(", s.Name))
-		var params []string
-		for _, p := range s.Params {
-			params = append(params, p+" interface{}")
-		}
-		out.WriteString(strings.Join(params, ", "))
-		out.WriteString(") interface{} {\n")
-
-		if strings.HasPrefix(s.Source, "go:") {
-			goCall, ok := c.goExterns[s.Name]
-			if !ok {
-				return "", fmt.Errorf("missing go call mapping for extern fn: %s", s.Name)
-			}
-			var callArgs []string
-			for _, p := range s.Params {
-				// Go packages might expect string or other types; we pass as is or cast if needed.
-				// In general, we pass the interface{} values.
-				callArgs = append(callArgs, p)
-			}
-			out.WriteString(fmt.Sprintf("\treturn %s(%s)\n", goCall, strings.Join(callArgs, ", ")))
-		} else if strings.HasPrefix(s.Source, "python:") {
-			// python:./scripts/analyzer.py:analyze
-			parts := strings.Split(strings.TrimPrefix(s.Source, "python:"), ":")
-			if len(parts) >= 2 {
-				scriptPath := parts[0]
-				funcName := parts[1]
-				if absPath, err := filepath.Abs(scriptPath); err == nil {
-					scriptPath = filepath.ToSlash(absPath)
-				}
-				var callArgs []string
-				for _, p := range s.Params {
-					callArgs = append(callArgs, p)
-				}
-				argsStr := ""
-				if len(callArgs) > 0 {
-					argsStr = ", " + strings.Join(callArgs, ", ")
-				}
-				out.WriteString(fmt.Sprintf("\treturn runtime.CallPython(%q, %q%s)\n", scriptPath, funcName, argsStr))
-			} else {
-				return "", fmt.Errorf("invalid python extern source: %s", s.Source)
-			}
-		}
-
-		out.WriteString("}\n\n")
-		return out.String(), nil
-
-	case *EnumStmt:
-		var rOut bytes.Buffer
-		rOut.WriteString("const (\n")
-		for i, m := range s.Members {
-			if valExpr, hasValue := s.Values[m]; hasValue {
-				valStr, err := c.genExpression(valExpr)
-				if err != nil {
-					return "", err
-				}
-				// Determine type from value
-				switch valExpr.(type) {
-				case *IntegerLiteral:
-					c.varTypes[m] = "int"
-					rOut.WriteString(fmt.Sprintf("\t%s = %s\n", m, valStr))
-				case *FloatLiteral:
-					c.varTypes[m] = "float64"
-					rOut.WriteString(fmt.Sprintf("\t%s = %s\n", m, valStr))
-				case *StringLiteral:
-					c.varTypes[m] = "string"
-					rOut.WriteString(fmt.Sprintf("\t%s = %s\n", m, valStr))
-				default:
-					c.varTypes[m] = "interface{}"
-					rOut.WriteString(fmt.Sprintf("\t%s = %s\n", m, valStr))
-				}
-			} else {
-				// No explicit value: use iota for first, string name otherwise
-				if i == 0 && len(s.Values) == 0 {
-					// All-string enum (original behavior)
-					c.varTypes[m] = "string"
-					rOut.WriteString(fmt.Sprintf("\t%s = %q\n", m, m))
-				} else {
-					c.varTypes[m] = "string"
-					rOut.WriteString(fmt.Sprintf("\t%s = %q\n", m, m))
-				}
-			}
-		}
-		rOut.WriteString(")\n\n")
-		return rOut.String(), nil
-
-	case *TypeAliasStmt:
-		goType := toGoType(s.BaseType)
-		if goType == "interface{}" && s.BaseType != "any" {
-			goType = s.BaseType
-		}
-		return fmt.Sprintf("type %s = %s\n\n", s.Name, goType), nil
-
-	case *ValidateStmt:
-		var keys []string
-		for _, k := range s.Required {
-			keys = append(keys, fmt.Sprintf("%q", k))
-		}
-		return fmt.Sprintf("func init() {\n\truntime.ValidateConfig([]string{%s})\n}\n\n", strings.Join(keys, ", ")), nil
-
-	case *IfStmt:
-		condStr, err := c.genExpression(s.Condition)
-		if err != nil {
-			return "", err
-		}
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		// Wrap condition in a truthiness check for interface{} values
-		condType := c.getExpressionType(s.Condition)
-		var condCode string
-		if condType == "bool" {
-			condCode = condStr
-		} else {
-			condCode = fmt.Sprintf("isTruthy(%s)", condStr)
-		}
-		if s.ElseBody != nil {
-			elseStr, err := c.genBlockStatement(s.ElseBody)
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("if %s %s else %s\n", condCode, bodyStr, elseStr), nil
-		}
-		return fmt.Sprintf("if %s %s\n", condCode, bodyStr), nil
-
-	case *ForStmt:
-		if s.IsRange {
-			iterStr, err := c.genExpression(s.Iterable)
-			if err != nil {
-				return "", err
-			}
-			c.declaredVars[s.Variable] = true
-			bodyStr, err := c.genBlockStatement(s.Body)
-			if err != nil {
-				return "", err
-			}
-			// Skip toSlice() if we know the iterable is already a slice type
-			iterType := c.getExpressionType(s.Iterable)
-			if iterType == "[]interface{}" || strings.HasPrefix(iterType, "[]") {
-				return fmt.Sprintf("for _, %s := range %s %s\n", s.Variable, iterStr, bodyStr), nil
-			}
-			return fmt.Sprintf("for _, %s := range toSlice(%s) %s\n", s.Variable, iterStr, bodyStr), nil
-		}
-		// Condition-based loop
-		condStr, err := c.genExpression(s.Iterable)
-		if err != nil {
-			return "", err
-		}
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		condType := c.getExpressionType(s.Iterable)
-		var condCode string
-		if condType == "bool" {
-			condCode = condStr
-		} else {
-			condCode = fmt.Sprintf("isTruthy(%s)", condStr)
-		}
-		return fmt.Sprintf("for %s %s\n", condCode, bodyStr), nil
-
-	case *StructDecl:
-		var out bytes.Buffer
-		out.WriteString(fmt.Sprintf("type %s struct {\n", s.Name))
-		for _, f := range s.Fields {
-			goType := toGoType(f.Type)
-			if goType == "interface{}" {
-				// Check if it's a known struct type
-				goType = f.Type
-			}
-			out.WriteString(fmt.Sprintf("\t%s %s\n", capitalizeFirst(f.Name), goType))
-		}
-		out.WriteString("}\n\n")
-		// Register struct type for later use
-		c.varTypes[s.Name] = s.Name
-		return out.String(), nil
-
-	case *MethodDecl:
-		c.inFunction = true
-		oldDeclared := c.declaredVars
-		oldVarTypes := c.varTypes
-		c.declaredVars = make(map[string]bool)
-		c.varTypes = make(map[string]string)
-		for k, v := range oldVarTypes {
-			c.varTypes[k] = v
-		}
-		c.declaredVars["self"] = true
-		c.varTypes["self"] = s.TypeName
-
-		var params []string
-		for i, p := range s.Params {
-			c.declaredVars[p] = true
-			pt := "interface{}"
-			if i < len(s.ParamTypes) && s.ParamTypes[i] != "" {
-				pt = toGoType(s.ParamTypes[i])
-				c.varTypes[p] = pt
-			}
-			params = append(params, p+" "+pt)
-		}
-
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-
-		c.declaredVars = oldDeclared
-		c.varTypes = oldVarTypes
-		c.inFunction = false
-
-		retType := "interface{}"
-		if s.ReturnType != "" {
-			retType = toGoType(s.ReturnType)
-			if retType == "interface{}" {
-				retType = s.ReturnType // might be a struct type
-			}
-		}
-
-		// Generate as Go method with pointer receiver
-		return fmt.Sprintf("func (self *%s) %s(%s) %s %s\n\n", s.TypeName, capitalizeFirst(s.Name), strings.Join(params, ", "), retType, bodyStr), nil
-
-	case *InterfaceDecl:
-		var out bytes.Buffer
-		out.WriteString(fmt.Sprintf("type %s interface {\n", s.Name))
-		for _, m := range s.Methods {
-			var params []string
-			for i, p := range m.Params {
-				pt := "interface{}"
-				if i < len(m.ParamTypes) && m.ParamTypes[i] != "" {
-					pt = toGoType(m.ParamTypes[i])
-				}
-				params = append(params, p+" "+pt)
-			}
-			retType := "interface{}"
-			if m.ReturnType != "" {
-				retType = toGoType(m.ReturnType)
-				if retType == "interface{}" {
-					retType = m.ReturnType
-				}
-			}
-			out.WriteString(fmt.Sprintf("\t%s(%s) %s\n", capitalizeFirst(m.Name), strings.Join(params, ", "), retType))
-		}
-		out.WriteString("}\n\n")
-		return out.String(), nil
-
-	case *BrokerStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		// In main() or global init, but Serv puts setup in main.
-		// Let's output these setups into standard setup blocks that will go into main() later
-		return fmt.Sprintf("func init() {\n\truntime.InitBroker(fmt.Sprint(%s))\n}\n\n", val), nil
-
-	case *ServerStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		if s.TLS {
-			return fmt.Sprintf("func init() {\n\truntime.InitServerTLS(fmt.Sprint(%s), %q, %q)\n}\n\n", val, s.CertFile, s.KeyFile), nil
-		}
-		return fmt.Sprintf("func init() {\n\truntime.InitServer(fmt.Sprint(%s))\n}\n\n", val), nil
-
-	case *DatabaseStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		return fmt.Sprintf("func init() {\n\truntime.InitDB(fmt.Sprint(%s))\n}\n\n", val), nil
-
-	case *CacheStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		return fmt.Sprintf("func init() {\n\truntime.InitCache(fmt.Sprint(%s))\n}\n\n", val), nil
-
-	case *MatchStmt:
-		valStr, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		var out bytes.Buffer
-		out.WriteString(fmt.Sprintf("switch %s {\n", valStr))
-		for _, cs := range s.Cases {
-			if cs.Value != nil {
-				caseVal, err := c.genExpression(cs.Value)
-				if err != nil {
-					return "", err
-				}
-				bodyStr, err := c.genBlockStatement(cs.Body)
-				if err != nil {
-					return "", err
-				}
-				out.WriteString(fmt.Sprintf("case %s: %s\n", caseVal, bodyStr))
-			} else {
-				bodyStr, err := c.genBlockStatement(cs.Body)
-				if err != nil {
-					return "", err
-				}
-				out.WriteString(fmt.Sprintf("default: %s\n", bodyStr))
-			}
-		}
-		out.WriteString("}\n")
-		return out.String(), nil
-
-	case *RouteStmt:
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		if len(s.Middlewares) > 0 {
-			// Generate middleware chain: each middleware is called before the handler
-			var middlewareNames []string
-			for _, mw := range s.Middlewares {
-				middlewareNames = append(middlewareNames, fmt.Sprintf("%q", mw))
-			}
-			return fmt.Sprintf("func init() {\n\truntime.AddRouteWithMiddleware(%q, %q, %d, %q, []string{%s}, func(%s runtime.Request) interface{} %s)\n}\n\n",
-				s.Method, s.Path, s.LimitRate, s.LimitPeriod, strings.Join(middlewareNames, ", "), s.Param, bodyStr), nil
-		}
-		return fmt.Sprintf("func init() {\n\truntime.AddRoute(%q, %q, %d, %q, func(%s runtime.Request) interface{} %s)\n}\n\n", s.Method, s.Path, s.LimitRate, s.LimitPeriod, s.Param, bodyStr), nil
-
-	case *MiddlewareDecl:
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		// Ensure middleware always has a return nil at the end (means "continue to handler")
-		if !strings.Contains(bodyStr, "return") || strings.Contains(bodyStr, "if") {
-			// Insert return nil before closing brace
-			bodyStr = bodyStr[:len(bodyStr)-1] + "\treturn nil\n}"
-		}
-		// Generate middleware as a named function and register it
-		return fmt.Sprintf("func init() {\n\truntime.RegisterMiddleware(%q, func(%s runtime.Request) interface{} %s)\n}\n\n", s.Name, s.Param, bodyStr), nil
-
-	case *WsStmt:
-		// Register the conn param as WSConn type for member expression resolution
-		oldDeclared := c.declaredVars
-		oldVarTypes := c.varTypes
-		c.declaredVars = make(map[string]bool)
-		c.varTypes = make(map[string]string)
-		for k, v := range oldVarTypes {
-			c.varTypes[k] = v
-		}
-		c.declaredVars[s.Param] = true
-		c.varTypes[s.Param] = "*runtime.WSConn"
-		c.inFunction = true
-
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-
-		c.declaredVars = oldDeclared
-		c.varTypes = oldVarTypes
-		c.inFunction = false
-
-		return fmt.Sprintf("func init() {\n\truntime.AddWebSocket(%q, func(%s *runtime.WSConn) %s)\n}\n\n", s.Path, s.Param, bodyStr), nil
-
-	case *ToolStmt:
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("func init() {\n\truntime.AddMCPTool(%q, %q, func(%s interface{}) interface{} %s)\n}\n\n", s.Name, s.Description, s.Param, bodyStr), nil
-
-	case *MigrationStmt:
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("func init() {\n\truntime.RegisterMigration(%q, func() %s)\n}\n\n", s.Name, bodyStr), nil
-
-	case *EveryStmt:
-		interval, err := c.genExpression(s.Interval)
-		if err != nil {
-			return "", err
-		}
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		return fmt.Sprintf("func init() {\n\t// Scheduled interval job\n\tgo func() {\n\t\ttime.Sleep(100 * time.Millisecond) // brief sleep to let server initialize\n\t\truntime.Every(fmt.Sprint(%s), func() %s)\n\t}()\n}\n\n", interval, bodyStr), nil
-
-	case *CronStmt:
-		cronVal, err := c.genExpression(s.Cron)
-		if err != nil {
-			return "", err
-		}
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		return fmt.Sprintf("func init() {\n\t// Scheduled cron job\n\tgo func() {\n\t\ttime.Sleep(100 * time.Millisecond)\n\t\truntime.Cron(fmt.Sprint(%s), func() %s)\n\t}()\n}\n\n", cronVal, bodyStr), nil
-
-	case *SubscribeStmt:
-		topic, err := c.genExpression(s.Topic)
-		if err != nil {
-			return "", err
-		}
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		return fmt.Sprintf("func init() {\n\truntime.Subscribe(fmt.Sprint(%s), func(%s string) %s)\n}\n\n", topic, s.Param, bodyStr), nil
-
-	case *PublishStmt:
-		topic, err := c.genExpression(s.Topic)
-		if err != nil {
-			return "", err
-		}
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		c.imports[`"fmt"`] = true
-		return fmt.Sprintf("runtime.Publish(fmt.Sprint(%s), %s)\n", topic, val), nil
-
-	case *SpawnStmt:
-		call, err := c.genExpression(s.Call)
-		if err != nil {
-			return "", err
-		}
-		var spawnCode string
-		if s.Limit != nil {
-			limStr, err := c.genExpression(s.Limit)
-			if err != nil {
-				return "", err
-			}
-			semID := fmt.Sprintf("spawn_%d_%d", s.Token.Line, s.Token.Col)
-			c.imports[`"fmt"`] = true
-			c.imports[`"strconv"`] = true
-			spawnCode = fmt.Sprintf("runtime.AcquireSemaphore(%q, func() int {\n\t\t\tval, _ := strconv.Atoi(fmt.Sprint(%s))\n\t\t\tif val <= 0 { return 1 }\n\t\t\treturn val\n\t\t}())\ngo func() {\n\t\tdefer runtime.ReleaseSemaphore(%q)\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\truntime.LogError(\"Recovered in spawned task: \", r)\n\t\t\t}\n\t\t}()\n\t\t%s\n\t}()\n", semID, limStr, semID, call)
-		} else {
-			spawnCode = fmt.Sprintf("go func() {\n\t\tdefer func() {\n\t\t\tif r := recover(); r != nil {\n\t\t\t\truntime.LogError(\"Recovered in spawned task: \", r)\n\t\t\t}\n\t\t}()\n\t\t%s\n\t}()\n", call)
-		}
-		if !c.inFunction {
-			return fmt.Sprintf("func init() {\n\t%s}\n\n", spawnCode), nil
-		}
-		return spawnCode, nil
-
-	case *TestStmt:
-		c.inFunction = true
-		oldConcurrent := c.inConcurrentContext
-		c.inConcurrentContext = hasConcurrency(s.Body)
-
-		// Collect test function bodies â€” emitted separately via GenerateTests()
-		funcName := "Test_" + sanitizeTestName(s.Name)
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-		c.inFunction = false
-		c.inConcurrentContext = oldConcurrent
-		c.testFuncs = append(c.testFuncs, fmt.Sprintf("func %s(t *testing.T) %s\n", funcName, bodyStr))
-		return "", nil
-
-	case *DestructureLetStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		// Generate: tmpVar := expr; field1 := extract(tmpVar, "field1"); ...
-		var out bytes.Buffer
-		tmpVar := fmt.Sprintf("_destructure_%d_%d", s.Token.Line, s.Token.Col)
-		out.WriteString(fmt.Sprintf("var %s interface{} = %s\n", tmpVar, val))
-		c.imports[`"fmt"`] = true
-		for _, field := range s.Fields {
-			c.declaredVars[field] = true
-			out.WriteString(fmt.Sprintf("var %s interface{} = func() interface{} {\n", field))
-			out.WriteString(fmt.Sprintf("\tswitch v := %s.(type) {\n", tmpVar))
-			out.WriteString(fmt.Sprintf("\tcase *runtime.SafeMap:\n\t\treturn v.Get(%q)\n", field))
-			out.WriteString(fmt.Sprintf("\tcase map[string]interface{}:\n\t\treturn v[%q]\n", field))
-			out.WriteString(fmt.Sprintf("\tdefault:\n"))
-			out.WriteString(fmt.Sprintf("\t\treturn runtime.GetField(v, %q)\n", field))
-			out.WriteString(fmt.Sprintf("\t}\n}()\n"))
-			out.WriteString(fmt.Sprintf("_ = %s\n", field))
-		}
-		return out.String(), nil
-
-	case *LetStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-
-		// Multi-return: let val, err = expr
-		if len(s.Names) > 1 {
-			for _, name := range s.Names {
-				c.declaredVars[name] = true
-			}
-			c.imports[`"fmt"`] = true
-			// Generate a safe call that catches panics and returns (value, error)
-			return fmt.Sprintf("%s, %s := safeCall(func() interface{} { return %s })\n_ = %s\n_ = %s\n",
-				s.Names[0], s.Names[1], val, s.Names[0], s.Names[1]), nil
-		}
-
-		// If already declared in current block scope, assign normal; else declare with var
-		if c.declaredVars[s.Name] {
-			return fmt.Sprintf("%s = %s\n_ = %s\n", s.Name, val, s.Name), nil
-		}
-		c.declaredVars[s.Name] = true
-		goType := "interface{}"
-		if s.Type != "" {
-			goType = toGoType(s.Type)
-			if goType == "interface{}" {
-				// Could be a struct type name
-				goType = "*" + s.Type
-			}
-			c.varTypes[s.Name] = s.Type
-		} else if structLit, ok := s.Value.(*StructLiteral); ok {
-			// Infer struct type from literal
-			goType = "*" + structLit.TypeName
-			c.varTypes[s.Name] = structLit.TypeName
-		} else if callExpr, ok := s.Value.(*CallExpr); ok {
-			// Infer type from function return type
-			if ident, ok := callExpr.Function.(*Identifier); ok {
-				if retType, exists := c.funcReturnTypes[ident.Value]; exists && c.structTypes[retType] {
-					goType = "*" + retType
-					c.varTypes[s.Name] = retType
-				}
-			}
-		} else {
-			inferred := c.getExpressionType(s.Value)
-			if inferred != "interface{}" {
-				goType = inferred
-				c.varTypes[s.Name] = goType
-			}
-		}
-		if c.inFunction {
-			return fmt.Sprintf("var %s %s = %s\n_ = %s\n", s.Name, goType, val, s.Name), nil
-		}
-		// Global let
-		return fmt.Sprintf("var %s %s = %s\n", s.Name, goType, val), nil
-
-	case *ReturnStmt:
-		val, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("return %s\n", val), nil
-
-	case *FnDecl:
-		c.inFunction = true
-		oldConcurrent := c.inConcurrentContext
-		c.inConcurrentContext = hasConcurrency(s.Body)
-
-		// Clear local variables for this function scope
-		oldDeclared := c.declaredVars
-		oldVarTypes := c.varTypes
-		c.declaredVars = make(map[string]bool)
-		c.varTypes = make(map[string]string)
-		for k, v := range oldVarTypes {
-			c.varTypes[k] = v
-		}
-
-		// Build a set of type parameter names for this function
-		typeParamSet := make(map[string]bool)
-		for _, tp := range s.TypeParams {
-			typeParamSet[tp] = true
-		}
-
-		var params []string
-		for i, p := range s.Params {
-			c.declaredVars[p] = true
-			pt := "interface{}"
-			if i < len(s.ParamTypes) && s.ParamTypes[i] != "" {
-				rawType := s.ParamTypes[i]
-				if typeParamSet[rawType] {
-					pt = rawType // generic type param: use as-is
-				} else if strings.HasPrefix(rawType, "[]") && typeParamSet[strings.TrimPrefix(rawType, "[]")] {
-					pt = "[]" + strings.TrimPrefix(rawType, "[]") // slice of generic type
-				} else {
-					pt = toGoType(rawType)
-				}
-				c.varTypes[p] = pt
-			}
-			params = append(params, p+" "+pt)
-		}
-
-		bodyStr, err := c.genBlockStatement(s.Body)
-		if err != nil {
-			return "", err
-		}
-
-		c.declaredVars = oldDeclared
-		c.varTypes = oldVarTypes
-		c.inFunction = false
-		c.inConcurrentContext = oldConcurrent
-
-		retType := "interface{}"
-		if s.ReturnType != "" {
-			if typeParamSet[s.ReturnType] {
-				retType = s.ReturnType
-			} else if strings.HasPrefix(s.ReturnType, "[]") && typeParamSet[strings.TrimPrefix(s.ReturnType, "[]")] {
-				retType = "[]" + strings.TrimPrefix(s.ReturnType, "[]")
-			} else {
-				retType = toGoType(s.ReturnType)
-				if retType == "interface{}" && c.structTypes[s.ReturnType] {
-					retType = "*" + s.ReturnType
-				}
-			}
-		}
-		hasReturn := false
-		if len(s.Body.Statements) > 0 {
-			lastStmt := s.Body.Statements[len(s.Body.Statements)-1]
-			if _, ok := lastStmt.(*ReturnStmt); ok {
-				hasReturn = true
-			}
-		}
-
-		if !hasReturn {
-			if strings.HasSuffix(bodyStr, "}") {
-				bodyStr = bodyStr[:len(bodyStr)-1] + fmt.Sprintf("\treturn %s\n}", zeroValue(retType))
-			}
-		}
-
-		// Generate with type parameters if present
-		typeParamStr := ""
-		if len(s.TypeParams) > 0 {
-			var tps []string
-			for i, tp := range s.TypeParams {
-				constraint := "any"
-				if i < len(s.TypeConstraints) && s.TypeConstraints[i] != "" {
-					constraint = servConstraintToGo(s.TypeConstraints[i])
-				}
-				tps = append(tps, tp+" "+constraint)
-			}
-			typeParamStr = "[" + strings.Join(tps, ", ") + "]"
-		}
-
-		return fmt.Sprintf("func %s%s(%s) %s %s\n\n", s.Name, typeParamStr, strings.Join(params, ", "), retType, bodyStr), nil
-
-	case *TryCatchStmt:
-		oldDeclared := c.declaredVars
-		c.declaredVars = make(map[string]bool)
-		for k, v := range oldDeclared {
-			c.declaredVars[k] = v
-		}
-		c.declaredVars[s.Param] = true
-
-		tryBodyStr, err := c.genBlockStatement(s.TryBody)
-		if err != nil {
-			return "", err
-		}
-
-		catchBodyStr, err := c.genBlockStatement(s.CatchBody)
-		if err != nil {
-			return "", err
-		}
-
-		c.declaredVars = oldDeclared
-
-		return fmt.Sprintf("func() {\n\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\tvar %s interface{} = r\n\t\t\t_ = %s\n\t\t\t%s\n\t\t}\n\t}()\n\t%s\n}()\n", s.Param, s.Param, catchBodyStr, tryBodyStr), nil
-
-	case *ExprStmt:
-		expr, err := c.genExpression(s.Value)
-		if err != nil {
-			return "", err
-		}
-		if !c.inFunction {
-			return fmt.Sprintf("func init() {\n\t%s\n}\n\n", expr), nil
-		}
-		return expr + "\n", nil
-
-	default:
-		return "", fmt.Errorf("unknown statement type: %T", stmt)
-	}
+switch s := stmt.(type) {
+case *ImportStmt:
+return c.genImportStmt(s)
+case *GoPackageImport:
+return c.genGoPackageImport(s)
+case *DeclareModuleStmt:
+return c.genDeclareModuleStmt(s)
+case *ExportStmt:
+return c.genExportStmt(s)
+case *ExternFnStmt:
+return c.genExternFnStmt(s)
+case *EnumStmt:
+return c.genEnumStmt(s)
+case *TypeAliasStmt:
+return c.genTypeAliasStmt(s)
+case *ValidateStmt:
+return c.genValidateStmt(s)
+case *IfStmt:
+return c.genIfStmt(s)
+case *ForStmt:
+return c.genForStmt(s)
+case *StructDecl:
+return c.genStructDecl(s)
+case *MethodDecl:
+return c.genMethodDecl(s)
+case *InterfaceDecl:
+return c.genInterfaceDecl(s)
+case *BrokerStmt:
+return c.genBrokerStmt(s)
+case *ServerStmt:
+return c.genServerStmt(s)
+case *DatabaseStmt:
+return c.genDatabaseStmt(s)
+case *CacheStmt:
+return c.genCacheStmt(s)
+case *MatchStmt:
+return c.genMatchStmt(s)
+case *RouteStmt:
+return c.genRouteStmt(s)
+case *MiddlewareDecl:
+return c.genMiddlewareDecl(s)
+case *WsStmt:
+return c.genWsStmt(s)
+case *ToolStmt:
+return c.genToolStmt(s)
+case *MigrationStmt:
+return c.genMigrationStmt(s)
+case *EveryStmt:
+return c.genEveryStmt(s)
+case *CronStmt:
+return c.genCronStmt(s)
+case *SubscribeStmt:
+return c.genSubscribeStmt(s)
+case *PublishStmt:
+return c.genPublishStmt(s)
+case *SpawnStmt:
+return c.genSpawnStmt(s)
+case *TestStmt:
+return c.genTestStmt(s)
+case *DestructureLetStmt:
+return c.genDestructureLetStmt(s)
+case *LetStmt:
+return c.genLetStmt(s)
+case *ReturnStmt:
+return c.genReturnStmt(s)
+case *FnDecl:
+return c.genFnDecl(s)
+case *TryCatchStmt:
+return c.genTryCatchStmt(s)
+case *ExprStmt:
+return c.genExprStmt(s)
+default:
+return "", fmt.Errorf("unknown statement type: %T", stmt)
+}
 }
 
 func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
-	oldInFunc := c.inFunction
-	c.inFunction = true
-	defer func() { c.inFunction = oldInFunc }()
+oldInFunc := c.inFunction
+c.inFunction = true
+defer func() { c.inFunction = oldInFunc }()
 
-	// Create a new scope for variables declared in this block
-	oldDeclared := c.declaredVars
-	c.declaredVars = make(map[string]bool)
-	for k, v := range oldDeclared {
-		c.declaredVars[k] = v
-	}
-	defer func() { c.declaredVars = oldDeclared }()
-
-	var out bytes.Buffer
-	out.WriteString("{\n")
-	for _, s := range block.Statements {
-		gen, err := c.genStatement(s)
-		if err != nil {
-			return "", err
-		}
-		// Indent lines
-		lines := strings.Split(gen, "\n")
-		for _, line := range lines {
-			if strings.TrimSpace(line) != "" {
-				out.WriteString("\t" + line + "\n")
-			}
-		}
-	}
-	out.WriteString("}")
-	return out.String(), nil
+oldDeclared := c.declaredVars
+c.declaredVars = make(map[string]bool)
+for k, v := range oldDeclared {
+c.declaredVars[k] = v
 }
+defer func() { c.declaredVars = oldDeclared }()
 
+var out bytes.Buffer
+out.WriteString("{\n")
+for _, s := range block.Statements {
+gen, err := c.genStatement(s)
+if err != nil {
+return "", err
+}
+lines := strings.Split(gen, "\n")
+for _, line := range lines {
+if strings.TrimSpace(line) != "" {
+out.WriteString("\t" + line + "\n")
+}
+}
+}
+out.WriteString("}")
+return out.String(), nil
+}
