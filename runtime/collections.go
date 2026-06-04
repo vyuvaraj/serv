@@ -87,7 +87,7 @@ func Push(slice interface{}, elem interface{}) interface{} {
 }
 
 // Contains checks if a slice contains an element.
-func Contains(slice interface{}, target interface{}) interface{} {
+func Contains(slice interface{}, target interface{}) bool {
 	items := toInterfaceSlice(slice)
 	targetStr := fmt.Sprint(target)
 	for _, item := range items {

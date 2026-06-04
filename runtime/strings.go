@@ -27,15 +27,15 @@ func StringReplace(s interface{}, old interface{}, new interface{}) interface{} 
 	return strings.ReplaceAll(fmt.Sprint(s), fmt.Sprint(old), fmt.Sprint(new))
 }
 
-func StringStartsWith(s interface{}, prefix interface{}) interface{} {
+func StringStartsWith(s interface{}, prefix interface{}) bool {
 	return strings.HasPrefix(fmt.Sprint(s), fmt.Sprint(prefix))
 }
 
-func StringEndsWith(s interface{}, suffix interface{}) interface{} {
+func StringEndsWith(s interface{}, suffix interface{}) bool {
 	return strings.HasSuffix(fmt.Sprint(s), fmt.Sprint(suffix))
 }
 
-func StringIncludes(s interface{}, substr interface{}) interface{} {
+func StringIncludes(s interface{}, substr interface{}) bool {
 	return strings.Contains(fmt.Sprint(s), fmt.Sprint(substr))
 }
 
