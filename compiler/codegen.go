@@ -328,6 +328,11 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 			if err != nil {
 				return "", err
 			}
+			// Skip toSlice() if we know the iterable is already a slice type
+			iterType := c.getExpressionType(s.Iterable)
+			if iterType == "[]interface{}" || strings.HasPrefix(iterType, "[]") {
+				return fmt.Sprintf("for _, %s := range %s %s\n", s.Variable, iterStr, bodyStr), nil
+			}
 			return fmt.Sprintf("for _, %s := range toSlice(%s) %s\n", s.Variable, iterStr, bodyStr), nil
 		}
 		// Condition-based loop
@@ -1123,11 +1128,8 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		} else if field == "status" {
 			field = "Status"
 		}
-		// Since objects might be interface{}, we have to perform type assertion or dynamic access.
-		// For our Request / HTTPResponse structs, they are returned statically.
-		// So we cast: if e.Object is req, we do req.Body.
-		// Let's produce a safe Go dynamic field access or standard access:
-		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member access\n\t\t\tval := interface{}(%s)\n\t\t\tswitch v := val.(type) {\n\t\t\tcase runtime.Request:\n\t\t\t\tif %q == \"Body\" { return v.Body }\n\t\t\t\tif %q == \"Method\" { return v.Method }\n\t\t\t\tif %q == \"Path\" { return v.Path }\n\t\t\tcase runtime.HTTPResponse:\n\t\t\t\tif %q == \"Body\" { return v.Body }\n\t\t\t\tif %q == \"Status\" { return v.Status }\n\t\t\tcase *runtime.SafeMap:\n\t\t\t\treturn v.Get(%q)\n\t\t\tcase map[string]interface{}:\n\t\t\t\treturn v[%q]\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, field, field, field, field, field, e.Field, e.Field), nil
+		// Since objects might be interface{}, use runtime helper for dynamic field access
+		return fmt.Sprintf("runtime.MemberAccess(%s, %q)", objStr, e.Field), nil
 
 	case *MemberAssignExpr:
 		objStr, err := c.genExpression(e.Object)
@@ -1544,8 +1546,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			if _, isNil := e.Left.(*NilLiteral); isNil {
 				return fmt.Sprintf("(%s == nil)", rightStr), nil
 			}
-			c.imports[`"fmt"`] = true
-			return fmt.Sprintf("(fmt.Sprintf(\"%%v\", %s) == fmt.Sprintf(\"%%v\", %s))", leftStr, rightStr), nil
+			return fmt.Sprintf("runtime.Equal(%s, %s)", leftStr, rightStr), nil
 		case "!=":
 			// Special case: comparison with nil
 			if _, isNil := e.Right.(*NilLiteral); isNil {
@@ -1554,17 +1555,12 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			if _, isNil := e.Left.(*NilLiteral); isNil {
 				return fmt.Sprintf("(%s != nil)", rightStr), nil
 			}
-			c.imports[`"fmt"`] = true
-			return fmt.Sprintf("(fmt.Sprintf(\"%%v\", %s) != fmt.Sprintf(\"%%v\", %s))", leftStr, rightStr), nil
+			return fmt.Sprintf("!runtime.Equal(%s, %s)", leftStr, rightStr), nil
 		case "<", ">", "<=", ">=":
-			return fmt.Sprintf("(func() bool {\n\t\t\tl, r := interface{}(%s), interface{}(%s)\n\t\t\tswitch lv := l.(type) {\n\t\t\tcase int:\n\t\t\t\tif rv, ok := r.(int); ok { return lv %s rv }\n\t\t\tcase int64:\n\t\t\t\tif rv, ok := r.(int64); ok { return lv %s rv }\n\t\t\tcase float64:\n\t\t\t\tif rv, ok := r.(float64); ok { return lv %s rv }\n\t\t\t}\n\t\t\treturn false\n\t\t}())", leftStr, rightStr, e.Operator, e.Operator, e.Operator), nil
+			return fmt.Sprintf("runtime.Compare(%s, %s, %q)", leftStr, rightStr, e.Operator), nil
 		default:
-			// Arithmetic operators
-			stringCase := ""
-			if e.Operator == "+" {
-				stringCase = fmt.Sprintf("\n\t\t\tcase string:\n\t\t\t\tif r, ok := interface{}(%s).(string); ok {\n\t\t\t\t\treturn l + r\n\t\t\t\t}", rightStr)
-			}
-			return fmt.Sprintf("(func() interface{} {\n\t\t\tswitch l := interface{}(%s).(type) {\n\t\t\tcase int:\n\t\t\t\tif r, ok := interface{}(%s).(int); ok {\n\t\t\t\t\treturn l %s r\n\t\t\t\t}\n\t\t\tcase int64:\n\t\t\t\tif r, ok := interface{}(%s).(int64); ok {\n\t\t\t\t\treturn l %s r\n\t\t\t\t}\n\t\t\tcase float64:\n\t\t\t\tif r, ok := interface{}(%s).(float64); ok {\n\t\t\t\t\treturn l %s r\n\t\t\t\t}%s\n\t\t\t}\n\t\t\treturn nil\n\t\t}())", leftStr, rightStr, e.Operator, rightStr, e.Operator, rightStr, e.Operator, stringCase), nil
+			// Arithmetic operators — use runtime helper instead of inline closure
+			return fmt.Sprintf("runtime.Arith(%s, %s, %q)", leftStr, rightStr, e.Operator), nil
 		}
 
 
@@ -2016,6 +2012,8 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 		return "[]interface{}"
 	case *StringLiteral:
 		return "string"
+	case *FStringLiteral:
+		return "string"
 	case *DurationLiteral:
 		return "string"
 	case *BooleanLiteral:
@@ -2029,6 +2027,27 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 			return t
 		}
 		return "interface{}"
+	case *CallExpr:
+		// Infer return type from known functions
+		if ident, ok := e.Function.(*Identifier); ok {
+			if retType, exists := c.funcReturnTypes[ident.Value]; exists {
+				goType := toGoType(retType)
+				if goType != "interface{}" {
+					return goType
+				}
+			}
+		}
+		return "interface{}"
+	case *MemberExpr:
+		// Known struct field access
+		if ident, ok := e.Object.(*Identifier); ok {
+			if objType, exists := c.varTypes[ident.Value]; exists {
+				if c.structTypes[objType] {
+					return "interface{}" // struct fields are dynamic for now
+				}
+			}
+		}
+		return "interface{}"
 	case *InfixExpr:
 		switch e.Operator {
 		case "==", "!=", "<", ">", "<=", ">=":
@@ -2037,6 +2056,13 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 			lt := c.getExpressionType(e.Left)
 			rt := c.getExpressionType(e.Right)
 			if lt == rt && (lt == "int" || lt == "float64" || lt == "string" || lt == "bool") {
+				return lt
+			}
+			// If one side is a literal and matches the other
+			if lt == "interface{}" && (rt == "int" || rt == "float64" || rt == "string") {
+				return rt
+			}
+			if rt == "interface{}" && (lt == "int" || lt == "float64" || lt == "string") {
 				return lt
 			}
 			return "interface{}"
