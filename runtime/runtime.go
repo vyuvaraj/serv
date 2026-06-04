@@ -1511,6 +1511,11 @@ func StartServer() interface{} {
 	RunMigrations()
 	initOtel()
 
+	// Allow PORT env var to override declared server port (useful for testing/containers)
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		serverPort = envPort
+	}
+
 	if serverPort == "" {
 		serverPort = "2112"
 		LogInfo("No server port specified, starting metrics server on default port 2112")

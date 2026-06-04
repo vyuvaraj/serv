@@ -107,14 +107,15 @@ Write-Host "Phase 3: Server Smoke Tests (start → /health → stop)" -Foregroun
 Write-Host "------------------------------------------------------"
 
 # Files that start a server and have routes we can hit
+# Each uses port 8080, so we override PORT env var to avoid conflicts
 $serverTests = @(
-    @{ File="02_rest_api.srv"; Port="8080"; Endpoints=@("/health") },
-    @{ File="37_structured_logging.srv"; Port="8080"; Endpoints=@("/health", "/api/users") },
-    @{ File="38_destructuring.srv"; Port="8080"; Endpoints=@("/health") },
-    @{ File="39_optional_chaining.srv"; Port="8080"; Endpoints=@("/health", "/api/user") },
-    @{ File="40_spread_operator.srv"; Port="8080"; Endpoints=@("/health", "/api/config") },
-    @{ File="41_new_features.srv"; Port="8080"; Endpoints=@("/health", "/api/status") },
-    @{ File="43_request_validation.srv"; Port="8080"; Endpoints=@("/health") }
+    @{ File="02_rest_api.srv"; Port="9001"; Endpoints=@("/health") },
+    @{ File="37_structured_logging.srv"; Port="9002"; Endpoints=@("/health", "/api/users") },
+    @{ File="38_destructuring.srv"; Port="9003"; Endpoints=@("/health") },
+    @{ File="39_optional_chaining.srv"; Port="9004"; Endpoints=@("/health", "/api/user") },
+    @{ File="40_spread_operator.srv"; Port="9005"; Endpoints=@("/health", "/api/config") },
+    @{ File="41_new_features.srv"; Port="9006"; Endpoints=@("/health", "/api/status") },
+    @{ File="43_request_validation.srv"; Port="9007"; Endpoints=@("/health") }
 )
 
 # Files needing external deps (DB, broker, etc.) — skip server tests
@@ -155,8 +156,10 @@ foreach ($test in $serverTests) {
         continue
     }
 
-    # Start the server in background
+    # Start the server in background with unique port via PORT env var
+    $env:PORT = $port
     $proc = Start-Process -FilePath (Resolve-Path $binPath) -PassThru -WindowStyle Hidden
+    $env:PORT = $null
     Start-Sleep -Seconds 3
 
     if ($proc.HasExited) {
