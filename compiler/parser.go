@@ -627,14 +627,23 @@ func (p *Parser) parseFnDeclaration() Statement {
 	stmt := &FnDecl{Token: fnToken}
 	stmt.Name = firstName
 
-	// Optional type parameters: fn name[T, U](...)
+	// Optional type parameters: fn name[T, U](...) or fn name[T: Comparable, U: Numeric](...)
 	if p.peekToken.Type == TOKEN_LBRACKET {
 		p.nextToken() // consume '['
 		stmt.TypeParams = []string{}
+		stmt.TypeConstraints = []string{}
 		for p.peekToken.Type != TOKEN_RBRACKET && p.peekToken.Type != TOKEN_EOF {
 			p.nextToken()
 			if p.curToken.Type == TOKEN_IDENT {
 				stmt.TypeParams = append(stmt.TypeParams, p.curToken.Literal)
+				// Check for constraint: T: Comparable
+				if p.peekToken.Type == TOKEN_COLON {
+					p.nextToken() // consume ':'
+					p.nextToken() // constraint name
+					stmt.TypeConstraints = append(stmt.TypeConstraints, p.curToken.Literal)
+				} else {
+					stmt.TypeConstraints = append(stmt.TypeConstraints, "")
+				}
 			}
 			if p.peekToken.Type == TOKEN_COMMA {
 				p.nextToken()

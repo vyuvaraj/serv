@@ -814,8 +814,12 @@ func (c *Codegen) genStatement(stmt Statement) (string, error) {
 		typeParamStr := ""
 		if len(s.TypeParams) > 0 {
 			var tps []string
-			for _, tp := range s.TypeParams {
-				tps = append(tps, tp+" any")
+			for i, tp := range s.TypeParams {
+				constraint := "any"
+				if i < len(s.TypeConstraints) && s.TypeConstraints[i] != "" {
+					constraint = servConstraintToGo(s.TypeConstraints[i])
+				}
+				tps = append(tps, tp+" "+constraint)
 			}
 			typeParamStr = "[" + strings.Join(tps, ", ") + "]"
 		}
@@ -1523,6 +1527,12 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return fmt.Sprintf("(%s %s %s)", leftStr, e.Operator, rightStr), nil
 		}
 
+		// Generic type params: if both sides have the same type param (e.g., T),
+		// the Go compiler can handle direct operations since constraints enforce it
+		if lt == rt && lt != "interface{}" && lt != "" && len(lt) <= 2 && lt[0] >= 'A' && lt[0] <= 'Z' {
+			return fmt.Sprintf("(%s %s %s)", leftStr, e.Operator, rightStr), nil
+		}
+
 		// Since operands are interface{} in Serv, we add a utility to add/concatenate/compare if needed.
 		// Comparison operators return bool; arithmetic operators return numeric/string.
 		switch e.Operator {
@@ -1948,6 +1958,31 @@ func toGoType(t string) string {
 			return "[]" + elemType
 		}
 		return "interface{}"
+	}
+}
+
+// servConstraintToGo maps Serv constraint names to Go constraint interfaces.
+func servConstraintToGo(constraint string) string {
+	switch constraint {
+	case "Comparable", "comparable":
+		return "comparable"
+	case "Numeric", "numeric":
+		return "~int | ~int64 | ~float64"
+	case "Integer", "integer":
+		return "~int | ~int64 | ~int32 | ~uint | ~uint64"
+	case "Float", "float":
+		return "~float32 | ~float64"
+	case "Ordered", "ordered":
+		return "~int | ~int64 | ~float64 | ~string"
+	case "Signed", "signed":
+		return "~int | ~int64 | ~int32 | ~float64"
+	case "Unsigned", "unsigned":
+		return "~uint | ~uint64 | ~uint32"
+	case "Stringer", "stringer":
+		return "fmt.Stringer"
+	default:
+		// Custom constraint — pass through as-is (user-defined interface)
+		return constraint
 	}
 }
 

@@ -32,7 +32,7 @@ Tracking remaining work to make Serv production-ready and competitive.
 | ✅ | Spread operator | `let merged = { ...defaults, ...overrides }` | Medium |
 | ✅ | Enums with values | `enum Status { Active = 1, Inactive = 2 }` | Low |
 | ✅ | Type aliases | `type UserID = int` | Low |
-| ⬜ | Generic constraints | `fn sort[T: Comparable](items: []T)` | Low |
+| ✅ | Generic constraints | `fn sort[T: Comparable](items: []T)` | Low |
 
 ---
 
