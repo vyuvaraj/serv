@@ -166,7 +166,7 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 | 6.3 | **Signature help** | Medium | ✅ Done — shows params on `(` and `,` triggers |
 | 6.4 | **Find references / rename** | Large | ⬜ Not started |
 | 6.5 | **Semantic diagnostics** | Medium | ✅ Done — static analysis warnings shown in real time |
-| 6.6 | **`serv fmt` integration** | Small | ⬜ Not started |
+| 6.6 | **`serv fmt` integration** | Small | ✅ Done — format-on-save via LSP documentFormatting |
 
 ### Phase 7: Testing Framework (Medium Priority)
 
@@ -188,13 +188,13 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 
 ### Phase 9: Distribution & Ecosystem (Low Priority)
 
-| # | Item | Effort | Rationale |
-|---|------|--------|-----------|
-| 9.1 | **Homebrew formula + Scoop manifest** | Small | Standard distribution channels. |
-| 9.2 | **VS Code extension publish** | Small | Already have the extension, just needs marketplace packaging. |
-| 9.3 | **Web playground** | Medium | Try-before-install is a major adoption driver. Use WASM or server-side compilation. |
-| 9.4 | **Docker base image** | Small | `FROM serv:latest` with Go toolchain pre-installed. |
-| 9.5 | **Community package registry** | Large | Central registry for third-party `.srv` modules. Far future. |
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| 9.1 | **Homebrew formula + Scoop manifest** | Small | ✅ Done — in release-scripts/ |
+| 9.2 | **VS Code extension publish** | Small | ✅ Done — publish script in release-scripts/ |
+| 9.3 | **Web playground** | Medium | ⬜ Not started |
+| 9.4 | **Docker base image** | Small | ✅ Done — Dockerfile.base in release-scripts/docker/ |
+| 9.5 | **Community package registry** | Large | ⬜ Not started |
 
 ---
 
