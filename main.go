@@ -145,6 +145,9 @@ func main() {
 	case "repl":
 		runREPL()
 
+	case "init":
+		initProject()
+
 	default:
 		printUsage()
 	}
@@ -153,14 +156,87 @@ func main() {
 func printUsage() {
 	fmt.Println("Serv: A Programming Language for Background Services")
 	fmt.Println("Usage:")
+	fmt.Println("  serv init [name]                           Create a new Serv project")
 	fmt.Println("  serv build <file.srv> [-o <output_binary>]  Compile Serv code to native binary")
 	fmt.Println("  serv run <file.srv> [--watch]              Compile and run Serv code immediately (with optional hot reload)")
-	fmt.Println("  serv test <file.srv>                       Run tests defined in a Serv file")
-	fmt.Println("  serv lint <file.srv>                       Validate syntax of a Serv file")
+	fmt.Println("  serv test [--cover] <file.srv>             Run tests defined in a Serv file")
+	fmt.Println("  serv lint <file.srv>                       Validate syntax and check for errors")
 	fmt.Println("  serv fmt <file.srv>                        Format a Serv file")
 	fmt.Println("  serv repl                                  Interactive shell for quick experiments")
 	fmt.Println("  serv add <go-package>                      Generate .srv.d declaration for a Go package")
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
+}
+
+func initProject() {
+	name := "my-service"
+	if len(os.Args) >= 3 {
+		name = os.Args[2]
+	}
+
+	// Create project directory
+	if err := os.MkdirAll(name, 0755); err != nil {
+		fmt.Printf("Failed to create directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// main.srv
+	mainSrv := `import { ok } from "stdlib/response"
+
+server "8080"
+
+route "GET" "/health" (req) {
+    return ok({ "status": "healthy" })
+}
+
+route "GET" "/api/hello" (req) {
+    let name = req.params.name
+    if name == nil {
+        return ok({ "message": "Hello, world!" })
+    }
+    return ok({ "message": f"Hello, {name}!" })
+}
+`
+	if err := os.WriteFile(filepath.Join(name, "main.srv"), []byte(mainSrv), 0644); err != nil {
+		fmt.Printf("Failed to write main.srv: %v\n", err)
+		os.Exit(1)
+	}
+
+	// config.yml
+	configYml := `server:
+  port: "8080"
+
+log:
+  level: "info"
+  format: "text"
+`
+	if err := os.WriteFile(filepath.Join(name, "config.yml"), []byte(configYml), 0644); err != nil {
+		fmt.Printf("Failed to write config.yml: %v\n", err)
+		os.Exit(1)
+	}
+
+	// test file
+	testSrv := `test "health check returns ok" {
+    // TODO: add your tests here
+    assert true
+}
+`
+	if err := os.WriteFile(filepath.Join(name, "main_test.srv"), []byte(testSrv), 0644); err != nil {
+		fmt.Printf("Failed to write main_test.srv: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✓ Created project: %s/\n", name)
+	fmt.Println("")
+	fmt.Println("  Files:")
+	fmt.Println("    main.srv       — Your service (routes, logic)")
+	fmt.Println("    main_test.srv  — Tests")
+	fmt.Println("    config.yml     — Runtime configuration")
+	fmt.Println("")
+	fmt.Println("  Get started:")
+	fmt.Printf("    cd %s\n", name)
+	fmt.Println("    serv run main.srv --watch")
+	fmt.Println("")
+	fmt.Println("  Then visit: http://localhost:8080/health")
 }
 
 func runLint(srvFile string) {
