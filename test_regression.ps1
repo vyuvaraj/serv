@@ -200,7 +200,11 @@ Write-Host ""
 if ($fail -gt 0) {
     Write-Host "Failed tests:" -ForegroundColor Red
     $results | Where-Object { $_.Status -eq "FAIL" } | ForEach-Object { Write-Host "  - $($_.Name): $($_.Detail)" -ForegroundColor Red }
-    exit 1
 }
 
+# Final cleanup — remove any leftover test binaries
+Remove-Item examples\smoke_*.exe -ErrorAction SilentlyContinue
+Remove-Item examples\regression_test.exe -ErrorAction SilentlyContinue
+
+if ($fail -gt 0) { exit 1 }
 exit 0
