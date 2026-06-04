@@ -143,7 +143,7 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| 4.1 | **Replace panic/recover with error returns** | Large | 🟡 Partial — try/catch still uses panic/recover for compat, but `?` operator uses proper error returns |
+| 4.1 | **Replace panic/recover with error returns** | Large | ✅ Done — DBQuery, HTTPGet, HTTPPost, JSONParse, CacheGet/Set, MongoDB ops all return error tuples |
 | 4.2 | **`?` operator for error propagation** | Medium | ✅ Done — `let data = fetchData()?` returns early on error |
 | 4.3 | **Result type in stdlib** | Small | ⬜ Not started |
 
