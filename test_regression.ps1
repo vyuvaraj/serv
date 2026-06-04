@@ -58,7 +58,7 @@ foreach ($file in $examples) {
         Write-Result $file.Name "FAIL" "compilation failed"
     }
 }
-Remove-Item regression_test.exe -ErrorAction SilentlyContinue
+Remove-Item examples\regression_test.exe -ErrorAction SilentlyContinue
 Write-Host ""
 
 if ($CompileOnly) {
@@ -127,10 +127,14 @@ $needsExternal = @(
 foreach ($test in $serverTests) {
     $file = "examples\$($test.File)"
     $port = $test.Port
-    $binPath = "smoke_test_$($test.Port).exe"
+    $binName = "smoke_test.exe"
+    $binPath = "examples\$binName"
 
-    # Build
-    $null = & .\serv.exe build $file -o $binPath 2>&1
+    # Clean previous
+    Remove-Item $binPath -ErrorAction SilentlyContinue
+
+    # Build (serv places output relative to the .srv file's directory)
+    $null = & .\serv.exe build $file -o $binName 2>&1
     if ($LASTEXITCODE -ne 0) {
         $fail++
         Write-Result "$($test.File) (smoke)" "FAIL" "build failed"
@@ -139,7 +143,7 @@ foreach ($test in $serverTests) {
 
     if (-not (Test-Path $binPath)) {
         $fail++
-        Write-Result "$($test.File) (smoke)" "FAIL" "binary not found after build"
+        Write-Result "$($test.File) (smoke)" "FAIL" "binary not found at $binPath"
         continue
     }
 
@@ -181,7 +185,6 @@ foreach ($test in $serverTests) {
     }
 }
 
-Remove-Item smoke_test_*.exe -ErrorAction SilentlyContinue
 Write-Host ""
 
 # --- Summary ---
