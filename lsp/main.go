@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -204,12 +205,16 @@ func (s *Server) handleMessage(msg JSONRPCMessage) {
 		s.handleHover(msg)
 	case "textDocument/definition":
 		s.handleDefinition(msg)
+	case "textDocument/references":
+		s.handleReferences(msg)
 	case "textDocument/documentSymbol":
 		s.handleDocumentSymbol(msg)
 	case "textDocument/signatureHelp":
 		s.handleSignatureHelp(msg)
 	case "textDocument/formatting":
 		s.handleFormatting(msg)
+	case "textDocument/codeAction":
+		s.handleCodeAction(msg)
 	}
 }
 
@@ -222,8 +227,10 @@ func (s *Server) handleInitialize(msg JSONRPCMessage) {
 			},
 			"hoverProvider":              true,
 			"definitionProvider":         true,
+			"referencesProvider":         true,
 			"documentSymbolProvider":     true,
 			"documentFormattingProvider": true,
+			"codeActionProvider":         true,
 			"signatureHelpProvider": map[string]interface{}{
 				"triggerCharacters":   []string{"(", ","},
 				"retriggerCharacters": []string{","},
@@ -231,7 +238,7 @@ func (s *Server) handleInitialize(msg JSONRPCMessage) {
 		},
 		"serverInfo": map[string]interface{}{
 			"name":    "serv-lsp",
-			"version": "2.0.0",
+			"version": "3.0.0",
 		},
 	}
 	sendResponse(msg.ID, result)
@@ -536,6 +543,12 @@ func (s *Server) handleDefinition(msg JSONRPCMessage) {
 	text := s.documents[params.TextDocument.URI]
 	syms := s.symbols[params.TextDocument.URI]
 	s.mu.RUnlock()
+
+	// Check if cursor is on an import path string (e.g. "handlers/notifier.srv")
+	if loc := s.resolveImportAtPosition(params.TextDocument.URI, text, params.Position); loc != nil {
+		sendResponse(msg.ID, loc)
+		return
+	}
 
 	word := getWordAtPosition(text, params.Position)
 	if word == "" {
@@ -964,6 +977,262 @@ func countNetBracesLSP(line string) int {
 		}
 	}
 	return net
+}
+
+// --- Find References ---
+
+func (s *Server) handleReferences(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+		Position     Position               `json:"position"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	s.mu.RLock()
+	text := s.documents[params.TextDocument.URI]
+	s.mu.RUnlock()
+
+	word := getWordAtPosition(text, params.Position)
+	if word == "" {
+		sendResponse(msg.ID, []interface{}{})
+		return
+	}
+
+	var locations []Location
+
+	// Search all open documents for references to this symbol
+	s.mu.RLock()
+	for uri, docText := range s.documents {
+		lines := strings.Split(docText, "\n")
+		for lineNum, line := range lines {
+			// Find all occurrences of the word in this line
+			idx := 0
+			for {
+				pos := strings.Index(line[idx:], word)
+				if pos < 0 {
+					break
+				}
+				col := idx + pos
+				// Check it's a whole word (not part of a larger identifier)
+				isBoundary := true
+				if col > 0 && isWordChar(line[col-1]) {
+					isBoundary = false
+				}
+				endCol := col + len(word)
+				if endCol < len(line) && isWordChar(line[endCol]) {
+					isBoundary = false
+				}
+				if isBoundary {
+					locations = append(locations, Location{
+						URI: uri,
+						Range: Range{
+							Start: Position{Line: lineNum, Character: col},
+							End:   Position{Line: lineNum, Character: endCol},
+						},
+					})
+				}
+				idx = col + len(word)
+			}
+		}
+	}
+	s.mu.RUnlock()
+
+	sendResponse(msg.ID, locations)
+}
+
+// --- Code Actions ---
+
+func (s *Server) handleCodeAction(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+		Range        Range                  `json:"range"`
+		Context      struct {
+			Diagnostics []Diagnostic `json:"diagnostics"`
+		} `json:"context"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	var actions []map[string]interface{}
+
+	// Generate quick fixes based on diagnostics
+	for _, diag := range params.Context.Diagnostics {
+		// "variable 'x' is declared but never used" → offer to remove the line
+		if strings.Contains(diag.Message, "is declared but never used") {
+			// Extract variable name
+			varName := ""
+			if start := strings.Index(diag.Message, "'"); start >= 0 {
+				end := strings.Index(diag.Message[start+1:], "'")
+				if end >= 0 {
+					varName = diag.Message[start+1 : start+1+end]
+				}
+			}
+			if varName != "" {
+				actions = append(actions, map[string]interface{}{
+					"title": fmt.Sprintf("Remove unused variable '%s'", varName),
+					"kind":  "quickfix",
+					"edit": map[string]interface{}{
+						"changes": map[string]interface{}{
+							params.TextDocument.URI: []map[string]interface{}{
+								{
+									"range": map[string]interface{}{
+										"start": map[string]interface{}{"line": diag.Range.Start.Line, "character": 0},
+										"end":   map[string]interface{}{"line": diag.Range.Start.Line + 1, "character": 0},
+									},
+									"newText": "",
+								},
+							},
+						},
+					},
+				})
+			}
+		}
+
+		// "cannot assign nil to non-optional type 'X'" → offer to make it optional
+		if strings.Contains(diag.Message, "cannot assign nil to non-optional type") {
+			typeName := ""
+			if start := strings.Index(diag.Message, "'"); start >= 0 {
+				end := strings.Index(diag.Message[start+1:], "'")
+				if end >= 0 {
+					typeName = diag.Message[start+1 : start+1+end]
+				}
+			}
+			if typeName != "" {
+				s.mu.RLock()
+				text := s.documents[params.TextDocument.URI]
+				s.mu.RUnlock()
+
+				lines := strings.Split(text, "\n")
+				if diag.Range.Start.Line < len(lines) {
+					line := lines[diag.Range.Start.Line]
+					// Replace ": type" with ": type?"
+					newLine := strings.Replace(line, ": "+typeName+" ", ": "+typeName+"? ", 1)
+					if newLine != line {
+						actions = append(actions, map[string]interface{}{
+							"title": fmt.Sprintf("Make type optional (%s?)", typeName),
+							"kind":  "quickfix",
+							"edit": map[string]interface{}{
+								"changes": map[string]interface{}{
+									params.TextDocument.URI: []map[string]interface{}{
+										{
+											"range": map[string]interface{}{
+												"start": map[string]interface{}{"line": diag.Range.Start.Line, "character": 0},
+												"end":   map[string]interface{}{"line": diag.Range.Start.Line, "character": len(line)},
+											},
+											"newText": newLine,
+										},
+									},
+								},
+							},
+						})
+					}
+				}
+			}
+		}
+	}
+
+	sendResponse(msg.ID, actions)
+}
+
+// --- Import Path Resolution ---
+
+func (s *Server) resolveImportAtPosition(uri, text string, pos Position) *Location {
+	lines := strings.Split(text, "\n")
+	if pos.Line >= len(lines) {
+		return nil
+	}
+	line := lines[pos.Line]
+
+	// Check if this line is an import statement with a string path
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "import") {
+		return nil
+	}
+
+	// Find the quoted path on this line
+	firstQuote := strings.Index(line, "\"")
+	if firstQuote < 0 {
+		return nil
+	}
+	lastQuote := strings.LastIndex(line, "\"")
+	if lastQuote <= firstQuote {
+		return nil
+	}
+
+	// Check if cursor is within or near the quoted string
+	if pos.Character < firstQuote || pos.Character > lastQuote {
+		return nil
+	}
+
+	importPath := line[firstQuote+1 : lastQuote]
+
+	// Resolve the path relative to the current file
+	currentFilePath := uriToFilePath(uri)
+	if currentFilePath == "" {
+		return nil
+	}
+
+	// Add .srv extension if missing
+	if !strings.HasSuffix(importPath, ".srv") && !strings.HasSuffix(importPath, ".srv.d") {
+		importPath = importPath + ".srv"
+	}
+
+	// Try resolving relative to current file
+	resolved := filepath.Join(filepath.Dir(currentFilePath), importPath)
+	if _, err := os.Stat(resolved); err == nil {
+		return &Location{
+			URI: filePathToURI(resolved),
+			Range: Range{
+				Start: Position{Line: 0, Character: 0},
+				End:   Position{Line: 0, Character: 0},
+			},
+		}
+	}
+
+	// Try stdlib resolution (relative to serv binary)
+	if strings.HasPrefix(importPath, "stdlib/") {
+		if exePath, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exePath), importPath)
+			if _, err := os.Stat(candidate); err == nil {
+				return &Location{
+					URI: filePathToURI(candidate),
+					Range: Range{
+						Start: Position{Line: 0, Character: 0},
+						End:   Position{Line: 0, Character: 0},
+					},
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func uriToFilePath(uri string) string {
+	// file:///C:/path/to/file.srv -> C:/path/to/file.srv
+	path := strings.TrimPrefix(uri, "file:///")
+	path = strings.TrimPrefix(path, "file://")
+	// Handle URL encoding
+	path = strings.ReplaceAll(path, "%20", " ")
+	path = strings.ReplaceAll(path, "%3A", ":")
+	// On Windows, paths start with drive letter
+	if len(path) > 2 && path[1] == ':' {
+		return path
+	}
+	// On Unix, add leading /
+	if !strings.HasPrefix(path, "/") {
+		return "/" + path
+	}
+	return path
+}
+
+func filePathToURI(path string) string {
+	abs, _ := filepath.Abs(path)
+	abs = filepath.ToSlash(abs)
+	// Windows: C:/path -> file:///C:/path
+	if len(abs) > 1 && abs[1] == ':' {
+		return "file:///" + abs
+	}
+	return "file://" + abs
 }
 
 // --- Helpers ---
