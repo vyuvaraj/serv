@@ -182,7 +182,14 @@ func initProject() {
 	// main.srv
 	mainSrv := `server "8080"
 
-route "GET" "/api/hello" (req) {
+// Path parameter: curl http://localhost:8080/api/hello/Alice
+route "GET" "/api/hello/:name" (req) {
+    let name = req.params.name
+    return { "message": f"Hello, {name}!" }
+}
+
+// Query parameter: curl http://localhost:8080/api/greet?name=Bob
+route "GET" "/api/greet" (req) {
     let name = req.params.name
     if name == nil {
         return { "message": "Hello, world!" }
