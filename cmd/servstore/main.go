@@ -46,6 +46,9 @@ func main() {
 	raftPort := flag.Int("raft-port", 8090, "Port for Raft consensus TCP transport")
 	raftBootstrap := flag.Bool("raft-bootstrap", false, "Bootstrap this node as the Raft cluster leader")
 	replicationFactor := flag.Int("replication-factor", 2, "Number of data replicas to maintain across the cluster")
+	erasureCoding := flag.Bool("erasure-coding", false, "Enable Reed-Solomon Erasure Coding instead of replication")
+	dataShards := flag.Int("data-shards", 2, "Number of data shards for Erasure Coding")
+	parityShards := flag.Int("parity-shards", 1, "Number of parity shards for Erasure Coding")
 	flag.Parse()
 
 	// Initialize OpenTelemetry Tracing (inspired by serv-lang)
@@ -145,9 +148,9 @@ func main() {
 	}
 
 	// Create S3 Gateway
-	gateway := s3.NewGateway(store, authProvider, raftNode, clusterMgr, *replicationFactor)
+	gateway := s3.NewGateway(store, authProvider, raftNode, clusterMgr, *replicationFactor, *erasureCoding, *dataShards, *parityShards)
 
-	if clusterMgr != nil {
+	if clusterMgr != nil && !*erasureCoding {
 		healer := cluster.NewHealingManager(store, clusterMgr, *replicationFactor, *accessKey, *secretKey)
 		healer.Start(context.Background(), 10*time.Second)
 	}

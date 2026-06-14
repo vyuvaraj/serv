@@ -1,7 +1,10 @@
 package s3
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -17,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/klauspost/reedsolomon"
 	"servstore/pkg/auth"
 	"servstore/pkg/cluster"
 	"servstore/pkg/metrics"
@@ -30,11 +34,20 @@ type Gateway struct {
 	raftNode          *cluster.RaftNode
 	cluster           *cluster.MembershipManager
 	replicationFactor int
+	erasureEnabled    bool
+	dataShards        int
+	parityShards      int
 }
 
-func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *cluster.RaftNode, clusterMgr *cluster.MembershipManager, replicationFactor int) *Gateway {
+func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *cluster.RaftNode, clusterMgr *cluster.MembershipManager, replicationFactor int, erasureEnabled bool, dataShards, parityShards int) *Gateway {
 	if replicationFactor <= 0 {
 		replicationFactor = 2
+	}
+	if dataShards <= 0 {
+		dataShards = 2
+	}
+	if parityShards <= 0 {
+		parityShards = 1
 	}
 	return &Gateway{
 		store:             store,
@@ -42,6 +55,9 @@ func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *
 		raftNode:          raftNode,
 		cluster:           clusterMgr,
 		replicationFactor: replicationFactor,
+		erasureEnabled:    erasureEnabled,
+		dataShards:        dataShards,
+		parityShards:      parityShards,
 	}
 }
 
@@ -143,35 +159,55 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse bucket and key
 	bucket, key := parsePath(r.URL.Path)
 
+	if r.Header.Get("X-ServStore-Shard-Index") != "" {
+		shardIdx := r.Header.Get("X-ServStore-Shard-Index")
+		key = key + ".shard." + shardIdx
+	}
+
 	if bucket != "" && key != "" && r.Header.Get("X-ServStore-Replicated") != "true" {
-		if g.cluster != nil {
-			ring := g.cluster.Ring()
-			if ring != nil {
-				owners, err := ring.GetNodes(bucket+"/"+key, g.replicationFactor)
-				if err == nil && len(owners) > 0 {
-					var targetOwner string
-					var targetAddr string
-					for _, owner := range owners {
-						if g.cluster.IsNodeOnline(owner) {
-							targetOwner = owner
-							addr, exists := g.cluster.GetNodeAddress(owner)
-							if exists {
-								targetAddr = addr
-								break
+		if g.erasureEnabled && g.cluster != nil {
+			if r.Method == http.MethodPut {
+				g.handlePutObjectErasure(w, r, bucket, key)
+				return
+			}
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				g.handleGetObjectErasure(w, r, bucket, key)
+				return
+			}
+			if r.Method == http.MethodDelete {
+				g.handleDeleteObjectErasure(w, r, bucket, key)
+				return
+			}
+		} else {
+			if g.cluster != nil {
+				ring := g.cluster.Ring()
+				if ring != nil {
+					owners, err := ring.GetNodes(bucket+"/"+key, g.replicationFactor)
+					if err == nil && len(owners) > 0 {
+						var targetOwner string
+						var targetAddr string
+						for _, owner := range owners {
+							if g.cluster.IsNodeOnline(owner) {
+								targetOwner = owner
+								addr, exists := g.cluster.GetNodeAddress(owner)
+								if exists {
+									targetAddr = addr
+									break
+								}
 							}
 						}
-					}
 
-					if targetOwner != "" {
-						if targetOwner != g.cluster.LocalNodeID() {
-							slog.Info("Proxying request to online owner node", "bucket", bucket, "key", key, "owner", targetOwner, "addr", targetAddr)
-							g.proxyRequest(w, r, targetAddr)
+						if targetOwner != "" {
+							if targetOwner != g.cluster.LocalNodeID() {
+								slog.Info("Proxying request to online owner node", "bucket", bucket, "key", key, "owner", targetOwner, "addr", targetAddr)
+								g.proxyRequest(w, r, targetAddr)
+								return
+							}
+							// Local node is the first online owner, fall through
+						} else {
+							g.writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "All replica nodes for this object are offline")
 							return
 						}
-						// Local node is the first online owner, fall through
-					} else {
-						g.writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "All replica nodes for this object are offline")
-						return
 					}
 				}
 			}
@@ -1207,5 +1243,397 @@ func (g *Gateway) proxyRequest(w http.ResponseWriter, r *http.Request, targetAdd
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+func (g *Gateway) handlePutObjectErasure(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to read request body: "+err.Error())
+		return
+	}
+	originalSize := int64(len(data))
+
+	enc, err := reedsolomon.New(g.dataShards, g.parityShards)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to create Reed-Solomon encoder: "+err.Error())
+		return
+	}
+
+	shards, err := enc.Split(data)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to split data: "+err.Error())
+		return
+	}
+
+	err = enc.Encode(shards)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to encode parity shards: "+err.Error())
+		return
+	}
+
+	versionID := g.cluster.LocalNodeID() + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	if headerVer := r.Header.Get("X-ServStore-Version-Id"); headerVer != "" {
+		versionID = headerVer
+	}
+
+	ring := g.cluster.Ring()
+	if ring == nil {
+		g.writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "Cluster ring is unavailable")
+		return
+	}
+
+	totalShards := g.dataShards + g.parityShards
+	owners, err := ring.GetNodes(bucket+"/"+key, totalShards)
+	if err != nil || len(owners) < totalShards {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Not enough nodes available for erasure coding placement")
+		return
+	}
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, totalShards)
+
+	for i := 0; i < totalShards; i++ {
+		owner := owners[i]
+		shardData := shards[i]
+		shardIndex := i
+
+		wg.Add(1)
+		go func(nodeID string, data []byte, index int) {
+			defer wg.Done()
+			err := g.writeShardToNode(r.Context(), bucket, key, versionID, originalSize, index, data, nodeID)
+			if err != nil {
+				errChan <- err
+			}
+		}(owner, shardData, shardIndex)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	if len(errChan) > g.parityShards {
+		firstErr := <-errChan
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Erasure write failed (too many shard failures): "+firstErr.Error())
+		return
+	}
+
+	h := md5.New()
+	h.Write(data)
+	etag := hex.EncodeToString(h.Sum(nil))
+
+	w.Header().Set("ETag", `"`+etag+`"`)
+	w.Header().Set("x-amz-version-id", versionID)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) writeShardToNode(ctx context.Context, bucket, key, versionID string, originalSize int64, shardIndex int, shardData []byte, nodeID string) error {
+	if nodeID == g.cluster.LocalNodeID() {
+		localKey := key + ".shard." + strconv.Itoa(shardIndex)
+		contentType := fmt.Sprintf("application/octet-stream; original-size=%d", originalSize)
+
+		localCtx := context.WithValue(ctx, storage.VersionIDContextKey, versionID)
+		_, err := g.store.PutObject(localCtx, bucket, localKey, bytes.NewReader(shardData), int64(len(shardData)), contentType)
+		return err
+	}
+
+	addr, exists := g.cluster.GetNodeAddress(nodeID)
+	if !exists {
+		return fmt.Errorf("node %s address not found", nodeID)
+	}
+
+	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+		addr = "http://" + addr
+	}
+	targetURL := fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(addr, "/"), bucket, key)
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", targetURL, bytes.NewReader(shardData))
+	if err != nil {
+		return err
+	}
+	req.ContentLength = int64(len(shardData))
+	req.Header.Set("Content-Type", fmt.Sprintf("application/octet-stream; original-size=%d", originalSize))
+	req.Header.Set("X-ServStore-Replicated", "true")
+	req.Header.Set("X-ServStore-Shard-Index", strconv.Itoa(shardIndex))
+	req.Header.Set("X-ServStore-Version-Id", versionID)
+
+	accessKey, secretKey := g.auth.GetAdminCredentials()
+	req.SetBasicAuth(accessKey, secretKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("node %s returned %d: %s", nodeID, resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (g *Gateway) handleGetObjectErasure(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	ring := g.cluster.Ring()
+	if ring == nil {
+		g.writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "Cluster ring is unavailable")
+		return
+	}
+
+	totalShards := g.dataShards + g.parityShards
+	owners, err := ring.GetNodes(bucket+"/"+key, totalShards)
+	if err != nil || len(owners) < totalShards {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Not enough nodes available for erasure coding placement")
+		return
+	}
+
+	var wg sync.WaitGroup
+	shards := make([][]byte, totalShards)
+	var originalSize int64
+	var contentType string
+	var versionID string
+	var finalETag string
+
+	mu := sync.Mutex{}
+
+	for i := 0; i < totalShards; i++ {
+		owner := owners[i]
+		shardIndex := i
+
+		wg.Add(1)
+		go func(nodeID string, index int) {
+			defer wg.Done()
+			data, size, mimeType, verID, etag, err := g.readShardFromNode(r.Context(), bucket, key, r.URL.Query().Get("versionId"), index, nodeID)
+			if err == nil {
+				mu.Lock()
+				shards[index] = data
+				if size > 0 {
+					originalSize = size
+				}
+				if mimeType != "" {
+					contentType = mimeType
+				}
+				if verID != "" {
+					versionID = verID
+				}
+				if etag != "" {
+					finalETag = etag
+				}
+				mu.Unlock()
+			} else {
+				slog.Warn("Failed to read shard", "node", nodeID, "index", index, "error", err)
+			}
+		}(owner, shardIndex)
+	}
+
+	wg.Wait()
+
+	retrievedCount := 0
+	for _, s := range shards {
+		if s != nil {
+			retrievedCount++
+		}
+	}
+
+	if retrievedCount < g.dataShards {
+		g.writeError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist or has too many missing shards to reconstruct")
+		return
+	}
+
+	enc, err := reedsolomon.New(g.dataShards, g.parityShards)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to create Reed-Solomon encoder: "+err.Error())
+		return
+	}
+
+	err = enc.Reconstruct(shards)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to reconstruct shards: "+err.Error())
+		return
+	}
+
+	var buf bytes.Buffer
+	err = enc.Join(&buf, shards, int(originalSize))
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to join reconstructed data: "+err.Error())
+		return
+	}
+
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", strconv.FormatInt(originalSize, 10))
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("ETag", `"`+finalETag+`"`)
+		if versionID != "" && versionID != "null" {
+			w.Header().Set("x-amz-version-id", versionID)
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Content-Length", strconv.FormatInt(originalSize, 10))
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("ETag", `"`+finalETag+`"`)
+	if versionID != "" && versionID != "null" {
+		w.Header().Set("x-amz-version-id", versionID)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
+}
+
+func (g *Gateway) readShardFromNode(ctx context.Context, bucket, key, versionID string, shardIndex int, nodeID string) ([]byte, int64, string, string, string, error) {
+	if nodeID == g.cluster.LocalNodeID() {
+		localKey := key + ".shard." + strconv.Itoa(shardIndex)
+		reader, obj, err := g.store.GetObject(ctx, bucket, localKey, versionID)
+		if err != nil {
+			return nil, 0, "", "", "", err
+		}
+		defer reader.Close()
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, 0, "", "", "", err
+		}
+
+		originalSize := int64(0)
+		contentType := obj.ContentType
+		if idx := strings.Index(obj.ContentType, "original-size="); idx != -1 {
+			fmt.Sscanf(obj.ContentType[idx:], "original-size=%d", &originalSize)
+			if semicolonIdx := strings.Index(obj.ContentType, ";"); semicolonIdx != -1 {
+				contentType = strings.TrimSpace(obj.ContentType[:semicolonIdx])
+			}
+		}
+
+		return data, originalSize, contentType, obj.VersionID, obj.ETag, nil
+	}
+
+	addr, exists := g.cluster.GetNodeAddress(nodeID)
+	if !exists {
+		return nil, 0, "", "", "", fmt.Errorf("node %s address not found", nodeID)
+	}
+
+	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+		addr = "http://" + addr
+	}
+	targetURL := fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(addr, "/"), bucket, key)
+	if versionID != "" {
+		targetURL += "?versionId=" + versionID
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
+	if err != nil {
+		return nil, 0, "", "", "", err
+	}
+	req.Header.Set("X-ServStore-Replicated", "true")
+	req.Header.Set("X-ServStore-Shard-Index", strconv.Itoa(shardIndex))
+
+	accessKey, secretKey := g.auth.GetAdminCredentials()
+	req.SetBasicAuth(accessKey, secretKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, "", "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0, "", "", "", fmt.Errorf("node %s returned status %d", nodeID, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, "", "", "", err
+	}
+
+	rawContentType := resp.Header.Get("Content-Type")
+	originalSize := int64(0)
+	contentType := rawContentType
+	if idx := strings.Index(rawContentType, "original-size="); idx != -1 {
+		fmt.Sscanf(rawContentType[idx:], "original-size=%d", &originalSize)
+		if semicolonIdx := strings.Index(rawContentType, ";"); semicolonIdx != -1 {
+			contentType = strings.TrimSpace(rawContentType[:semicolonIdx])
+		}
+	}
+
+	etag := strings.Trim(resp.Header.Get("ETag"), `"`)
+	verID := resp.Header.Get("x-amz-version-id")
+
+	return data, originalSize, contentType, verID, etag, nil
+}
+
+func (g *Gateway) handleDeleteObjectErasure(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	ring := g.cluster.Ring()
+	if ring == nil {
+		g.writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "Cluster ring is unavailable")
+		return
+	}
+
+	totalShards := g.dataShards + g.parityShards
+	owners, err := ring.GetNodes(bucket+"/"+key, totalShards)
+	if err != nil || len(owners) < totalShards {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Not enough nodes available for erasure coding placement")
+		return
+	}
+
+	var wg sync.WaitGroup
+	versionID := r.URL.Query().Get("versionId")
+
+	for i := 0; i < totalShards; i++ {
+		owner := owners[i]
+		shardIndex := i
+
+		wg.Add(1)
+		go func(nodeID string, index int) {
+			defer wg.Done()
+			err := g.deleteShardFromNode(r.Context(), bucket, key, versionID, index, nodeID)
+			if err != nil {
+				slog.Warn("Failed to delete shard", "node", nodeID, "index", index, "error", err)
+			}
+		}(owner, shardIndex)
+	}
+
+	wg.Wait()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (g *Gateway) deleteShardFromNode(ctx context.Context, bucket, key, versionID string, shardIndex int, nodeID string) error {
+	if nodeID == g.cluster.LocalNodeID() {
+		localKey := key + ".shard." + strconv.Itoa(shardIndex)
+		_, err := g.store.DeleteObject(ctx, bucket, localKey, versionID)
+		return err
+	}
+
+	addr, exists := g.cluster.GetNodeAddress(nodeID)
+	if !exists {
+		return fmt.Errorf("node %s address not found", nodeID)
+	}
+
+	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+		addr = "http://" + addr
+	}
+	targetURL := fmt.Sprintf("%s/%s/%s", strings.TrimSuffix(addr, "/"), bucket, key)
+	if versionID != "" {
+		targetURL += "?versionId=" + versionID
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "DELETE", targetURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-ServStore-Replicated", "true")
+	req.Header.Set("X-ServStore-Shard-Index", strconv.Itoa(shardIndex))
+
+	accessKey, secretKey := g.auth.GetAdminCredentials()
+	req.SetBasicAuth(accessKey, secretKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("node %s returned status %d", nodeID, resp.StatusCode)
+	}
+	return nil
 }
 

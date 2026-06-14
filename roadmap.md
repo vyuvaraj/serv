@@ -44,7 +44,7 @@ Graduate from single-node to a consistent, fault-tolerant distributed system.
   - [x] Auto-healing (Background detection of offline drives/nodes and automatic rebuilds)
 - **Data Protection & Storage Reliability**:
   - [x] Peer-to-peer data replication
-  - [ ] Erasure Coding (e.g. Reed-Solomon) to minimize storage overhead while preserving fault tolerance
+  - [x] Erasure Coding (e.g. Reed-Solomon) to minimize storage overhead while preserving fault tolerance
   - [ ] End-to-end data integrity validation using BLAKE3 checksums
 
 ---
