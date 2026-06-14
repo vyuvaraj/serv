@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,20 +14,23 @@ import (
 	"time"
 
 	"servstore/pkg/auth"
+	"servstore/pkg/cluster"
 	"servstore/pkg/metrics"
 	"servstore/pkg/otel"
 	"servstore/pkg/storage"
 )
 
 type Gateway struct {
-	store storage.StorageEngine
-	auth  *auth.AuthProvider
+	store    storage.StorageEngine
+	auth     *auth.AuthProvider
+	raftNode *cluster.RaftNode
 }
 
-func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider) *Gateway {
+func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *cluster.RaftNode) *Gateway {
 	return &Gateway{
-		store: store,
-		auth:  auth,
+		store:    store,
+		auth:     auth,
+		raftNode: raftNode,
 	}
 }
 
@@ -243,7 +247,9 @@ func (g *Gateway) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
-	err := g.store.CreateBucket(r.Context(), bucket)
+	err := g.proposeOrExecute(w, r, "CreateBucket", bucket, "", nil, func() error {
+		return g.store.CreateBucket(r.Context(), bucket)
+	})
 	if err != nil {
 		if errors.Is(err, storage.ErrBucketExists) {
 			g.writeError(w, http.StatusConflict, "BucketAlreadyExists", "The requested bucket name is not available.")
@@ -257,7 +263,9 @@ func (g *Gateway) handleCreateBucket(w http.ResponseWriter, r *http.Request, buc
 }
 
 func (g *Gateway) handleDeleteBucket(w http.ResponseWriter, r *http.Request, bucket string) {
-	err := g.store.DeleteBucket(r.Context(), bucket)
+	err := g.proposeOrExecute(w, r, "DeleteBucket", bucket, "", nil, func() error {
+		return g.store.DeleteBucket(r.Context(), bucket)
+	})
 	if err != nil {
 		if errors.Is(err, storage.ErrBucketNotFound) {
 			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
@@ -320,7 +328,9 @@ func (g *Gateway) handlePutBucketVersioning(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	err := g.store.SetBucketVersioning(r.Context(), bucket, config.Status)
+	err := g.proposeOrExecute(w, r, "SetVersioning", bucket, "", []byte(config.Status), func() error {
+		return g.store.SetBucketVersioning(r.Context(), bucket, config.Status)
+	})
 	if err != nil {
 		if errors.Is(err, storage.ErrBucketNotFound) {
 			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
@@ -787,7 +797,11 @@ func (g *Gateway) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Reques
 		})
 	}
 
-	if err := g.store.SetBucketLifecycle(r.Context(), bucket, rules); err != nil {
+	rulesBytes, _ := json.Marshal(rules)
+	err := g.proposeOrExecute(w, r, "SetLifecycle", bucket, "", rulesBytes, func() error {
+		return g.store.SetBucketLifecycle(r.Context(), bucket, rules)
+	})
+	if err != nil {
 		if errors.Is(err, storage.ErrBucketNotFound) {
 			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 			return
@@ -799,7 +813,10 @@ func (g *Gateway) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Reques
 }
 
 func (g *Gateway) handleDeleteBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
-	if err := g.store.DeleteBucketLifecycle(r.Context(), bucket); err != nil {
+	err := g.proposeOrExecute(w, r, "DeleteLifecycle", bucket, "", nil, func() error {
+		return g.store.DeleteBucketLifecycle(r.Context(), bucket)
+	})
+	if err != nil {
 		if errors.Is(err, storage.ErrBucketNotFound) {
 			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 			return
@@ -904,4 +921,28 @@ func (g *Gateway) checkAuthorization(r *http.Request) bool {
 	}
 
 	return g.authorize(r, action, resource)
+}
+
+func (g *Gateway) proposeOrExecute(w http.ResponseWriter, r *http.Request, op string, bucketName, keyName string, value []byte, fallback func() error) error {
+	if g.raftNode == nil {
+		return fallback()
+	}
+
+	if !g.raftNode.IsLeader() {
+		leader := g.raftNode.LeaderAddr()
+		if leader == "" {
+			return fmt.Errorf("raft cluster has no active leader")
+		}
+		// Return 307 redirect error or cluster redirection error
+		return fmt.Errorf("cluster not leader: request must be sent to Raft leader at %s", leader)
+	}
+
+	cmd := cluster.MetadataCommand{
+		Op:         op,
+		BucketName: bucketName,
+		KeyName:    keyName,
+		Value:      value,
+	}
+
+	return g.raftNode.Propose(cmd)
 }

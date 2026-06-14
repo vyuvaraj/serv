@@ -26,9 +26,10 @@ type WebConsole struct {
 	auth       *auth.AuthProvider
 	store      storage.StorageEngine
 	cluster    *cluster.MembershipManager
+	raftNode   *cluster.RaftNode
 }
 
-func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store storage.StorageEngine, clusterMgr *cluster.MembershipManager) *WebConsole {
+func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store storage.StorageEngine, clusterMgr *cluster.MembershipManager, raftNode *cluster.RaftNode) *WebConsole {
 	// Strip assets prefix
 	subFS, err := fs.Sub(assetsFS, "assets")
 	if err != nil {
@@ -41,6 +42,7 @@ func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store 
 		auth:       authProvider,
 		store:      store,
 		cluster:    clusterMgr,
+		raftNode:   raftNode,
 	}
 }
 
@@ -218,6 +220,27 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if path == "/console/cluster/join" && r.Method == http.MethodPost {
+		var req struct {
+			NodeID  string `json:"node_id"`
+			Address string `json:"address"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if wc.raftNode != nil {
+			if err := wc.raftNode.Join(req.NodeID, req.Address); err != nil {
+				http.Error(w, "Join failed: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, "Raft not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
 	if path == "/console/logout" {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "token",
@@ -237,7 +260,7 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Allow public access to login page and public assets
 		isPublicAsset := false
-		if path == "/login.html" || path == "/style.css" || path == "/favicon.ico" || path == "/console/cluster/gossip" {
+		if path == "/login.html" || path == "/style.css" || path == "/favicon.ico" || path == "/console/cluster/gossip" || path == "/console/cluster/join" {
 			isPublicAsset = true
 		}
 
@@ -298,16 +321,47 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, "Invalid policy JSON: "+err.Error(), http.StatusBadRequest)
 					return
 				}
-				if err := wc.store.PutUserPolicy(r.Context(), username, body); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
+				if wc.raftNode != nil {
+					if !wc.raftNode.IsLeader() {
+						http.Error(w, "Not Raft leader. Propose to: "+wc.raftNode.LeaderAddr(), http.StatusBadRequest)
+						return
+					}
+					cmd := cluster.MetadataCommand{
+						Op:      "PutPolicy",
+						KeyName: username,
+						Value:   body,
+					}
+					if err := wc.raftNode.Propose(cmd); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				} else {
+					if err := wc.store.PutUserPolicy(r.Context(), username, body); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
 				}
 				w.WriteHeader(http.StatusOK)
 				return
 			case http.MethodDelete:
-				if err := wc.store.DeleteUserPolicy(r.Context(), username); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
+				if wc.raftNode != nil {
+					if !wc.raftNode.IsLeader() {
+						http.Error(w, "Not Raft leader. Propose to: "+wc.raftNode.LeaderAddr(), http.StatusBadRequest)
+						return
+					}
+					cmd := cluster.MetadataCommand{
+						Op:      "DeletePolicy",
+						KeyName: username,
+					}
+					if err := wc.raftNode.Propose(cmd); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				} else {
+					if err := wc.store.DeleteUserPolicy(r.Context(), username); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
 				}
 				w.WriteHeader(http.StatusNoContent)
 				return
