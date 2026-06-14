@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ServStore - Cloud Object Storage Console</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-box-archive"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>ServStore</h1>
+                    <span>S3 Storage Engine</span>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-header">
+                    <span>BUCKETS</span>
+                    <button id="btn-create-bucket" title="Create Bucket">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+                <div id="bucket-list" class="bucket-list">
+                    <div class="loading-spinner"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="pulse-dot"></span>
+                    <span>Single-Node Active</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="breadcrumb">
+                    <span id="breadcrumb-bucket" class="breadcrumb-item active">Select a bucket</span>
+                    <span id="breadcrumb-separator" class="breadcrumb-separator" style="display:none;">/</span>
+                    <span id="breadcrumb-path" class="breadcrumb-item"></span>
+                </div>
+                <div class="user-profile">
+                    <i class="fa-solid fa-user-shield"></i>
+                    <span>Admin Mode</span>
+                </div>
+            </header>
+
+            <div id="no-bucket-selected" class="empty-state">
+                <div class="empty-icon">
+                    <i class="fa-solid fa-cubes"></i>
+                </div>
+                <h2>Welcome to ServStore Console</h2>
+                <p>Select an existing bucket from the sidebar or create a new one to start storing objects.</p>
+                <button class="btn btn-primary" id="btn-create-bucket-hero">
+                    <i class="fa-solid fa-plus"></i> Create Bucket
+                </button>
+            </div>
+
+            <div id="bucket-view" class="bucket-view" style="display: none;">
+                <!-- Bucket Config & Actions Bar -->
+                <div class="bucket-settings-bar card">
+                    <div class="bucket-info-meta">
+                        <h2 id="current-bucket-name">bucket-name</h2>
+                        <span class="meta-tag" id="bucket-created-time">Created: 2026-06-14</span>
+                    </div>
+                    <div class="bucket-controls">
+                        <div class="versioning-toggle-container">
+                            <span class="label-text">Object Versioning:</span>
+                            <div class="toggle-switch">
+                                <input type="checkbox" id="toggle-versioning">
+                                <label for="toggle-versioning"></label>
+                            </div>
+                            <span id="versioning-status" class="status-badge">Disabled</span>
+                        </div>
+                        <button class="btn btn-danger btn-icon" id="btn-delete-bucket" title="Delete Bucket">
+                            <i class="fa-solid fa-trash"></i> Delete Bucket
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Drag & Drop Upload Zone -->
+                <div id="drop-zone" class="drop-zone card">
+                    <input type="file" id="file-input" multiple style="display: none;">
+                    <div class="drop-zone-content">
+                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                        <h3>Drag & drop files here</h3>
+                        <p>or click to browse from your computer</p>
+                    </div>
+                </div>
+
+                <!-- Upload Progress -->
+                <div id="upload-progress-container" class="upload-progress-container" style="display: none;">
+                    <div class="progress-info">
+                        <span id="upload-filename">file.bin</span>
+                        <span id="upload-percentage">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="upload-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Object Browser -->
+                <div class="object-browser card">
+                    <div class="browser-header">
+                        <div class="search-bar">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="object-search" placeholder="Search objects in bucket...">
+                        </div>
+                        <div class="browser-actions">
+                            <button class="btn btn-secondary btn-icon" id="btn-refresh-objects" title="Refresh List">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="object-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Size</th>
+                                    <th>Last Modified</th>
+                                    <th>ETag</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="object-list-body">
+                                <!-- Filled dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create Bucket Modal -->
+    <div id="modal-create-bucket" class="modal">
+        <div class="modal-content card">
+            <div class="modal-header">
+                <h2>Create Bucket</h2>
+                <button class="close-modal" id="close-create-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="new-bucket-name">Bucket Name</label>
+                    <input type="text" id="new-bucket-name" placeholder="my-awesome-bucket" autocomplete="off">
+                    <span class="help-text">Must be lowercase, alphanumeric, 3-63 characters, no spaces.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-cancel-create">Cancel</button>
+                <button class="btn btn-primary" id="btn-submit-create">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Version History Modal -->
+    <div id="modal-versions" class="modal">
+        <div class="modal-content card modal-large">
+            <div class="modal-header">
+                <div>
+                    <h2>Version History</h2>
+                    <p id="version-modal-filename" class="subtitle">object-key</p>
+                </div>
+                <button class="close-modal" id="close-versions-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-container">
+                    <table class="object-table">
+                        <thead>
+                            <tr>
+                                <th>Version ID</th>
+                                <th>Status</th>
+                                <th>Size</th>
+                                <th>Last Modified</th>
+                                <th>ETag</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="version-list-body">
+                            <!-- Filled dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+</body>
+</html>

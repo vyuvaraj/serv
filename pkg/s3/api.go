@@ -1,0 +1,499 @@
+package s3
+
+import (
+	"encoding/xml"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"servstore/pkg/auth"
+	"servstore/pkg/storage"
+)
+
+type Gateway struct {
+	store storage.StorageEngine
+	auth  *auth.AuthProvider
+}
+
+func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider) *Gateway {
+	return &Gateway{
+		store: store,
+		auth:  auth,
+	}
+}
+
+func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// CORS Headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Amz-Date, X-Amz-Content-Sha256, Content-Length")
+	w.Header().Set("Access-Control-Expose-Headers", "ETag, x-amz-version-id, x-amz-delete-marker")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Verify authentication
+	if !g.auth.VerifyRequest(r) {
+		g.writeError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
+	// Parse bucket and key
+	bucket, key := parsePath(r.URL.Path)
+
+	if bucket == "" {
+		if r.Method == http.MethodGet {
+			g.handleListBuckets(w, r)
+		} else {
+			g.writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed on service level")
+		}
+		return
+	}
+
+	if key == "" {
+		// Bucket level operations
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Has("versioning") {
+				g.handleGetBucketVersioning(w, r, bucket)
+			} else if r.URL.Query().Has("versions") {
+				g.handleListObjectVersions(w, r, bucket)
+			} else {
+				g.handleListObjects(w, r, bucket)
+			}
+		case http.MethodPut:
+			if r.URL.Query().Has("versioning") {
+				g.handlePutBucketVersioning(w, r, bucket)
+			} else {
+				g.handleCreateBucket(w, r, bucket)
+			}
+		case http.MethodDelete:
+			g.handleDeleteBucket(w, r, bucket)
+		case http.MethodHead:
+			g.handleHeadBucket(w, r, bucket)
+		default:
+			g.writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed on bucket level")
+		}
+		return
+	}
+
+	// Object level operations
+	switch r.Method {
+	case http.MethodGet:
+		g.handleGetObject(w, r, bucket, key)
+	case http.MethodPut:
+		g.handlePutObject(w, r, bucket, key)
+	case http.MethodDelete:
+		g.handleDeleteObject(w, r, bucket, key)
+	case http.MethodHead:
+		g.handleHeadObject(w, r, bucket, key)
+	default:
+		g.writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed on object level")
+	}
+}
+
+func parsePath(path string) (string, string) {
+	path = strings.TrimPrefix(path, "/")
+	idx := strings.Index(path, "/")
+	if idx == -1 {
+		return path, ""
+	}
+	return path[:idx], path[idx+1:]
+}
+
+func (g *Gateway) writeXML(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(xml.Header))
+	enc := xml.NewEncoder(w)
+	enc.Indent("", "  ")
+	if err := enc.Encode(data); err != nil {
+		log.Printf("Error encoding XML: %v", err)
+	}
+}
+
+func (g *Gateway) writeError(w http.ResponseWriter, status int, code, message string) {
+	g.writeXML(w, status, ErrorResponse{
+		Code:    code,
+		Message: message,
+	})
+}
+
+func (g *Gateway) handleListBuckets(w http.ResponseWriter, r *http.Request) {
+	buckets, err := g.store.ListBuckets(r.Context())
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	res := ListAllMyBucketsResult{
+		Xmlns: xmlNamespace,
+		Owner: OwnerResult{
+			ID:          "servstore-owner",
+			DisplayName: "ServStore Admin",
+		},
+		Buckets: make([]BucketResult, len(buckets)),
+	}
+
+	for i, b := range buckets {
+		res.Buckets[i] = BucketResult{
+			Name:         b.Name,
+			CreationDate: b.CreatedTime.UTC().Format(time.RFC3339),
+		}
+	}
+
+	g.writeXML(w, http.StatusOK, res)
+}
+
+func (g *Gateway) handleCreateBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	err := g.store.CreateBucket(r.Context(), bucket)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketExists) {
+			g.writeError(w, http.StatusConflict, "BucketAlreadyExists", "The requested bucket name is not available.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.Header().Set("Location", "/"+bucket)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleDeleteBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	err := g.store.DeleteBucket(r.Context(), bucket)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		if strings.Contains(err.Error(), "not empty") {
+			g.writeError(w, http.StatusConflict, "BucketNotEmpty", "The bucket you tried to delete is not empty.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (g *Gateway) handleHeadBucket(w http.ResponseWriter, r *http.Request, bucket string) {
+	_, err := g.store.GetBucket(r.Context(), bucket)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleGetBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
+	b, err := g.store.GetBucket(r.Context(), bucket)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	res := VersioningConfiguration{
+		Xmlns: xmlNamespace,
+	}
+	if b.Versioning == "Enabled" || b.Versioning == "Suspended" {
+		res.Status = b.Versioning
+	}
+
+	g.writeXML(w, http.StatusOK, res)
+}
+
+func (g *Gateway) handlePutBucketVersioning(w http.ResponseWriter, r *http.Request, bucket string) {
+	var config VersioningConfiguration
+	decoder := xml.NewDecoder(r.Body)
+	if err := decoder.Decode(&config); err != nil {
+		g.writeError(w, http.StatusBadRequest, "MalformedXML", "The XML body is malformed.")
+		return
+	}
+
+	if config.Status != "Enabled" && config.Status != "Suspended" && config.Status != "Disabled" {
+		g.writeError(w, http.StatusBadRequest, "InvalidArgument", "Versioning status must be Enabled or Suspended.")
+		return
+	}
+
+	err := g.store.SetBucketVersioning(r.Context(), bucket, config.Status)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleListObjects(w http.ResponseWriter, r *http.Request, bucket string) {
+	query := r.URL.Query()
+	prefix := query.Get("prefix")
+	delimiter := query.Get("delimiter")
+	marker := query.Get("marker")
+	maxKeysStr := query.Get("max-keys")
+
+	maxKeys := 1000
+	if maxKeysStr != "" {
+		if mk, err := strconv.Atoi(maxKeysStr); err == nil {
+			maxKeys = mk
+		}
+	}
+
+	objects, commonPrefixes, err := g.store.ListObjects(r.Context(), bucket, prefix, delimiter, marker, maxKeys)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	res := ListBucketResult{
+		Xmlns:       xmlNamespace,
+		Name:        bucket,
+		Prefix:      prefix,
+		Marker:      marker,
+		MaxKeys:     maxKeys,
+		Delimiter:   delimiter,
+		IsTruncated: false,
+		Contents:    make([]ObjectResult, len(objects)),
+	}
+
+	for i, obj := range objects {
+		res.Contents[i] = ObjectResult{
+			Key:          obj.Key,
+			LastModified: obj.LastModified.UTC().Format(time.RFC3339),
+			ETag:         `"` + obj.ETag + `"`,
+			Size:         obj.Size,
+			StorageClass: "STANDARD",
+			Owner: OwnerResult{
+				ID:          "servstore-owner",
+				DisplayName: "ServStore Admin",
+			},
+		}
+	}
+
+	if len(commonPrefixes) > 0 {
+		res.CommonPrefixes = make([]PrefixResult, len(commonPrefixes))
+		for i, p := range commonPrefixes {
+			res.CommonPrefixes[i] = PrefixResult{Prefix: p}
+		}
+	}
+
+	g.writeXML(w, http.StatusOK, res)
+}
+
+func (g *Gateway) handleListObjectVersions(w http.ResponseWriter, r *http.Request, bucket string) {
+	query := r.URL.Query()
+	prefix := query.Get("prefix")
+	delimiter := query.Get("delimiter")
+	keyMarker := query.Get("key-marker")
+	versionIDMarker := query.Get("version-id-marker")
+	maxKeysStr := query.Get("max-keys")
+
+	maxKeys := 1000
+	if maxKeysStr != "" {
+		if mk, err := strconv.Atoi(maxKeysStr); err == nil {
+			maxKeys = mk
+		}
+	}
+
+	versions, commonPrefixes, err := g.store.ListObjectVersions(r.Context(), bucket, prefix, delimiter, keyMarker, versionIDMarker, maxKeys)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	res := ListVersionsResult{
+		Xmlns:           xmlNamespace,
+		Name:            bucket,
+		Prefix:          prefix,
+		KeyMarker:       keyMarker,
+		VersionIdMarker: versionIDMarker,
+		MaxKeys:         maxKeys,
+		Delimiter:       delimiter,
+		IsTruncated:     false,
+	}
+
+	for _, ver := range versions {
+		if ver.IsDeleteMarker {
+			res.DeleteMarker = append(res.DeleteMarker, DeleteMarkerResult{
+				Key:          ver.Key,
+				VersionId:    ver.VersionID,
+				IsLatest:     ver.IsLatest,
+				LastModified: ver.LastModified.UTC().Format(time.RFC3339),
+				Owner: OwnerResult{
+					ID:          "servstore-owner",
+					DisplayName: "ServStore Admin",
+				},
+			})
+		} else {
+			res.Version = append(res.Version, VersionResult{
+				Key:          ver.Key,
+				VersionId:    ver.VersionID,
+				IsLatest:     ver.IsLatest,
+				LastModified: ver.LastModified.UTC().Format(time.RFC3339),
+				ETag:         `"` + ver.ETag + `"`,
+				Size:         ver.Size,
+				StorageClass: "STANDARD",
+				Owner: OwnerResult{
+					ID:          "servstore-owner",
+					DisplayName: "ServStore Admin",
+				},
+			})
+		}
+	}
+
+	if len(commonPrefixes) > 0 {
+		res.CommonPrefixes = make([]PrefixResult, len(commonPrefixes))
+		for i, p := range commonPrefixes {
+			res.CommonPrefixes[i] = PrefixResult{Prefix: p}
+		}
+	}
+
+	g.writeXML(w, http.StatusOK, res)
+}
+
+func (g *Gateway) handlePutObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	size := r.ContentLength
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	obj, err := g.store.PutObject(r.Context(), bucket, key, r.Body, size, contentType)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	w.Header().Set("ETag", `"`+obj.ETag+`"`)
+	if obj.VersionID != "" && obj.VersionID != "null" {
+		w.Header().Set("x-amz-version-id", obj.VersionID)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleGetObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	versionID := r.URL.Query().Get("versionId")
+
+	reader, obj, err := g.store.GetObject(r.Context(), bucket, key, versionID)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			if obj != nil && obj.IsDeleteMarker {
+				w.Header().Set("x-amz-delete-marker", "true")
+				if obj.VersionID != "" && obj.VersionID != "null" {
+					w.Header().Set("x-amz-version-id", obj.VersionID)
+				}
+				g.writeError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+				return
+			}
+			g.writeError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	defer reader.Close()
+
+	w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
+	w.Header().Set("Content-Type", obj.ContentType)
+	w.Header().Set("ETag", `"`+obj.ETag+`"`)
+	if obj.VersionID != "" && obj.VersionID != "null" {
+		w.Header().Set("x-amz-version-id", obj.VersionID)
+	}
+
+	_, _ = io.Copy(w, reader)
+}
+
+func (g *Gateway) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	versionID := r.URL.Query().Get("versionId")
+
+	obj, err := g.store.HeadObject(r.Context(), bucket, key, versionID)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if obj.IsDeleteMarker {
+		w.Header().Set("x-amz-delete-marker", "true")
+		if obj.VersionID != "" && obj.VersionID != "null" {
+			w.Header().Set("x-amz-version-id", obj.VersionID)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
+	w.Header().Set("Content-Type", obj.ContentType)
+	w.Header().Set("ETag", `"`+obj.ETag+`"`)
+	if obj.VersionID != "" && obj.VersionID != "null" {
+		w.Header().Set("x-amz-version-id", obj.VersionID)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleDeleteObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	versionID := r.URL.Query().Get("versionId")
+
+	obj, err := g.store.DeleteObject(r.Context(), bucket, key, versionID)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			// In S3, deleting non-existent object is a 204 or 404 depending on status, typically 204
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	if obj.IsDeleteMarker {
+		w.Header().Set("x-amz-delete-marker", "true")
+	}
+	if obj.VersionID != "" && obj.VersionID != "null" {
+		w.Header().Set("x-amz-version-id", obj.VersionID)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
