@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"servstore/pkg/otel"
 	"sort"
 	"strings"
 	"sync"
@@ -224,7 +225,18 @@ func (s *LocalStore) writeObjectMeta(bucket, key string, om *ObjectMeta) error {
 	return os.WriteFile(metaPath, data, 0644)
 }
 
-func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) (*ObjectVersion, error) {
+func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) (ov *ObjectVersion, err error) {
+	_, span := otel.StartSpan(ctx, "Storage PutObject", 1)
+	span.SetAttribute("s3.bucket", bucket)
+	span.SetAttribute("s3.key", key)
+	defer func() {
+		status := 1
+		if err != nil {
+			status = 2
+		}
+		span.End(status)
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -332,11 +344,25 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	return &newVer, nil
 }
 
-func (s *LocalStore) GetObject(ctx context.Context, bucket, key, versionID string) (io.ReadCloser, *ObjectVersion, error) {
+func (s *LocalStore) GetObject(ctx context.Context, bucket, key, versionID string) (rc io.ReadCloser, ov *ObjectVersion, err error) {
+	_, span := otel.StartSpan(ctx, "Storage GetObject", 1)
+	span.SetAttribute("s3.bucket", bucket)
+	span.SetAttribute("s3.key", key)
+	if versionID != "" {
+		span.SetAttribute("s3.version_id", versionID)
+	}
+	defer func() {
+		status := 1
+		if err != nil {
+			status = 2
+		}
+		span.End(status)
+	}()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	_, err := s.readBucketMeta(bucket)
+	_, err = s.readBucketMeta(bucket)
 	if err != nil {
 		return nil, nil, err
 	}

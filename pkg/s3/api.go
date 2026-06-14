@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"servstore/pkg/auth"
+	"servstore/pkg/otel"
 	"servstore/pkg/storage"
 )
 
@@ -26,7 +27,36 @@ func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider) *Gateway {
 	}
 }
 
+type trackingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (trw *trackingResponseWriter) WriteHeader(code int) {
+	trw.statusCode = code
+	trw.ResponseWriter.WriteHeader(code)
+}
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Start OTel tracing
+	parentTrace := r.Header.Get("traceparent")
+	ctx, span := otel.StartSpanWithParent(r.Context(), "S3 "+r.Method+" "+r.URL.Path, 2, parentTrace)
+	trw := &trackingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+	defer func() {
+		status := 1
+		if trw.statusCode >= 400 {
+			status = 2
+		}
+		span.SetAttribute("http.method", r.Method)
+		span.SetAttribute("http.route", r.URL.Path)
+		span.SetAttribute("http.status_code", trw.statusCode)
+		span.End(status)
+	}()
+
+	r = r.WithContext(ctx)
+	w = trw
+
 	// CORS Headers
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, HEAD, OPTIONS")
