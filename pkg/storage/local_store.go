@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zeebo/blake3"
 )
 
 type LocalStore struct {
@@ -291,6 +293,7 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	}()
 
 	hasher := md5.New()
+	b3Hasher := blake3.New()
 	// Read all data first so we can encrypt before writing
 	plaintext, err := io.ReadAll(reader)
 	if err != nil {
@@ -302,6 +305,9 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	}
 	hasher.Write(plaintext)
 	etag := hex.EncodeToString(hasher.Sum(nil))
+
+	b3Hasher.Write(plaintext)
+	b3Checksum := hex.EncodeToString(b3Hasher.Sum(nil))
 
 	// Encrypt if key is configured
 	var payload []byte
@@ -344,6 +350,7 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 		ContentType:    contentType,
 		IsLatest:       true,
 		IsDeleteMarker: false,
+		Checksum:       b3Checksum,
 	}
 
 	// Adjust existing versions: IsLatest must be set to false for other versions
@@ -450,6 +457,14 @@ func (s *LocalStore) GetObject(ctx context.Context, bucket, key, versionID strin
 		if err != nil {
 			return nil, nil, err
 		}
+		if targetVer.Checksum != "" {
+			b3Hasher := blake3.New()
+			b3Hasher.Write(plaintext)
+			sum := hex.EncodeToString(b3Hasher.Sum(nil))
+			if sum != targetVer.Checksum {
+				return nil, nil, fmt.Errorf("data integrity corruption detected (BLAKE3 mismatch): expected %s, got %s", targetVer.Checksum, sum)
+			}
+		}
 		return io.NopCloser(bytes.NewReader(plaintext)), targetVer, nil
 	}
 
@@ -457,7 +472,40 @@ func (s *LocalStore) GetObject(ctx context.Context, bucket, key, versionID strin
 	if err != nil {
 		return nil, nil, err
 	}
+
+	if targetVer.Checksum != "" {
+		return &integrityCheckingReader{
+			rc:       file,
+			hasher:   blake3.New(),
+			expected: targetVer.Checksum,
+		}, targetVer, nil
+	}
+
 	return file, targetVer, nil
+}
+
+type integrityCheckingReader struct {
+	rc       io.ReadCloser
+	hasher   *blake3.Hasher
+	expected string
+}
+
+func (r *integrityCheckingReader) Read(p []byte) (n int, err error) {
+	n, err = r.rc.Read(p)
+	if n > 0 {
+		r.hasher.Write(p[:n])
+	}
+	if err == io.EOF {
+		sum := hex.EncodeToString(r.hasher.Sum(nil))
+		if sum != r.expected {
+			return n, fmt.Errorf("data integrity corruption detected (BLAKE3 mismatch): expected %s, got %s", r.expected, sum)
+		}
+	}
+	return n, err
+}
+
+func (r *integrityCheckingReader) Close() error {
+	return r.rc.Close()
 }
 
 func (s *LocalStore) HeadObject(ctx context.Context, bucket, key, versionID string) (*ObjectVersion, error) {

@@ -26,6 +26,7 @@ type ObjectVersion struct {
 	IsDeleteMarker bool       `json:"is_delete_marker"`
 	Locked         bool       `json:"locked,omitempty"`          // WORM lock active
 	RetainUntil    *time.Time `json:"retain_until,omitempty"`    // lock expiry (nil = no lock)
+	Checksum       string     `json:"checksum,omitempty"`        // BLAKE3 checksum
 }
 
 type ObjectMeta struct {

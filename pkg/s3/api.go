@@ -678,8 +678,23 @@ func (g *Gateway) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	versionID := r.URL.Query().Get("versionId")
 
 	reader, obj, err := g.store.GetObject(r.Context(), bucket, key, versionID)
+	
+	// If the reader is an integrityCheckingReader, we can read/verify it fully before writing headers,
+	// or we can read it to a buffer so we can catch integrity errors before sending HTTP headers.
+	// Since we need to support failover on integrity corruption, we must verify the integrity before sending headers.
+	var buf []byte
+	if err == nil {
+		buf, err = io.ReadAll(reader)
+		reader.Close()
+	}
+
 	if err != nil {
-		if (errors.Is(err, storage.ErrObjectNotFound) || errors.Is(err, storage.ErrBucketNotFound)) && g.cluster != nil && r.Header.Get("X-ServStore-Replicated") != "true" {
+		isIntegrityErr := err != nil && strings.Contains(err.Error(), "integrity corruption detected")
+		shouldFailover := (errors.Is(err, storage.ErrObjectNotFound) || errors.Is(err, storage.ErrBucketNotFound)) && r.Header.Get("X-ServStore-Replicated") != "true"
+		if isIntegrityErr {
+			shouldFailover = true // always failover if local file is corrupted, even if replicated GET was sent (to ensure data recovery)
+		}
+		if shouldFailover && g.cluster != nil {
 			ring := g.cluster.Ring()
 			if ring != nil {
 				owners, ringErr := ring.GetNodes(bucket+"/"+key, g.replicationFactor)
@@ -691,7 +706,11 @@ func (g *Gateway) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 						if g.cluster.IsNodeOnline(owner) {
 							addr, exists := g.cluster.GetNodeAddress(owner)
 							if exists {
-								slog.Info("Local key missing, proxying read to online backup node", "bucket", bucket, "key", key, "backup", owner)
+								if isIntegrityErr {
+									slog.Warn("Local key corrupted, proxying read to online backup node", "bucket", bucket, "key", key, "backup", owner, "error", err)
+								} else {
+									slog.Info("Local key missing, proxying read to online backup node", "bucket", bucket, "key", key, "backup", owner)
+								}
 								g.proxyRequest(w, r, addr)
 								return
 							}
@@ -720,7 +739,6 @@ func (g *Gateway) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
-	defer reader.Close()
 
 	w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
 	w.Header().Set("Content-Type", obj.ContentType)
@@ -728,8 +746,11 @@ func (g *Gateway) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 	if obj.VersionID != "" && obj.VersionID != "null" {
 		w.Header().Set("x-amz-version-id", obj.VersionID)
 	}
+	if obj.Checksum != "" {
+		w.Header().Set("x-amz-meta-blake3", obj.Checksum)
+	}
 
-	_, _ = io.Copy(w, reader)
+	_, _ = w.Write(buf)
 }
 
 func (g *Gateway) handleHeadObject(w http.ResponseWriter, r *http.Request, bucket, key string) {

@@ -43,6 +43,9 @@ func (m *mockErasureNode) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", obj.ContentType)
 		w.Header().Set("ETag", obj.ETag)
 		w.Header().Set("x-amz-version-id", obj.VersionID)
+		if obj.Checksum != "" {
+			w.Header().Set("x-amz-meta-blake3", obj.Checksum)
+		}
 		io.Copy(w, reader)
 		return
 	}
