@@ -18,6 +18,7 @@ type NodeInfo struct {
 	Status   string    `json:"status"` // "online" or "offline"
 	LastSeen time.Time `json:"last_seen"`
 	Load     int64     `json:"load"`
+	Region   string    `json:"region"`
 }
 
 type MembershipManager struct {
@@ -70,6 +71,13 @@ func NewMembershipManager(nodeID, address string, bootstrapPeers string) *Member
 		}
 	}
 
+	return mm
+}
+
+func (mm *MembershipManager) WithRegion(region string) *MembershipManager {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	mm.localNode.Region = region
 	return mm
 }
 
@@ -192,10 +200,11 @@ func (mm *MembershipManager) updatePeerInfo(peer *NodeInfo) {
 			peerCopy.LastSeen = time.Now()
 		}
 		mm.peers[peer.NodeID] = &peerCopy
-		if peerCopy.Status == "online" {
+		// ONLY add to hash ring if they belong to our region!
+		if peerCopy.Status == "online" && (peerCopy.Region == "" || peerCopy.Region == mm.localNode.Region) {
 			mm.ring.AddNode(peer.NodeID)
 		}
-		slog.Info("Discovered new cluster node", "node_id", peer.NodeID, "address", peer.Address)
+		slog.Info("Discovered new cluster node", "node_id", peer.NodeID, "address", peer.Address, "region", peer.Region)
 		return
 	}
 
@@ -206,10 +215,11 @@ func (mm *MembershipManager) updatePeerInfo(peer *NodeInfo) {
 		existing.LastSeen = peer.LastSeen
 		existing.Load = peer.Load
 		existing.Address = peer.Address
+		existing.Region = peer.Region
 
-		// Rebuild ring membership based on status transition
+		// Rebuild ring membership based on status transition and matching region
 		if oldStatus != existing.Status {
-			if existing.Status == "online" {
+			if existing.Status == "online" && (existing.Region == "" || existing.Region == mm.localNode.Region) {
 				mm.ring.AddNode(peer.NodeID)
 			} else {
 				mm.ring.RemoveNode(peer.NodeID)

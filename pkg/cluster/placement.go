@@ -33,6 +33,12 @@ func (hr *HashRing) hashKey(key string) uint32 {
 	return h.Sum32()
 }
 
+func (hr *HashRing) IsNodeInRing(nodeID string) bool {
+	hr.mu.RLock()
+	defer hr.mu.RUnlock()
+	return hr.nodes[nodeID]
+}
+
 func (hr *HashRing) AddNode(nodeID string) {
 	hr.mu.Lock()
 	defer hr.mu.Unlock()

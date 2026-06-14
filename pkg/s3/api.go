@@ -37,6 +37,7 @@ type Gateway struct {
 	erasureEnabled    bool
 	dataShards        int
 	parityShards      int
+	crrMgr            *cluster.CRRManager
 }
 
 func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *cluster.RaftNode, clusterMgr *cluster.MembershipManager, replicationFactor int, erasureEnabled bool, dataShards, parityShards int) *Gateway {
@@ -59,6 +60,11 @@ func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *
 		dataShards:        dataShards,
 		parityShards:      parityShards,
 	}
+}
+
+func (g *Gateway) WithCRR(crrMgr *cluster.CRRManager) *Gateway {
+	g.crrMgr = crrMgr
+	return g
 }
 
 func (g *Gateway) Store() storage.StorageEngine {
@@ -629,6 +635,16 @@ func (g *Gateway) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		}
 	}
 
+	// Trigger CRR asynchronously if this write didn't originate from a remote region replication
+	if g.crrMgr != nil && r.Header.Get("X-ServStore-Region-Source") == "" {
+		g.crrMgr.Enqueue(cluster.CRRJob{
+			Bucket:    bucket,
+			Key:       key,
+			VersionID: obj.VersionID,
+			Delete:    false,
+		})
+	}
+
 	w.Header().Set("ETag", `"`+obj.ETag+`"`)
 	if obj.VersionID != "" && obj.VersionID != "null" {
 		w.Header().Set("x-amz-version-id", obj.VersionID)
@@ -859,6 +875,16 @@ func (g *Gateway) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 				wg.Wait()
 			}
 		}
+	}
+
+	// Trigger CRR asynchronously for deletion
+	if g.crrMgr != nil && r.Header.Get("X-ServStore-Region-Source") == "" {
+		g.crrMgr.Enqueue(cluster.CRRJob{
+			Bucket:    bucket,
+			Key:       key,
+			VersionID: versionID,
+			Delete:    true,
+		})
 	}
 
 	if obj.IsDeleteMarker {

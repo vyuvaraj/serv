@@ -53,7 +53,7 @@ Graduate from single-node to a consistent, fault-tolerant distributed system.
 Bring ServStore to high-scale production and Kubernetes environments.
 - **Scalability**:
   - [x] Horizontal scalability (Adding nodes dynamically to increase storage capacity and throughput)
-  - [ ] Multi-region replication and active-active clustering
+  - [x] Multi-region replication and active-active clustering
 - **Kubernetes Operator**:
   - [ ] ServStore Kubernetes Operator for orchestration
   - [ ] Custom Resource Definitions (CRDs) for clusters, buckets, and access credentials

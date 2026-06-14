@@ -225,6 +225,7 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			NodeID  string `json:"node_id"`
 			Address string `json:"address"`
+			Region  string `json:"region"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -238,6 +239,7 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					Address:  req.Address,
 					Status:   "online",
 					LastSeen: time.Now(),
+					Region:   req.Region,
 				},
 				Peers: make(map[string]*cluster.NodeInfo),
 			}
