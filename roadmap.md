@@ -18,7 +18,7 @@ Establish the single-node storage engine, S3 compatibility layer, and visual con
 ## Phase 2: Security, Extended Features, Observability, and CLI
 Enhance the single-node capabilities with enterprise security, management utilities, and observability.
 - **Extended S3 Features**:
-  - [ ] Multipart Upload support (Initiate, Upload Part, Complete, Abort)
+  - [x] Multipart Upload support (Initiate, Upload Part, Complete, Abort)
   - [ ] Lifecycle policies (Auto-expire/transition objects)
   - [ ] Object locking (WORM - Write Once Read Many support)
 - **Security & IAM**:
