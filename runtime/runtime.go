@@ -292,11 +292,13 @@ func StartServer() interface{} {
 		// OpenTelemetry: start request span
 		parentTrace := r.Header.Get("traceparent")
 		trace := TraceRequest(r.Method, r.URL.Path, parentTrace)
+		SetActiveTrace(trace)
 
 		start := time.Now()
 		MetricInc("http_server_requests_total")
 
 		res := handler(req)
+		ClearActiveTrace()
 
 		duration := time.Since(start).Seconds()
 		MetricGauge("http_server_request_duration_seconds", duration)

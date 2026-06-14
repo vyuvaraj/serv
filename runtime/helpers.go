@@ -39,7 +39,21 @@ func HTTPGet(url string) interface{} {
 	endSpan := TraceHTTPClient("GET", url)
 	start := time.Now()
 	MetricInc("http_client_requests_total")
-	resp, err := http.Get(url)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		MetricInc("http_client_errors_total")
+		endSpan(0)
+		return [2]interface{}{nil, fmt.Sprintf("HTTP GET request failed for %s: %s", url, err.Error())}
+	}
+
+	// Inject traceparent if active
+	if active := GetActiveTrace(); active != nil {
+		req.Header.Set("traceparent", Traceparent(active))
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		MetricInc("http_client_errors_total")
 		endSpan(0)
@@ -67,7 +81,21 @@ func HTTPPost(url string, body interface{}) interface{} {
 		json.NewEncoder(&buf).Encode(body)
 	}
 
-	resp, err := http.Post(url, "application/json", &buf)
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		MetricInc("http_client_errors_total")
+		endSpan(0)
+		return [2]interface{}{nil, fmt.Sprintf("HTTP POST request failed for %s: %s", url, err.Error())}
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Inject traceparent if active
+	if active := GetActiveTrace(); active != nil {
+		req.Header.Set("traceparent", Traceparent(active))
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		MetricInc("http_client_errors_total")
 		endSpan(0)
