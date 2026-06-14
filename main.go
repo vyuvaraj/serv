@@ -1,12 +1,16 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,6 +149,20 @@ func main() {
 	case "repl":
 		runREPL()
 
+	case "install":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: serv install <package-name>")
+			os.Exit(1)
+		}
+		installPackage(os.Args[2])
+
+	case "publish":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: serv publish <package-dir>")
+			os.Exit(1)
+		}
+		publishPackage(os.Args[2])
+
 	case "init":
 		initProject()
 
@@ -164,6 +182,8 @@ func printUsage() {
 	fmt.Println("  serv fmt <file.srv>                        Format a Serv file")
 	fmt.Println("  serv repl                                  Interactive shell for quick experiments")
 	fmt.Println("  serv add <go-package>                      Generate .srv.d declaration for a Go package")
+	fmt.Println("  serv install <package-name>                Install a third-party Serv module")
+	fmt.Println("  serv publish <package-dir>                 Publish a Serv module to the registry")
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
 }
 
@@ -1389,6 +1409,25 @@ func resolveImportPath(importerPath, importStr string) string {
 		}
 	}
 
+	// 5. Package resolution: check in local packages/ folder
+	if !strings.HasPrefix(importStr, "./") && !strings.HasPrefix(importStr, "../") && !strings.HasPrefix(importStr, "/") && !strings.HasPrefix(importStr, "stdlib/") {
+		basePkg := strings.TrimSuffix(importStr, ".srv")
+		basePkg = strings.TrimSuffix(basePkg, ".srv.d")
+
+		candidates := []string{
+			filepath.Join("packages", importStr),
+			filepath.Join("packages", basePkg, "index.srv"),
+			filepath.Join("packages", basePkg, "main.srv"),
+		}
+
+		for _, c := range candidates {
+			if _, err := os.Stat(c); err == nil {
+				abs, _ := filepath.Abs(c)
+				return abs
+			}
+		}
+	}
+
 	// Default: resolve relative to the importing file's directory
 	return filepath.Join(filepath.Dir(importerPath), importStr)
 }
@@ -1448,10 +1487,10 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 
 			if len(imp.Names) > 0 {
 				// Selective import validation
-				subExports := make(map[string]bool)   // name -> isExported
-				subDefined := make(map[string]bool)   // name -> exists
-				structNames := make(map[string]bool)  // imported struct names
-				
+				subExports := make(map[string]bool)  // name -> isExported
+				subDefined := make(map[string]bool)  // name -> exists
+				structNames := make(map[string]bool) // imported struct names
+
 				// Identify defined and exported symbols in the subProgram
 				for _, subStmt := range subProgram.Statements {
 					name := statementName(subStmt)
@@ -1484,7 +1523,7 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 					if exp, ok := subStmt.(*compiler.ExportStmt); ok {
 						inner = exp.Inner
 					}
-					
+
 					// If this name is explicitly imported and is a Struct
 					var isStruct bool
 					for _, importedName := range imp.Names {
@@ -1503,7 +1542,7 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 				// Merge imported statements
 				for _, subStmt := range subProgram.Statements {
 					name := statementName(subStmt)
-					
+
 					// Non-named statements are always included (they might be transitive routes/background workers/etc.)
 					if name == "" {
 						mergedStatements = append(mergedStatements, subStmt)
@@ -1590,4 +1629,166 @@ func statementName(stmt compiler.Statement) string {
 	default:
 		return ""
 	}
+}
+
+func getRegistryURL() string {
+	url := os.Getenv("SERV_REGISTRY")
+	if url == "" {
+		url = "https://registry.serv-lang.org"
+	}
+	return strings.TrimSuffix(url, "/")
+}
+
+func installPackage(pkgName string) {
+	registry := getRegistryURL()
+	url := fmt.Sprintf("%s/packages/%s.tar.gz", registry, pkgName)
+	fmt.Printf("Downloading package from %s...\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("Error connecting to registry: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("Registry returned status %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	// Untar into packages/pkgName
+	targetDir := filepath.Join("packages", pkgName)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		fmt.Printf("Failed to create package directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		fmt.Printf("Failed to initialize gzip reader: %v\n", err)
+		os.Exit(1)
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Printf("Failed to read tar header: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Prevent Zip Slip / path traversal
+		cleaned := filepath.Clean(hdr.Name)
+		if strings.HasPrefix(cleaned, "..") || strings.HasPrefix(cleaned, "/") {
+			continue
+		}
+
+		dest := filepath.Join(targetDir, cleaned)
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			os.MkdirAll(dest, 0755)
+		case tar.TypeReg:
+			os.MkdirAll(filepath.Dir(dest), 0755)
+			f, err := os.OpenFile(dest, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(hdr.Mode))
+			if err != nil {
+				fmt.Printf("Failed to create file %s: %v\n", dest, err)
+				os.Exit(1)
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				fmt.Printf("Failed to write file %s: %v\n", dest, err)
+				os.Exit(1)
+			}
+			f.Close()
+		}
+	}
+
+	fmt.Printf("✓ Package '%s' successfully installed to %s/\n", pkgName, targetDir)
+}
+
+func publishPackage(pkgDir string) {
+	// Create in-memory tar.gz
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	absPkgDir, err := filepath.Abs(pkgDir)
+	if err != nil {
+		fmt.Printf("Invalid package directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	err = filepath.Walk(absPkgDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Compute relative path
+		relPath, err := filepath.Rel(absPkgDir, path)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.ToSlash(relPath)
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+
+		if info.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			if _, err := io.Copy(tw, f); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		fmt.Printf("Failed to package files: %v\n", err)
+		os.Exit(1)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	// Send HTTP POST to registry
+	registry := getRegistryURL()
+	url := fmt.Sprintf("%s/publish?name=%s", registry, filepath.Base(absPkgDir))
+	fmt.Printf("Publishing package to %s...\n", url)
+
+	req, err := http.NewRequest("POST", url, &buf)
+	if err != nil {
+		fmt.Printf("Failed to create publish request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Printf("Publish failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		fmt.Printf("Publish failed with status %d: %s\n", resp.StatusCode, string(bodyBytes))
+		os.Exit(1)
+	}
+
+	fmt.Printf("✓ Package '%s' successfully published!\n", filepath.Base(absPkgDir))
 }

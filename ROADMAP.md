@@ -101,7 +101,7 @@ The roadmap below captures the current status of all features and details the re
 | 9.2 | VS Code extension publish | ✅ Done | Publisher scripts configured |
 | 9.3 | **Web playground** | ⬜ Pending | Browser-based interactive editor |
 | 9.4 | Docker base image | ✅ Done | `Dockerfile.base` configured |
-| 9.5 | **Community package registry** | ⬜ Pending | Online index for package sharing |
+| 9.5 | **Community package registry** | ✅ Done | CLI install & publish commands + local packages/ folder resolution |
 
 ---
 
@@ -112,10 +112,7 @@ The roadmap below captures the current status of all features and details the re
 - **Approach**: Compile the Serv compiler to WebAssembly (WASM) or build a backend runner service that runs temporary containers to execute compilation and return output.
 - **Effort**: Medium
 
-### 2. Community Package Registry (Phase 9.5)
-- **Goal**: Establish a central registry where authors can publish Serv modules and consumers can install them using a CLI command (e.g., `serv install <pkg>`).
-- **Approach**: Build a simple registry server index hosting metadata and tarball archives, integrated with local dependency retrieval in the Serv CLI tool.
-- **Effort**: Large
+
 
 ---
 
