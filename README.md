@@ -1,8 +1,8 @@
 # ServStore
 
-A cloud-native, distributed-ready, S3-compatible object storage engine. ServStore serves as an open-source alternative to MinIO, designed for strong consistency, high scalability, and high performance.
+A cloud-native, distributed, S3-compatible object storage engine. ServStore serves as an open-source alternative to MinIO, designed for strong consistency, high scalability, and high performance.
 
-Currently, this repository contains the **MVP release**, featuring a robust single-node storage engine with native S3 compatibility, Object Versioning, AWS Signature V4 verification, S3 Multipart Upload support, AES-256 Encryption-at-Rest, TLS 1.3 enforcement, a built-in Glassmorphic Admin Console, and lightweight OpenTelemetry tracing.
+Currently, this repository contains **Phase 5 capabilities**, featuring a robust distributed storage engine with native S3 compatibility, Object Versioning, AWS Signature V4 verification, S3 Multipart Upload support, AES-256 Encryption-at-Rest, TLS 1.3 enforcement, a built-in Glassmorphic Admin Console, and lightweight OpenTelemetry tracing.
 
 ---
 
@@ -10,7 +10,11 @@ Currently, this repository contains the **MVP release**, featuring a robust sing
 * **S3-Compatible REST API**: Native support for creating/deleting buckets, uploading/retrieving objects, HEAD requests, delete markers, and listing bucket contents.
 * **S3 Multipart Uploads**: Supports standard S3 multipart operations (`InitiateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, and `AbortMultipartUpload`) for uploading large files.
 * **Object Versioning**: Supports versioning states (Enabled, Suspended, Disabled) matching AWS S3 versioning specs.
-* **Authentication**: Decodes and verifies AWS Signature V4 (header-based and query-based signature verification).
+* **Consistent Hashing & Dynamic Joins**: Uses a virtual-node consistent hash ring to distribute data across storage nodes. Supports dynamic node additions (`POST /console/cluster/join`) and automatic data rebalancing.
+* **Peer-to-Peer Auto-healing & Erasure Coding**: Automatically heals/rebuilds replicas and supports Reed-Solomon Erasure Coding to preserve fault tolerance.
+* **Cross-Region Replication (CRR)**: Asynchronously replicates modifications (PUT/DELETE) across distinct geographic regions with active-active clustering.
+* **Content-Addressed Storage (CAS)**: Supports deduplication and Git-like content hashing using BLAKE3 checksums for content-addressed buckets.
+* **BLAKE3 Data Integrity Validation**: Protects clusters against bit rot and storage corruption by validating hashes on-the-fly.
 * **AES-256 Encryption-at-Rest**: Optional per-object AES-256-GCM encryption of all stored data. Enabled via `--encryption-key`; passphrase is SHA-256 derived to a 32-byte key. Fully transparent to S3 clients.
 * **TLS 1.3 Enforcement**: Optional HTTPS mode via `--tls-cert` / `--tls-key`. Forces TLS 1.3 minimum with preferred curves (X25519, P256). Gracefully falls back to HTTP when not configured.
 * **OpenTelemetry Tracing**: A custom, lightweight, zero-dependency tracing client (inspired by the `Serv-lang` project) to export trace spans of HTTP routes and storage I/O operations to any OTel collector.
@@ -31,6 +35,14 @@ ServStore/
 ├── pkg/
 │   ├── auth/
 │   │   └── auth.go             # AWS Signature V4 authentication handler
+│   ├── cluster/
+│   │   ├── membership.go       # Gossip protocol, node timeouts & Hash Ring logic
+│   │   ├── healing.go          # P2P auto-healing & dynamic rebalancing
+│   │   ├── crr.go              # Cross-Region Replication (CRR) Manager
+│   │   ├── placement.go        # Consistent hashing ring implementation
+│   │   ├── raft_node.go        # Raft consensus node for consistent metadata storage
+│   │   ├── rebalance_test.go   # Integration tests for dynamic scale-out rebalancing
+│   │   └── crr_test.go         # Integration tests for Cross-Region Replication
 │   ├── metrics/
 │   │   ├── metrics.go          # Zero-dependency Prometheus metrics registry
 │   │   └── metrics_test.go     # Unit tests for metrics serialisation
@@ -38,12 +50,15 @@ ServStore/
 │   │   ├── otel.go             # Lightweight OpenTelemetry tracing client
 │   │   └── otel_test.go        # Unit tests for OTel tracing
 │   ├── s3/
-│   │   ├── api.go              # S3 API router, gateway handlers & HTTP tracing
-│   │   └── xml.go              # S3-compliant XML request/response models
+│   │   ├── api.go              # S3 API router, gateway handlers & failover routing
+│   │   ├── xml.go              # S3-compliant XML request/response models
+│   │   └── integrity_failover_test.go # Integration tests for BLAKE3 data integrity failover
 │   ├── storage/
 │   │   ├── store.go            # Storage engine interface definition
-│   │   ├── local_store.go      # Versioned storage, multipart staging & encryption hooks
+│   │   ├── local_store.go      # Versioned storage, CAS mapping, encryption hooks
 │   │   ├── crypto.go           # AES-256-GCM encrypt/decrypt helpers
+│   │   ├── cas_test.go         # Integration tests for Content-Addressed Storage deduplication
+│   │   ├── integrity_test.go   # Unit tests for BLAKE3 checksum checks & bit rot detection
 │   │   ├── crypto_test.go      # Unit tests for encryption round-trips
 │   │   └── local_store_test.go # Storage engine test suite (including multipart tests)
 │   └── web/
