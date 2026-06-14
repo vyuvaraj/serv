@@ -363,6 +363,11 @@ func (g *Gateway) handleCreateBucket(w http.ResponseWriter, r *http.Request, buc
 		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
+	
+	if strings.ToLower(r.Header.Get("x-servstore-content-addressable")) == "true" {
+		_ = g.store.SetBucketContentAddressable(r.Context(), bucket, true)
+	}
+
 	w.Header().Set("Location", "/"+bucket)
 	w.WriteHeader(http.StatusOK)
 }

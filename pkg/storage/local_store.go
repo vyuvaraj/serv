@@ -57,6 +57,9 @@ func (s *LocalStore) getObjectMetaPath(bucket, key string) string {
 }
 
 func (s *LocalStore) getObjectDataPath(bucket, key, versionID string) string {
+	if strings.HasPrefix(versionID, "cas-") {
+		return filepath.Join(s.getBucketDir(bucket), ".data", "cas."+strings.TrimPrefix(versionID, "cas-"))
+	}
 	return filepath.Join(s.getBucketDir(bucket), ".data", key+"."+versionID)
 }
 
@@ -207,6 +210,24 @@ func (s *LocalStore) SetBucketVersioning(ctx context.Context, bucket string, sta
 	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
 }
 
+func (s *LocalStore) SetBucketContentAddressable(ctx context.Context, bucket string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	b, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return err
+	}
+
+	b.ContentAddressable = enabled
+	data, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+}
+
 func (s *LocalStore) readObjectMeta(bucket, key string) (*ObjectMeta, error) {
 	metaPath := s.getObjectMetaPath(bucket, key)
 	data, err := os.ReadFile(metaPath)
@@ -277,21 +298,6 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 		}
 	}
 
-	// Read content and calculate MD5
-	dataPath := s.getObjectDataPath(bucket, key, versionID)
-	if err := os.MkdirAll(filepath.Dir(dataPath), 0755); err != nil {
-		return nil, err
-	}
-
-	tmpFile, err := os.CreateTemp(filepath.Dir(dataPath), "put-object-*")
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-	}()
-
 	hasher := md5.New()
 	b3Hasher := blake3.New()
 	// Read all data first so we can encrypt before writing
@@ -309,25 +315,54 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	b3Hasher.Write(plaintext)
 	b3Checksum := hex.EncodeToString(b3Hasher.Sum(nil))
 
-	// Encrypt if key is configured
-	var payload []byte
-	if s.encryptionKey != nil {
-		payload, err = encryptPayload(s.encryptionKey, plaintext)
+	// If bucket is ContentAddressable, use cas-<checksum> as the version ID
+	if b.ContentAddressable {
+		versionID = "cas-" + b3Checksum
+	}
+
+	dataPath := s.getObjectDataPath(bucket, key, versionID)
+	if err := os.MkdirAll(filepath.Dir(dataPath), 0755); err != nil {
+		return nil, err
+	}
+
+	// For CAS, check if target file already exists (deduplication)
+	alreadyExists := false
+	if b.ContentAddressable {
+		if _, err := os.Stat(dataPath); err == nil {
+			alreadyExists = true
+		}
+	}
+
+	if !alreadyExists {
+		tmpFile, err := os.CreateTemp(filepath.Dir(dataPath), "put-object-*")
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		payload = plaintext
-	}
+		defer func() {
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpFile.Name())
+		}()
 
-	if _, err := tmpFile.Write(payload); err != nil {
-		return nil, err
-	}
+		// Encrypt if key is configured
+		var payload []byte
+		if s.encryptionKey != nil {
+			payload, err = encryptPayload(s.encryptionKey, plaintext)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			payload = plaintext
+		}
 
-	// Close temp file before renaming
-	_ = tmpFile.Close()
-	if err := os.Rename(tmpFile.Name(), dataPath); err != nil {
-		return nil, err
+		if _, err := tmpFile.Write(payload); err != nil {
+			return nil, err
+		}
+
+		// Close temp file before renaming
+		_ = tmpFile.Close()
+		if err := os.Rename(tmpFile.Name(), dataPath); err != nil {
+			return nil, err
+		}
 	}
 
 	// Read existing metadata or create new
@@ -355,7 +390,7 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 
 	// Adjust existing versions: IsLatest must be set to false for other versions
 	for i := range om.Versions {
-		if b.Versioning == "Enabled" {
+		if b.Versioning == "Enabled" || b.ContentAddressable {
 			om.Versions[i].IsLatest = false
 		} else {
 			// If versioning is suspended or disabled, we replace the version with ID "null"
@@ -589,7 +624,47 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 		deletedVer := om.Versions[foundIndex]
 		if !deletedVer.IsDeleteMarker {
 			dataPath := s.getObjectDataPath(bucket, key, versionID)
-			_ = os.Remove(dataPath)
+			
+			// If CAS, do reference counting before removing the data file
+			if strings.HasPrefix(versionID, "cas-") {
+				refCount := 0
+				// Scan all metadata keys in this bucket
+				metaKeys, scanErr := s.scanMetadataKeys(bucket)
+				if scanErr == nil {
+					for _, k := range metaKeys {
+						// Don't recount ourselves since we're about to be deleted
+						if k == key {
+							// For our own object, count only other versions
+							for _, otherVer := range om.Versions {
+								if otherVer.VersionID == versionID && !otherVer.IsDeleteMarker {
+									// wait, we are removing foundIndex from om.Versions below,
+									// so let's only count if it's NOT the version we're deleting.
+								}
+							}
+							continue
+						}
+						if otherMeta, err := s.readObjectMeta(bucket, k); err == nil {
+							for _, otherVer := range otherMeta.Versions {
+								if otherVer.VersionID == versionID && !otherVer.IsDeleteMarker {
+									refCount++
+								}
+							}
+						}
+					}
+				}
+				// Also count other versions of the same object we are currently editing
+				for i, otherVer := range om.Versions {
+					if i != foundIndex && otherVer.VersionID == versionID && !otherVer.IsDeleteMarker {
+						refCount++
+					}
+				}
+
+				if refCount == 0 {
+					_ = os.Remove(dataPath)
+				}
+			} else {
+				_ = os.Remove(dataPath)
+			}
 		}
 
 		// Remove from slice
@@ -675,7 +750,32 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 	} else {
 		// Versioning Disabled: Permanent deletion of all versions
 		for _, ver := range om.Versions {
-			_ = os.Remove(s.getObjectDataPath(bucket, key, ver.VersionID))
+			if !ver.IsDeleteMarker {
+				dataPath := s.getObjectDataPath(bucket, key, ver.VersionID)
+				if strings.HasPrefix(ver.VersionID, "cas-") {
+					refCount := 0
+					metaKeys, scanErr := s.scanMetadataKeys(bucket)
+					if scanErr == nil {
+						for _, k := range metaKeys {
+							if k == key {
+								continue
+							}
+							if otherMeta, err := s.readObjectMeta(bucket, k); err == nil {
+								for _, otherVer := range otherMeta.Versions {
+									if otherVer.VersionID == ver.VersionID && !otherVer.IsDeleteMarker {
+										refCount++
+									}
+								}
+							}
+						}
+					}
+					if refCount == 0 {
+						_ = os.Remove(dataPath)
+					}
+				} else {
+					_ = os.Remove(dataPath)
+				}
+			}
 		}
 		_ = os.Remove(s.getObjectMetaPath(bucket, key))
 		return &ObjectVersion{Key: key, IsDeleteMarker: true}, nil

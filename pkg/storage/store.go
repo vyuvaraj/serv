@@ -43,10 +43,11 @@ type LifecycleRule struct {
 }
 
 type Bucket struct {
-	Name       string          `json:"name"`
-	CreatedTime time.Time      `json:"created_time"`
-	Versioning  string         `json:"versioning"`  // "Enabled", "Suspended", "Disabled"
-	Lifecycle  []LifecycleRule `json:"lifecycle,omitempty"`
+	Name               string          `json:"name"`
+	CreatedTime        time.Time       `json:"created_time"`
+	Versioning         string          `json:"versioning"` // "Enabled", "Suspended", "Disabled"
+	Lifecycle          []LifecycleRule `json:"lifecycle,omitempty"`
+	ContentAddressable bool            `json:"content_addressable,omitempty"`
 }
 
 type PartInfo struct {
@@ -60,6 +61,7 @@ type StorageEngine interface {
 	ListBuckets(ctx context.Context) ([]Bucket, error)
 	GetBucket(ctx context.Context, bucket string) (*Bucket, error)
 	SetBucketVersioning(ctx context.Context, bucket string, status string) error
+	SetBucketContentAddressable(ctx context.Context, bucket string, enabled bool) error
 
 	PutObject(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) (*ObjectVersion, error)
 	GetObject(ctx context.Context, bucket, key, versionID string) (io.ReadCloser, *ObjectVersion, error)

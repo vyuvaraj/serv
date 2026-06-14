@@ -65,7 +65,7 @@ Bring ServStore to high-scale production and Kubernetes environments.
 ## Phase 5: AI-Native Storage Engine Features
 Pioneer a new class of intelligent object storage by fusing S3 with vector indexing, time travel query semantics, and serverless sandboxed computing.
 - **AI & Intelligent Querying**:
-  - [ ] Content Addressing: Enable storage/retrieval via content hashing (`store.put(content)`) to support deduplication and Git-like addressing
+  - [x] Content Addressing: Enable storage/retrieval via content hashing (`store.put(content)`) to support deduplication and Git-like addressing
   - [ ] Time Travel: Query historical versions of objects at specific points in time (`bucket.at("timestamp")`) using existing version metadata
   - [ ] Semantic Search: Built-in local embedding generation and vector search (`store.search("query")`) to retrieve objects semantically
 - **Compute Near Data**:
