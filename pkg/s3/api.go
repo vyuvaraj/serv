@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -24,13 +26,15 @@ type Gateway struct {
 	store    storage.StorageEngine
 	auth     *auth.AuthProvider
 	raftNode *cluster.RaftNode
+	cluster  *cluster.MembershipManager
 }
 
-func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *cluster.RaftNode) *Gateway {
+func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *cluster.RaftNode, clusterMgr *cluster.MembershipManager) *Gateway {
 	return &Gateway{
 		store:    store,
 		auth:     auth,
 		raftNode: raftNode,
+		cluster:  clusterMgr,
 	}
 }
 
@@ -114,6 +118,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Parse bucket and key
 	bucket, key := parsePath(r.URL.Path)
+
+	if bucket != "" && key != "" {
+		if g.cluster != nil {
+			ring := g.cluster.Ring()
+			if ring != nil {
+				owners, err := ring.GetNodes(bucket+"/"+key, 1)
+				if err == nil && len(owners) > 0 {
+					owner := owners[0]
+					if owner != g.cluster.LocalNodeID() {
+						if addr, exists := g.cluster.GetNodeAddress(owner); exists {
+							slog.Info("Proxying request to owner node", "bucket", bucket, "key", key, "owner", owner, "addr", addr)
+							g.proxyRequest(w, r, addr)
+							return
+						}
+					}
+				}
+			}
+		}
+	}
 
 	if bucket == "" {
 		if r.Method == http.MethodGet {
@@ -946,3 +969,24 @@ func (g *Gateway) proposeOrExecute(w http.ResponseWriter, r *http.Request, op st
 
 	return g.raftNode.Propose(cmd)
 }
+
+func (g *Gateway) proxyRequest(w http.ResponseWriter, r *http.Request, targetAddr string) {
+	if !strings.HasPrefix(targetAddr, "http://") && !strings.HasPrefix(targetAddr, "https://") {
+		targetAddr = "http://" + targetAddr
+	}
+	targetURL, err := url.Parse(targetAddr)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to parse target proxy URL: "+err.Error())
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = targetURL.Host
+	}
+
+	proxy.ServeHTTP(w, r)
+}
+

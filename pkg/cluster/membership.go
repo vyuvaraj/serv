@@ -27,6 +27,7 @@ type MembershipManager struct {
 	client    *http.Client
 	stopChan  chan struct{}
 	active    bool
+	ring      *HashRing
 }
 
 type GossipPayload struct {
@@ -47,7 +48,11 @@ func NewMembershipManager(nodeID, address string, bootstrapPeers string) *Member
 		peers:     make(map[string]*NodeInfo),
 		client:    &http.Client{Timeout: 2 * time.Second},
 		stopChan:  make(chan struct{}),
+		ring:      NewHashRing(50),
 	}
+
+	// Add local node to ring initially
+	mm.ring.AddNode(local.NodeID)
 
 	// Load bootstrap peers
 	if bootstrapPeers != "" {
@@ -66,6 +71,10 @@ func NewMembershipManager(nodeID, address string, bootstrapPeers string) *Member
 	}
 
 	return mm
+}
+
+func (mm *MembershipManager) Ring() *HashRing {
+	return mm.ring
 }
 
 func (mm *MembershipManager) Start(ctx context.Context) {
@@ -103,6 +112,26 @@ func (mm *MembershipManager) GetNodes() []NodeInfo {
 	}
 	return nodes
 }
+
+func (mm *MembershipManager) GetNodeAddress(nodeID string) (string, bool) {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+
+	if mm.localNode.NodeID == nodeID {
+		return mm.localNode.Address, true
+	}
+	if peer, exists := mm.peers[nodeID]; exists {
+		return peer.Address, true
+	}
+	return "", false
+}
+
+func (mm *MembershipManager) LocalNodeID() string {
+	mm.mu.RLock()
+	defer mm.mu.RUnlock()
+	return mm.localNode.NodeID
+}
+
 
 // MergeGossip processes incoming gossip payload and returns local state to sender.
 func (mm *MembershipManager) MergeGossip(payload GossipPayload) GossipPayload {
@@ -149,16 +178,29 @@ func (mm *MembershipManager) updatePeerInfo(peer *NodeInfo) {
 			peerCopy.LastSeen = time.Now()
 		}
 		mm.peers[peer.NodeID] = &peerCopy
+		if peerCopy.Status == "online" {
+			mm.ring.AddNode(peer.NodeID)
+		}
 		slog.Info("Discovered new cluster node", "node_id", peer.NodeID, "address", peer.Address)
 		return
 	}
 
 	// If info is newer, update it
 	if peer.LastSeen.After(existing.LastSeen) {
+		oldStatus := existing.Status
 		existing.Status = peer.Status
 		existing.LastSeen = peer.LastSeen
 		existing.Load = peer.Load
 		existing.Address = peer.Address
+
+		// Rebuild ring membership based on status transition
+		if oldStatus != existing.Status {
+			if existing.Status == "online" {
+				mm.ring.AddNode(peer.NodeID)
+			} else {
+				mm.ring.RemoveNode(peer.NodeID)
+			}
+		}
 	}
 }
 
@@ -266,6 +308,7 @@ func (mm *MembershipManager) checkTimeouts() {
 	for _, peer := range mm.peers {
 		if peer.Status == "online" && !peer.LastSeen.IsZero() && now.Sub(peer.LastSeen) > timeout {
 			peer.Status = "offline"
+			mm.ring.RemoveNode(peer.NodeID)
 			slog.Warn("Node went offline (heartbeat timeout)", "node_id", peer.NodeID, "address", peer.Address)
 		}
 	}

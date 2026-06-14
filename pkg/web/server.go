@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -287,6 +288,39 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(wc.cluster.GetNodes())
 		} else {
 			w.Write([]byte(`[]`))
+		}
+		return
+	}
+
+	if path == "/console/cluster/placement" && r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		if wc.cluster != nil && wc.cluster.Ring() != nil {
+			bucket := r.URL.Query().Get("bucket")
+			key := r.URL.Query().Get("key")
+			if bucket == "" || key == "" {
+				http.Error(w, `{"error":"Missing bucket or key parameter"}`, http.StatusBadRequest)
+				return
+			}
+			owners, err := wc.cluster.Ring().GetNodes(bucket+"/"+key, 1)
+			if err != nil || len(owners) == 0 {
+				errMsg := "Key placement lookup failed"
+				if err != nil {
+					errMsg = err.Error()
+				}
+				http.Error(w, fmt.Sprintf(`{"error":%q}`, errMsg), http.StatusInternalServerError)
+				return
+			}
+			owner := owners[0]
+			addr, _ := wc.cluster.GetNodeAddress(owner)
+			res := map[string]string{
+				"bucket":  bucket,
+				"key":     key,
+				"node_id": owner,
+				"address": addr,
+			}
+			json.NewEncoder(w).Encode(res)
+		} else {
+			http.Error(w, `{"error":"Cluster not enabled"}`, http.StatusServiceUnavailable)
 		}
 		return
 	}

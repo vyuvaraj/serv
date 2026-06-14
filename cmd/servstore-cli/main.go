@@ -39,6 +39,7 @@ Commands:
   policy-get     <username>             View the attached IAM policy for a user
   policy-del     <username>             Delete the attached IAM policy for a user
   cluster-status                        View the status of all nodes in the cluster
+  placement  <bucket> <key>                Find the node owning a specific key
   help                                  Print this message
 `
 
@@ -96,6 +97,8 @@ func main() {
 		err = cmdPolicyDel(rest)
 	case "cluster-status":
 		err = cmdClusterStatus(rest)
+	case "placement":
+		err = cmdPlacement(rest)
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -620,6 +623,44 @@ func cmdClusterStatus(args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n", node.NodeID, node.Address, node.Status, seen, node.Load)
 	}
 	w.Flush()
+	return nil
+}
+
+func cmdPlacement(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: placement <bucket> <key>")
+	}
+	bucket, key := args[0], args[1]
+
+	targetURL := url("/console/cluster/placement?bucket=" + bucket + "&key=" + key)
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return err
+	}
+
+	var res struct {
+		Bucket  string `json:"bucket"`
+		Key     string `json:"key"`
+		NodeID  string `json:"node_id"`
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return fmt.Errorf("decode placement: %w", err)
+	}
+
+	fmt.Printf("Bucket:     %s\n", res.Bucket)
+	fmt.Printf("Key:        %s\n", res.Key)
+	fmt.Printf("Owner Node: %s (%s)\n", res.NodeID, res.Address)
 	return nil
 }
 

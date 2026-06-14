@@ -40,7 +40,7 @@ Graduate from single-node to a consistent, fault-tolerant distributed system.
 - **Distributed System Foundation**:
   - [x] Cluster Membership (Gossip protocol or static configuration discovery)
   - [x] Raft Consensus Engine (For consistent metadata storage across nodes)
-  - [ ] Data Placement: Consistent Hashing or CRUSH-style placement algorithm
+  - [x] Data Placement: Consistent Hashing or CRUSH-style placement algorithm
   - [ ] Auto-healing (Background detection of offline drives/nodes and automatic rebuilds)
 - **Data Protection & Storage Reliability**:
   - [ ] Peer-to-peer data replication
