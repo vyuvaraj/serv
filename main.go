@@ -871,9 +871,10 @@ func countNetBraces(line string) int {
 			stringChar = ch
 			continue
 		}
-		if ch == '{' {
+		switch ch {
+		case '{':
 			net++
-		} else if ch == '}' {
+		case '}':
 			net--
 		}
 	}
@@ -962,11 +963,13 @@ func runREPL() {
 		// Build a temporary Serv program that includes all prior state + current line
 		var srvSource strings.Builder
 		for _, d := range declarations {
-			srvSource.WriteString(d + "\n")
+			srvSource.WriteString(d)
+			srvSource.WriteString("\n")
 		}
 
 		if isDecl {
-			srvSource.WriteString(line + "\n")
+			srvSource.WriteString(line)
+			srvSource.WriteString("\n")
 		} else {
 			// Expression: wrap in a let so it gets evaluated
 			srvSource.WriteString(fmt.Sprintf("let _result = %s\n", line))
@@ -1002,6 +1005,9 @@ func runREPL() {
 		if isDecl {
 			declarations = append(declarations, line)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("REPL read error: %v\n", err)
 	}
 
 	// .build/repl acts as a cache, no cleanup needed
@@ -1441,52 +1447,106 @@ func parseWithDependencies(filePath string, visited map[string]bool) (*compiler.
 			}
 
 			if len(imp.Names) > 0 {
-				// Selective import: only include exported statements matching the requested names
-				// Also auto-include methods for any imported struct types
-				nameSet := make(map[string]bool)
-				for _, n := range imp.Names {
-					nameSet[n] = true
-				}
-				// First pass: collect imported struct names
-				structNames := make(map[string]bool)
+				// Selective import validation
+				subExports := make(map[string]bool)   // name -> isExported
+				subDefined := make(map[string]bool)   // name -> exists
+				structNames := make(map[string]bool)  // imported struct names
+				
+				// Identify defined and exported symbols in the subProgram
 				for _, subStmt := range subProgram.Statements {
-					name := exportedName(subStmt)
-					if nameSet[name] {
-						inner := subStmt
-						if exp, ok := subStmt.(*compiler.ExportStmt); ok {
-							inner = exp.Inner
-						}
-						if _, isStruct := inner.(*compiler.StructDecl); isStruct {
-							structNames[name] = true
-						}
+					name := statementName(subStmt)
+					if name == "" {
+						continue
+					}
+					subDefined[name] = true
+					if _, ok := subStmt.(*compiler.ExportStmt); ok {
+						subExports[name] = true
 					}
 				}
-				// Second pass: include matching names + methods on imported structs
+
+				// Validate each imported name
+				for _, n := range imp.Names {
+					if !subDefined[n] {
+						return nil, fmt.Errorf("symbol '%s' is not defined in '%s'", n, imp.Path)
+					}
+					if !subExports[n] {
+						return nil, fmt.Errorf("cannot import non-exported symbol '%s' from '%s'", n, imp.Path)
+					}
+				}
+
+				// Collect imported struct names to auto-include their methods
 				for _, subStmt := range subProgram.Statements {
-					name := exportedName(subStmt)
+					name := statementName(subStmt)
+					if name == "" {
+						continue
+					}
 					inner := subStmt
 					if exp, ok := subStmt.(*compiler.ExportStmt); ok {
 						inner = exp.Inner
 					}
-					// Include if name matches directly
-					if nameSet[name] {
+					
+					// If this name is explicitly imported and is a Struct
+					var isStruct bool
+					for _, importedName := range imp.Names {
+						if importedName == name {
+							if _, ok := inner.(*compiler.StructDecl); ok {
+								isStruct = true
+							}
+							break
+						}
+					}
+					if isStruct {
+						structNames[name] = true
+					}
+				}
+
+				// Merge imported statements
+				for _, subStmt := range subProgram.Statements {
+					name := statementName(subStmt)
+					
+					// Non-named statements are always included (they might be transitive routes/background workers/etc.)
+					if name == "" {
+						mergedStatements = append(mergedStatements, subStmt)
+						continue
+					}
+
+					inner := subStmt
+					isExported := false
+					if exp, ok := subStmt.(*compiler.ExportStmt); ok {
+						inner = exp.Inner
+						isExported = true
+					}
+
+					// Include if name is in the import list
+					isImported := false
+					for _, importedName := range imp.Names {
+						if importedName == name {
+							isImported = true
+							break
+						}
+					}
+					if isImported {
 						mergedStatements = append(mergedStatements, inner)
 						continue
 					}
-					// Auto-include methods for imported struct types
+
+					// Auto-include exported methods for imported struct types
 					if method, ok := inner.(*compiler.MethodDecl); ok {
-						if structNames[method.TypeName] {
+						if structNames[method.TypeName] && isExported {
 							mergedStatements = append(mergedStatements, inner)
 						}
 					}
 				}
 			} else {
-				// Wildcard import: include all exported statements (and non-export statements for backward compat)
+				// Wildcard import: include all non-named statements + explicitly exported named statements
 				for _, subStmt := range subProgram.Statements {
-					if exp, ok := subStmt.(*compiler.ExportStmt); ok {
-						mergedStatements = append(mergedStatements, exp.Inner)
-					} else {
+					name := statementName(subStmt)
+					if name == "" {
 						mergedStatements = append(mergedStatements, subStmt)
+					} else {
+						if exp, ok := subStmt.(*compiler.ExportStmt); ok {
+							mergedStatements = append(mergedStatements, exp.Inner)
+						}
 					}
 				}
 			}

@@ -187,9 +187,69 @@ func (s *Server) handleDefinition(msg JSONRPCMessage) {
 	sendResponse(msg.ID, nil)
 }
 
-// --- Find References ---
+// --- Find References & Rename ---
 
 func (s *Server) handleReferences(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+		Position     Position               `json:"position"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	s.mu.RLock()
+	text := s.documents[params.TextDocument.URI]
+	syms := s.symbols[params.TextDocument.URI]
+	s.mu.RUnlock()
+
+	word := getWordAtPosition(text, params.Position)
+	if word == "" {
+		sendResponse(msg.ID, []interface{}{})
+		return
+	}
+
+	// Determine if this is a local variable
+	isLocal := false
+	var localStartLine, localEndLine int
+	enclosingSym := findEnclosingSymbol(syms, params.Position.Line)
+	if enclosingSym != nil {
+		lines := strings.Split(text, "\n")
+		localStartLine = enclosingSym.Line
+		localEndLine = len(lines) - 1
+		for _, sInfo := range syms {
+			if sInfo.Line > localStartLine && sInfo.Line < localEndLine {
+				localEndLine = sInfo.Line - 1
+			}
+		}
+		if isLocalVariable(word, text, localStartLine, params.Position.Line) {
+			isLocal = true
+		}
+	}
+
+	var locations []Location
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if isLocal {
+		docText := s.documents[params.TextDocument.URI]
+		lines := strings.Split(docText, "\n")
+		for lineNum := localStartLine; lineNum <= localEndLine && lineNum < len(lines); lineNum++ {
+			line := lines[lineNum]
+			locations = append(locations, findWordOccurrencesInLine(line, word, lineNum, params.TextDocument.URI)...)
+		}
+	} else {
+		for uri, docText := range s.documents {
+			lines := strings.Split(docText, "\n")
+			for lineNum, line := range lines {
+				locations = append(locations, findWordOccurrencesInLine(line, word, lineNum, uri)...)
+			}
+		}
+	}
+
+	sendResponse(msg.ID, locations)
+}
+
+func (s *Server) handlePrepareRename(msg JSONRPCMessage) {
 	var params struct {
 		TextDocument TextDocumentIdentifier `json:"textDocument"`
 		Position     Position               `json:"position"`
@@ -201,51 +261,220 @@ func (s *Server) handleReferences(msg JSONRPCMessage) {
 	s.mu.RUnlock()
 
 	word := getWordAtPosition(text, params.Position)
-	if word == "" {
-		sendResponse(msg.ID, []interface{}{})
+	if word == "" || isBuiltinOrKeyword(word) {
+		sendResponse(msg.ID, nil)
 		return
+	}
+
+	lines := strings.Split(text, "\n")
+	if params.Position.Line >= len(lines) {
+		sendResponse(msg.ID, nil)
+		return
+	}
+	line := lines[params.Position.Line]
+	start := params.Position.Character
+	for start > 0 && isWordChar(line[start-1]) {
+		start--
+	}
+	end := params.Position.Character
+	for end < len(line) && isWordChar(line[end]) {
+		end++
+	}
+
+	sendResponse(msg.ID, Range{
+		Start: Position{Line: params.Position.Line, Character: start},
+		End:   Position{Line: params.Position.Line, Character: end},
+	})
+}
+
+func (s *Server) handleRename(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+		Position     Position               `json:"position"`
+		NewName      string                 `json:"newName"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	s.mu.RLock()
+	text := s.documents[params.TextDocument.URI]
+	syms := s.symbols[params.TextDocument.URI]
+	s.mu.RUnlock()
+
+	word := getWordAtPosition(text, params.Position)
+	if word == "" || isBuiltinOrKeyword(word) {
+		sendResponse(msg.ID, nil)
+		return
+	}
+
+	isLocal := false
+	var localStartLine, localEndLine int
+	enclosingSym := findEnclosingSymbol(syms, params.Position.Line)
+	if enclosingSym != nil {
+		lines := strings.Split(text, "\n")
+		localStartLine = enclosingSym.Line
+		localEndLine = len(lines) - 1
+		for _, sInfo := range syms {
+			if sInfo.Line > localStartLine && sInfo.Line < localEndLine {
+				localEndLine = sInfo.Line - 1
+			}
+		}
+		if isLocalVariable(word, text, localStartLine, params.Position.Line) {
+			isLocal = true
+		}
 	}
 
 	var locations []Location
 
-	// Search all open documents for references to this symbol
 	s.mu.RLock()
-	for uri, docText := range s.documents {
+	if isLocal {
+		docText := s.documents[params.TextDocument.URI]
 		lines := strings.Split(docText, "\n")
-		for lineNum, line := range lines {
-			// Find all occurrences of the word in this line
-			idx := 0
-			for {
-				pos := strings.Index(line[idx:], word)
-				if pos < 0 {
-					break
-				}
-				col := idx + pos
-				// Check it's a whole word (not part of a larger identifier)
-				isBoundary := true
-				if col > 0 && isWordChar(line[col-1]) {
-					isBoundary = false
-				}
-				endCol := col + len(word)
-				if endCol < len(line) && isWordChar(line[endCol]) {
-					isBoundary = false
-				}
-				if isBoundary {
-					locations = append(locations, Location{
-						URI: uri,
-						Range: Range{
-							Start: Position{Line: lineNum, Character: col},
-							End:   Position{Line: lineNum, Character: endCol},
-						},
-					})
-				}
-				idx = col + len(word)
+		for lineNum := localStartLine; lineNum <= localEndLine && lineNum < len(lines); lineNum++ {
+			line := lines[lineNum]
+			locations = append(locations, findWordOccurrencesInLine(line, word, lineNum, params.TextDocument.URI)...)
+		}
+	} else {
+		for uri, docText := range s.documents {
+			lines := strings.Split(docText, "\n")
+			for lineNum, line := range lines {
+				locations = append(locations, findWordOccurrencesInLine(line, word, lineNum, uri)...)
 			}
 		}
 	}
 	s.mu.RUnlock()
 
-	sendResponse(msg.ID, locations)
+	changes := make(map[string][]TextEdit)
+	for _, loc := range locations {
+		changes[loc.URI] = append(changes[loc.URI], TextEdit{
+			Range:   loc.Range,
+			NewText: params.NewName,
+		})
+	}
+
+	sendResponse(msg.ID, WorkspaceEdit{Changes: changes})
+}
+
+// --- Helper Functions for Reference Resolution and Scope Tracking ---
+
+func findEnclosingSymbol(symbols []symbolInfo, line int) *symbolInfo {
+	var best *symbolInfo
+	for i := range symbols {
+		sym := &symbols[i]
+		if sym.Line <= line {
+			if best == nil || sym.Line > best.Line {
+				best = sym
+			}
+		}
+	}
+	return best
+}
+
+func isLocalVariable(word string, text string, startLine, cursorLine int) bool {
+	lines := strings.Split(text, "\n")
+	for i := startLine; i <= cursorLine && i < len(lines); i++ {
+		line := lines[i]
+		if strings.Contains(line, "let ") && strings.Contains(line, word) {
+			if isVarDeclaredInLet(line, word) {
+				return true
+			}
+		}
+		if strings.Contains(line, "for ") && strings.Contains(line, " in ") {
+			if isVarDeclaredInFor(line, word) {
+				return true
+			}
+		}
+		if (strings.Contains(line, "fn ") || strings.Contains(line, "route ") || strings.Contains(line, "subscribe ") || strings.Contains(line, "ws ")) && (strings.Contains(line, "("+word) || strings.Contains(line, ", "+word)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isVarDeclaredInLet(line, word string) bool {
+	parts := strings.SplitN(line, "=", 2)
+	if len(parts) < 1 {
+		return false
+	}
+	left := strings.TrimPrefix(strings.TrimSpace(parts[0]), "let ")
+	vars := strings.Split(left, ",")
+	for _, v := range vars {
+		v = strings.TrimSpace(v)
+		if strings.Contains(v, ":") {
+			vParts := strings.SplitN(v, ":", 2)
+			v = strings.TrimSpace(vParts[0])
+		}
+		if v == word {
+			return true
+		}
+	}
+	return false
+}
+
+func isVarDeclaredInFor(line, word string) bool {
+	parts := strings.SplitN(line, " in ", 2)
+	if len(parts) < 1 {
+		return false
+	}
+	left := strings.TrimPrefix(strings.TrimSpace(parts[0]), "for ")
+	vars := strings.Split(left, ",")
+	for _, v := range vars {
+		if strings.TrimSpace(v) == word {
+			return true
+		}
+	}
+	return false
+}
+
+func findWordOccurrencesInLine(line, word string, lineNum int, uri string) []Location {
+	var locations []Location
+	idx := 0
+	for {
+		pos := strings.Index(line[idx:], word)
+		if pos < 0 {
+			break
+		}
+		col := idx + pos
+		isBoundary := true
+		if col > 0 && isWordChar(line[col-1]) {
+			isBoundary = false
+		}
+		endCol := col + len(word)
+		if endCol < len(line) && isWordChar(line[endCol]) {
+			isBoundary = false
+		}
+		if isBoundary {
+			locations = append(locations, Location{
+				URI: uri,
+				Range: Range{
+					Start: Position{Line: lineNum, Character: col},
+					End:   Position{Line: lineNum, Character: endCol},
+				},
+			})
+		}
+		idx = col + len(word)
+	}
+	return locations
+}
+
+func isBuiltinOrKeyword(word string) bool {
+	keywords := map[string]bool{
+		"fn": true, "let": true, "return": true, "if": true, "else": true,
+		"for": true, "in": true, "match": true, "struct": true, "interface": true,
+		"middleware": true, "export": true, "import": true, "route": true,
+		"every": true, "cron": true, "subscribe": true, "publish": true,
+		"spawn": true, "server": true, "database": true, "broker": true,
+		"cache": true, "try": true, "catch": true, "test": true, "assert": true,
+		"enum": true, "await": true, "true": true, "false": true, "nil": true,
+		"self": true, "declare": true, "module": true, "from": true, "extern": true,
+		"migration": true, "tool": true, "ws": true, "use": true, "channel": true,
+		"atomic": true, "break": true, "continue": true, "type": true,
+	}
+	builtins := map[string]bool{
+		"log": true, "db": true, "cache": true, "http": true, "json": true,
+		"time": true, "metric": true, "atomic": true, "channel": true,
+		"registry": true, "env": true, "config": true, "validate": true,
+	}
+	return keywords[word] || builtins[word]
 }
 
 // --- Document Symbols ---

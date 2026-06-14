@@ -164,7 +164,7 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 | 6.1 | **Cross-file go-to-definition** | Medium | ✅ Done — searches all open documents |
 | 6.2 | **Semantic hover** (on usage, not just definition) | Medium | ✅ Done — looks up word under cursor in symbol table |
 | 6.3 | **Signature help** | Medium | ✅ Done — shows params on `(` and `,` triggers |
-| 6.4 | **Find references / rename** | Large | ⬜ Not started |
+| 6.4 | **Find references / rename** | Large | ✅ Done — scoped references + prepareRename + rename |
 | 6.5 | **Semantic diagnostics** | Medium | ✅ Done — static analysis warnings shown in real time |
 | 6.6 | **`serv fmt` integration** | Small | ✅ Done — format-on-save via LSP documentFormatting |
 
@@ -184,7 +184,7 @@ Directly gated on Phase 2 progress — better types = less runtime overhead.
 |---|------|--------|--------|
 | 8.1 | **Package resolution without relative paths** | Medium | ✅ Done — `import { ok } from "stdlib/response"` works |
 | 8.2 | **Circular dependency detection** | Small | ✅ Done — clear error with file name |
-| 8.3 | **Module-level visibility enforcement** | Medium | ⬜ Not started |
+| 8.3 | **Module-level visibility enforcement** | Medium | ✅ Done — selective & wildcard visibility validation |
 
 ### Phase 9: Distribution & Ecosystem (Low Priority)
 
