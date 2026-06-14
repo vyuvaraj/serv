@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Simple credential store for MVP
@@ -18,30 +19,146 @@ type Credential struct {
 type AuthProvider struct {
 	credentials map[string]string // AccessKey -> SecretKey
 	enabled     bool
+	jwtSecret   []byte
+	ldapClient  *LDAPClient
+	oidcClient  *OIDCClient
 }
 
 func NewAuthProvider(accessKey, secretKey string, enabled bool) *AuthProvider {
 	creds := make(map[string]string)
+	var jwtSec []byte
 	if accessKey != "" && secretKey != "" {
 		creds[accessKey] = secretKey
+		// Derive a JWT signing key from the secret key so sessions persist across restarts
+		h := sha256.Sum256([]byte(secretKey))
+		jwtSec = h[:]
+	} else {
+		// Fallback to a random key if no secret is set
+		h := sha256.Sum256([]byte("default-servstore-jwt-fallback-secret-key-32bytes"))
+		jwtSec = h[:]
 	}
+
 	return &AuthProvider{
 		credentials: creds,
 		enabled:     enabled,
+		jwtSecret:   jwtSec,
 	}
+}
+
+func (ap *AuthProvider) ConfigureLDAP(ldapURL, dnTemplate string) {
+	if ldapURL != "" {
+		ap.ldapClient = NewLDAPClient(ldapURL, dnTemplate)
+	}
+}
+
+func (ap *AuthProvider) ConfigureOIDC(cfg OIDCConfig) {
+	if cfg.Issuer != "" {
+		ap.oidcClient = NewOIDCClient(cfg)
+	}
+}
+
+func (ap *AuthProvider) HasLDAP() bool {
+	return ap.ldapClient != nil
+}
+
+func (ap *AuthProvider) HasOIDC() bool {
+	return ap.oidcClient != nil && ap.oidcClient.IsEnabled()
+}
+
+func (ap *AuthProvider) OIDCClient() *OIDCClient {
+	return ap.oidcClient
+}
+
+func (ap *AuthProvider) JWTSecret() []byte {
+	return ap.jwtSecret
 }
 
 func (ap *AuthProvider) IsEnabled() bool {
 	return ap.enabled
 }
 
-// VerifyRequest validates the AWS Signature V4 of the incoming HTTP request.
+func (ap *AuthProvider) GetIdentity(r *http.Request) string {
+	if !ap.enabled {
+		return "anonymous"
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Basic ") {
+		username, _, ok := r.BasicAuth()
+		if ok {
+			return username
+		}
+	}
+
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		claims, err := ValidateToken(tokenStr, ap.jwtSecret)
+		if err == nil {
+			return claims.Username
+		}
+	}
+
+	if cookie, err := r.Cookie("token"); err == nil {
+		claims, err := ValidateToken(cookie.Value, ap.jwtSecret)
+		if err == nil {
+			return claims.Username
+		}
+	}
+
+	if strings.HasPrefix(authHeader, "AWS4-HMAC-SHA256 ") {
+		parts := strings.Split(authHeader[17:], ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "Credential=") {
+				cred := part[11:]
+				credParts := strings.Split(cred, "/")
+				if len(credParts) > 0 {
+					return credParts[0]
+				}
+			}
+		}
+	}
+
+	if credential := r.URL.Query().Get("X-Amz-Credential"); credential != "" {
+		credParts := strings.Split(credential, "/")
+		if len(credParts) > 0 {
+			return credParts[0]
+		}
+	}
+
+	return ""
+}
+
+// VerifyRequest validates the request. If auth is disabled, it returns true.
+// It supports either a JWT token in the Authorization header (Bearer) or AWS SigV4.
 func (ap *AuthProvider) VerifyRequest(r *http.Request) bool {
 	if !ap.enabled {
 		return true
 	}
 
 	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Basic ") {
+		username, password, ok := r.BasicAuth()
+		if ok {
+			secret, exists := ap.credentials[username]
+			return exists && secret == password
+		}
+	}
+
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		_, err := ValidateToken(tokenStr, ap.jwtSecret)
+		return err == nil
+	}
+
+	// Also check Cookie for JWT token (useful for browser console requests)
+	if cookie, err := r.Cookie("token"); err == nil {
+		_, err := ValidateToken(cookie.Value, ap.jwtSecret)
+		if err == nil {
+			return true
+		}
+	}
+
 	if authHeader == "" {
 		// Also check query string for auth parameters
 		authHeader = r.URL.Query().Get("X-Amz-Algorithm")
@@ -52,6 +169,43 @@ func (ap *AuthProvider) VerifyRequest(r *http.Request) bool {
 	}
 
 	return ap.verifyHeaderSignature(r, authHeader)
+}
+
+// AuthenticateConsole attempts to authenticate console users using local keys or LDAP.
+// Returns a JWT token if successful, or an error.
+func (ap *AuthProvider) AuthenticateConsole(username, password string) (string, error) {
+	// 1. Try local credentials
+	if secret, ok := ap.credentials[username]; ok {
+		if secret == password {
+			// Generate token valid for 24 hours
+			claims := JWTClaims{
+				Username:  username,
+				Role:      "admin",
+				ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+				Issuer:    "servstore",
+			}
+			return GenerateToken(claims, ap.jwtSecret)
+		}
+	}
+
+	// 2. Try LDAP if configured
+	if ap.ldapClient != nil {
+		ok, err := ap.ldapClient.Authenticate(username, password)
+		if err != nil {
+			return "", fmt.Errorf("LDAP auth error: %w", err)
+		}
+		if ok {
+			claims := JWTClaims{
+				Username:  username,
+				Role:      "ldap-user",
+				ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+				Issuer:    "servstore",
+			}
+			return GenerateToken(claims, ap.jwtSecret)
+		}
+	}
+
+	return "", fmt.Errorf("invalid credentials")
 }
 
 func sum256(data []byte) []byte {
@@ -70,7 +224,6 @@ func hmacSHA256(key []byte, data []byte) []byte {
 }
 
 func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string) bool {
-	// Format: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-date, Signature=...
 	if !strings.HasPrefix(authHeader, "AWS4-HMAC-SHA256 ") {
 		return false
 	}
@@ -107,22 +260,17 @@ func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string
 	}
 
 	// Reconstruct the Canonical Request
-	// 1. HTTP Method
 	method := r.Method
-
-	// 2. Canonical URI
 	uri := r.URL.Path
 	if uri == "" {
 		uri = "/"
 	}
 
-	// 3. Canonical Query String
-	// Need to sort query parameters
 	queryParams := r.URL.Query()
 	var queryKeys []string
 	for k := range queryParams {
 		if k == "X-Amz-Signature" || k == "Signature" {
-			continue // Skip signature parameter itself in canonical string
+			continue
 		}
 		queryKeys = append(queryKeys, k)
 	}
@@ -136,7 +284,6 @@ func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string
 	}
 	canonicalQuery := strings.Join(queryParts, "&")
 
-	// 4. Canonical Headers
 	signedHeadersList := strings.Split(signedHeadersPart, ";")
 	var canonicalHeaders strings.Builder
 	for _, h := range signedHeadersList {
@@ -150,7 +297,6 @@ func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string
 		canonicalHeaders.WriteString(fmt.Sprintf("%s:%s\n", hLower, strings.TrimSpace(val)))
 	}
 
-	// 5. Payload Hash
 	payloadHash := r.Header.Get("X-Amz-Content-Sha256")
 	if payloadHash == "" {
 		payloadHash = "UNSIGNED-PAYLOAD"
@@ -165,7 +311,6 @@ func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string
 		payloadHash,
 	)
 
-	// String to Sign
 	amzDate := r.Header.Get("X-Amz-Date")
 	if amzDate == "" {
 		amzDate = r.Header.Get("Date")
@@ -179,7 +324,6 @@ func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string
 		hexEncode(sum256([]byte(canonicalRequest))),
 	)
 
-	// Calculate Signature
 	kDate := hmacSHA256([]byte("AWS4"+secretKey), []byte(dateStr))
 	kRegion := hmacSHA256(kDate, []byte(region))
 	kService := hmacSHA256(kRegion, []byte(service))
@@ -191,7 +335,6 @@ func (ap *AuthProvider) verifyHeaderSignature(r *http.Request, authHeader string
 }
 
 func (ap *AuthProvider) verifyQuerySignature(r *http.Request) bool {
-	// Query params authentication
 	algorithm := r.URL.Query().Get("X-Amz-Algorithm")
 	if algorithm != "AWS4-HMAC-SHA256" {
 		return false
@@ -220,14 +363,12 @@ func (ap *AuthProvider) verifyQuerySignature(r *http.Request) bool {
 		return false
 	}
 
-	// Canonical Request construction for query auth
 	method := r.Method
 	uri := r.URL.Path
 	if uri == "" {
 		uri = "/"
 	}
 
-	// Gather query keys excluding X-Amz-Signature
 	queryParams := r.URL.Query()
 	var queryKeys []string
 	for k := range queryParams {
@@ -246,7 +387,6 @@ func (ap *AuthProvider) verifyQuerySignature(r *http.Request) bool {
 	}
 	canonicalQuery := strings.Join(queryParts, "&")
 
-	// Canonical Headers
 	signedHeadersList := strings.Split(signedHeaders, ";")
 	var canonicalHeaders strings.Builder
 	for _, h := range signedHeadersList {
@@ -296,7 +436,6 @@ func sortStrings(strs []string) {
 	}
 }
 
-// pathEscape escapes string for S3 canonical URI/Query matching AWS SigV4 specification
 func pathEscape(s string) string {
 	var hexCount int
 	for i := 0; i < len(s); i++ {

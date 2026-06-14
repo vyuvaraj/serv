@@ -77,4 +77,8 @@ type StorageEngine interface {
 	SetBucketLifecycle(ctx context.Context, bucket string, rules []LifecycleRule) error
 	GetBucketLifecycle(ctx context.Context, bucket string) ([]LifecycleRule, error)
 	DeleteBucketLifecycle(ctx context.Context, bucket string) error
+
+	PutUserPolicy(ctx context.Context, username string, policy []byte) error
+	GetUserPolicy(ctx context.Context, username string) ([]byte, error)
+	DeleteUserPolicy(ctx context.Context, username string) error
 }

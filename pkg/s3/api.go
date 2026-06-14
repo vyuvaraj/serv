@@ -1,11 +1,13 @@
 package s3
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -97,6 +99,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Verify authentication
 	if !g.auth.VerifyRequest(r) {
 		g.writeError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return
+	}
+
+	// Verify RBAC Authorization
+	if !g.checkAuthorization(r) {
+		g.writeError(w, http.StatusForbidden, "AccessDenied", "Access Denied by RBAC Policy")
 		return
 	}
 
@@ -800,4 +808,100 @@ func (g *Gateway) handleDeleteBucketLifecycle(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (g *Gateway) authorize(r *http.Request, action, resource string) bool {
+	if !g.auth.IsEnabled() {
+		return true
+	}
+
+	identity := g.auth.GetIdentity(r)
+	if identity == "" {
+		return false
+	}
+
+	policyBytes, err := g.store.GetUserPolicy(r.Context(), identity)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Permissive mode if no policy attached
+			return true
+		}
+		return false
+	}
+
+	var pol auth.Policy
+	if err := json.Unmarshal(policyBytes, &pol); err != nil {
+		return false
+	}
+
+	return pol.IsAllowed(action, resource)
+}
+
+func (g *Gateway) checkAuthorization(r *http.Request) bool {
+	if !g.auth.IsEnabled() {
+		return true
+	}
+
+	bucket, key := parsePath(r.URL.Path)
+	var action string
+	var resource string
+
+	if bucket == "" {
+		action = "s3:ListAllMyBuckets"
+		resource = "arn:aws:s3:::*"
+	} else if key == "" {
+		resource = "arn:aws:s3:::" + bucket
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Has("versioning") {
+				action = "s3:GetBucketVersioning"
+			} else if r.URL.Query().Has("versions") {
+				action = "s3:ListBucketVersions"
+			} else if r.URL.Query().Has("lifecycle") {
+				action = "s3:GetLifecycleConfiguration"
+			} else {
+				action = "s3:ListBucket"
+			}
+		case http.MethodPut:
+			if r.URL.Query().Has("versioning") {
+				action = "s3:PutBucketVersioning"
+			} else if r.URL.Query().Has("lifecycle") {
+				action = "s3:PutLifecycleConfiguration"
+			} else {
+				action = "s3:CreateBucket"
+			}
+		case http.MethodDelete:
+			if r.URL.Query().Has("lifecycle") {
+				action = "s3:PutLifecycleConfiguration"
+			} else {
+				action = "s3:DeleteBucket"
+			}
+		case http.MethodHead:
+			action = "s3:ListBucket"
+		default:
+			return false
+		}
+	} else {
+		resource = "arn:aws:s3:::" + bucket + "/" + key
+		switch r.Method {
+		case http.MethodGet:
+			action = "s3:GetObject"
+		case http.MethodPut:
+			action = "s3:PutObject"
+		case http.MethodDelete:
+			action = "s3:DeleteObject"
+		case http.MethodHead:
+			action = "s3:GetObject"
+		case http.MethodPost:
+			if r.URL.Query().Has("uploads") || r.URL.Query().Has("uploadId") {
+				action = "s3:PutObject"
+			} else {
+				action = "s3:PutObject"
+			}
+		default:
+			return false
+		}
+	}
+
+	return g.authorize(r, action, resource)
 }

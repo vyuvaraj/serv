@@ -31,10 +31,13 @@ Commands:
   get  <bucket> <key> <dest>       Download an object to a file (use - for stdout)
   rm   <bucket> <key>              Delete an object
   lock <bucket> <key> <duration>   Apply a WORM lock (e.g. 72h, 30d, 1y)
-  lc-set <bucket> <days> [prefix]  Set lifecycle expiry rule (delete objects older than N days)
-  lc-get <bucket>                  Show the lifecycle configuration for a bucket
-  lc-del <bucket>                  Remove the lifecycle configuration from a bucket
-  help                             Print this message
+  lc-set     <bucket> <days> [prefix] Set lifecycle expiry rule (delete objects older than N days)
+  lc-get     <bucket>                 Show the lifecycle configuration for a bucket
+  lc-del     <bucket>                 Remove the lifecycle configuration from a bucket
+  policy-set <username> <file.json>   Attach an IAM policy to a user
+  policy-get <username>               View the attached IAM policy for a user
+  policy-del <username>               Delete the attached IAM policy for a user
+  help                                Print this message
 `
 
 // ---------- global flags ----------
@@ -83,6 +86,12 @@ func main() {
 		err = cmdLCGet(rest)
 	case "lc-del":
 		err = cmdLCDel(rest)
+	case "policy-set":
+		err = cmdPolicySet(rest)
+	case "policy-get":
+		err = cmdPolicyGet(rest)
+	case "policy-del":
+		err = cmdPolicyDel(rest)
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -473,6 +482,93 @@ func cmdLCDel(args []string) error {
 		return err
 	}
 	fmt.Printf("Lifecycle configuration removed from '%s'\n", bucket)
+	return nil
+}
+
+func cmdPolicySet(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: policy-set <username> <file.json>")
+	}
+	username := args[0]
+	filepath := args[1]
+
+	data, err := os.ReadFile(filepath)
+	if err != nil {
+		return fmt.Errorf("read policy file: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, url("/console/users/"+username+"/policy"), strings.NewReader(string(data)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := expectStatus(resp, http.StatusOK, http.StatusNoContent); err != nil {
+		return err
+	}
+
+	fmt.Printf("Policy successfully attached to user '%s'.\n", username)
+	return nil
+}
+
+func cmdPolicyGet(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: policy-get <username>")
+	}
+	username := args[0]
+
+	req, err := http.NewRequest(http.MethodGet, url("/console/users/"+username+"/policy"), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(body))
+	return nil
+}
+
+func cmdPolicyDel(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: policy-del <username>")
+	}
+	username := args[0]
+
+	req, err := http.NewRequest(http.MethodDelete, url("/console/users/"+username+"/policy"), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := expectStatus(resp, http.StatusOK, http.StatusNoContent); err != nil {
+		return err
+	}
+
+	fmt.Printf("Policy successfully removed from user '%s'.\n", username)
 	return nil
 }
 

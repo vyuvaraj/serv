@@ -1,4 +1,24 @@
 // ServStore Console Application Logic
+// Wrap global fetch to automatically inject Bearer tokens and handle 401/403 redirects
+const originalFetch = window.fetch;
+window.fetch = async function (resource, options = {}) {
+    options.headers = options.headers || {};
+    const token = localStorage.getItem('token');
+    if (token) {
+        // Only add authorization header for local requests, not external URLs
+        if (typeof resource === 'string' && (!resource.startsWith('http') || resource.startsWith(window.location.origin))) {
+            options.headers['Authorization'] = `Bearer ${token}`;
+        }
+    }
+    
+    const response = await originalFetch(resource, options);
+    if ((response.status === 401 || response.status === 403) && !resource.includes('/console/login')) {
+        localStorage.removeItem('token');
+        window.location.href = '/login.html';
+    }
+    return response;
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     let currentBucket = '';
     let selectedObjectForVersions = '';
@@ -573,6 +593,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 row.style.display = name.includes(query) ? '' : 'none';
             }
         });
+    });
+
+    // Logout functionality
+    document.getElementById('btn-logout').addEventListener('click', () => {
+        localStorage.removeItem('token');
+        window.location.href = '/console/logout';
     });
 
     // Initial load

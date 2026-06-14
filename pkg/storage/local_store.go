@@ -1222,3 +1222,43 @@ func (s *LocalStore) LockObject(ctx context.Context, bucket, key, versionID stri
 	result := om.Versions[foundIndex]
 	return &result, nil
 }
+
+func (s *LocalStore) getUserPolicyPath(username string) string {
+	return filepath.Join(s.rootDir, ".system", "iam", "policies", username+".json")
+}
+
+func (s *LocalStore) PutUserPolicy(ctx context.Context, username string, policy []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := s.getUserPolicyPath(username)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, policy, 0644)
+}
+
+func (s *LocalStore) GetUserPolicy(ctx context.Context, username string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	path := s.getUserPolicyPath(username)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *LocalStore) DeleteUserPolicy(ctx context.Context, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := s.getUserPolicyPath(username)
+	err := os.Remove(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}

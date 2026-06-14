@@ -24,8 +24,8 @@ Enhance the single-node capabilities with enterprise security, management utilit
 - **Security & IAM**:
   - [x] TLS 1.3 enforcement
   - [x] AES-256 Encryption-at-Rest
-  - [ ] JWT / OIDC / LDAP Integration for console and API auth
-  - [ ] RBAC (Role-Based Access Control) authorization policies
+  - [x] JWT / OIDC / LDAP Integration for console and API auth
+  - [x] RBAC (Role-Based Access Control) authorization policies
 - **Observability**:
   - [x] Structured logging (JSON format)
   - [x] Prometheus metrics endpoint (Request rate, latency, storage utilization, active connections)
@@ -59,3 +59,14 @@ Bring ServStore to high-scale production and Kubernetes environments.
   - [ ] Custom Resource Definitions (CRDs) for clusters, buckets, and access credentials
   - [ ] Helm charts for easy packaging and deployment
   - [ ] Orchestration of zero-downtime rolling upgrades of clusters
+
+---
+
+## Phase 5: AI-Native Storage Engine Features
+Pioneer a new class of intelligent object storage by fusing S3 with vector indexing, time travel query semantics, and serverless sandboxed computing.
+- **AI & Intelligent Querying**:
+  - [ ] Content Addressing: Enable storage/retrieval via content hashing (`store.put(content)`) to support deduplication and Git-like addressing
+  - [ ] Time Travel: Query historical versions of objects at specific points in time (`bucket.at("timestamp")`) using existing version metadata
+  - [ ] Semantic Search: Built-in local embedding generation and vector search (`store.search("query")`) to retrieve objects semantically
+- **Compute Near Data**:
+  - [ ] Serverless WASM Transforms: Run sandboxed WASM binaries server-side directly on object streams (`bucket.map(transform)`) using `wazero`
