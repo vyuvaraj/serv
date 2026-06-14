@@ -59,6 +59,8 @@ Bring ServStore to high-scale production and Kubernetes environments.
   - [ ] Custom Resource Definitions (CRDs) for clusters, buckets, and access credentials
   - [ ] Helm charts for easy packaging and deployment
   - [ ] Orchestration of zero-downtime rolling upgrades of clusters
+  - [ ] CSI (Container Storage Interface) Plugin support to expose ServStore buckets as persistent storage volumes
+  - [ ] Dynamic Traffic Flow Control & Rate Limiting per namespace/tenant
 
 ---
 
@@ -67,6 +69,23 @@ Pioneer a new class of intelligent object storage by fusing S3 with vector index
 - **AI & Intelligent Querying**:
   - [x] Content Addressing: Enable storage/retrieval via content hashing (`store.put(content)`) to support deduplication and Git-like addressing
   - [ ] Time Travel: Query historical versions of objects at specific points in time (`bucket.at("timestamp")`) using existing version metadata
-  - [ ] Semantic Search: Built-in local embedding generation and vector search (`store.search("query")`) to retrieve objects semantically
+  - [ ] Semantic Search: Built-in local embedding generation (ONNX runtime / local models) and vector search interface (`GET /bucket/object?query=semantic`) to retrieve objects semantically
+  - [ ] Auto-Embedding Pipeline: Automatically index documents (PDFs, text) and generate vector representations upon upload
 - **Compute Near Data**:
   - [ ] Serverless WASM Transforms: Run sandboxed WASM binaries server-side directly on object streams (`bucket.map(transform)`) using `wazero`
+  - [ ] WASM Runtime Sandbox Limits: Strict memory/CPU quota configuration per execution context to prevent resource starvation
+- **Hybrid Cloud Archiving**:
+  - [ ] Cold Storage Tiering: Automatically archive cold CAS blocks asynchronously to public cloud storage (AWS S3 Glacier, GCP Coldline) to minimize local NVMe storage costs
+
+---
+
+## Phase 6: Enterprise Hardening & Chaos Engineering
+Ensure production readiness through rigorous validation, resiliency checks, and performance benchmarks.
+- **Resiliency & Validation**:
+  - [ ] Jepsen Testing: Rigorous testing of the Raft FSM and cluster consensus layer under simulated network partitions
+  - [ ] Chaos Mesh Integration: Simulate arbitrary disk latency, packet loss, and node crashes in Kubernetes to validate auto-healing
+  - [ ] API Fuzzing: Auto-generate malformed S3 requests to ensure HTTP routing and parser stability
+- **High-Performance Optimization**:
+  - [ ] Direct I/O and Zero-Copy: Optimize storage engine pipelines to bypass OS page cache where appropriate for maximum disk throughput
+  - [ ] Multi-threaded Hashing: Parallelize BLAKE3 checksum hashing for multi-gigabyte payload streams
+
