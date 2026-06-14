@@ -38,7 +38,7 @@ Enhance the single-node capabilities with enterprise security, management utilit
 ## Phase 3: Distributed Clustering & Data Protection
 Graduate from single-node to a consistent, fault-tolerant distributed system.
 - **Distributed System Foundation**:
-  - [ ] Cluster Membership (Gossip protocol or static configuration discovery)
+  - [x] Cluster Membership (Gossip protocol or static configuration discovery)
   - [ ] Raft Consensus Engine (For consistent metadata storage across nodes)
   - [ ] Data Placement: Consistent Hashing or CRUSH-style placement algorithm
   - [ ] Auto-healing (Background detection of offline drives/nodes and automatic rebuilds)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"servstore/pkg/auth"
+	"servstore/pkg/cluster"
 	"servstore/pkg/storage"
 )
 
@@ -24,9 +25,10 @@ type WebConsole struct {
 	fileServer http.Handler
 	auth       *auth.AuthProvider
 	store      storage.StorageEngine
+	cluster    *cluster.MembershipManager
 }
 
-func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store storage.StorageEngine) *WebConsole {
+func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store storage.StorageEngine, clusterMgr *cluster.MembershipManager) *WebConsole {
 	// Strip assets prefix
 	subFS, err := fs.Sub(assetsFS, "assets")
 	if err != nil {
@@ -38,6 +40,7 @@ func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store 
 		fileServer: http.FileServer(http.FS(subFS)),
 		auth:       authProvider,
 		store:      store,
+		cluster:    clusterMgr,
 	}
 }
 
@@ -199,6 +202,22 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if path == "/console/cluster/gossip" && r.Method == http.MethodPost {
+		var payload cluster.GossipPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+		if wc.cluster != nil {
+			reply := wc.cluster.MergeGossip(payload)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(reply)
+			return
+		}
+		http.Error(w, "Cluster not enabled", http.StatusServiceUnavailable)
+		return
+	}
+
 	if path == "/console/logout" {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "token",
@@ -218,7 +237,7 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Allow public access to login page and public assets
 		isPublicAsset := false
-		if path == "/login.html" || path == "/style.css" || path == "/favicon.ico" {
+		if path == "/login.html" || path == "/style.css" || path == "/favicon.ico" || path == "/console/cluster/gossip" {
 			isPublicAsset = true
 		}
 
@@ -239,6 +258,16 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2.5 Handle protected console endpoints
+	if path == "/console/cluster/status" && r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		if wc.cluster != nil {
+			json.NewEncoder(w).Encode(wc.cluster.GetNodes())
+		} else {
+			w.Write([]byte(`[]`))
+		}
+		return
+	}
+
 	if strings.HasPrefix(path, "/console/users/") && strings.HasSuffix(path, "/policy") {
 		parts := strings.Split(path, "/")
 		if len(parts) == 5 {

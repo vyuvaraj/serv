@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -34,10 +35,11 @@ Commands:
   lc-set     <bucket> <days> [prefix] Set lifecycle expiry rule (delete objects older than N days)
   lc-get     <bucket>                 Show the lifecycle configuration for a bucket
   lc-del     <bucket>                 Remove the lifecycle configuration from a bucket
-  policy-set <username> <file.json>   Attach an IAM policy to a user
-  policy-get <username>               View the attached IAM policy for a user
-  policy-del <username>               Delete the attached IAM policy for a user
-  help                                Print this message
+  policy-set     <username> <file.json> Attach an IAM policy to a user
+  policy-get     <username>             View the attached IAM policy for a user
+  policy-del     <username>             Delete the attached IAM policy for a user
+  cluster-status                        View the status of all nodes in the cluster
+  help                                  Print this message
 `
 
 // ---------- global flags ----------
@@ -92,6 +94,8 @@ func main() {
 		err = cmdPolicyGet(rest)
 	case "policy-del":
 		err = cmdPolicyDel(rest)
+	case "cluster-status":
+		err = cmdClusterStatus(rest)
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
@@ -569,6 +573,53 @@ func cmdPolicyDel(args []string) error {
 	}
 
 	fmt.Printf("Policy successfully removed from user '%s'.\n", username)
+	return nil
+}
+
+type nodeInfo struct {
+	NodeID   string    `json:"node_id"`
+	Address  string    `json:"address"`
+	Status   string    `json:"status"`
+	LastSeen time.Time `json:"last_seen"`
+	Load     int64     `json:"load"`
+}
+
+func cmdClusterStatus(args []string) error {
+	req, err := http.NewRequest(http.MethodGet, url("/console/cluster/status"), nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if err := expectStatus(resp, http.StatusOK); err != nil {
+		return err
+	}
+
+	var nodes []nodeInfo
+	if err := json.NewDecoder(resp.Body).Decode(&nodes); err != nil {
+		return fmt.Errorf("decode status: %w", err)
+	}
+
+	if len(nodes) == 0 {
+		fmt.Println("No active clustering detected.")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "NODE ID\tADDRESS\tSTATUS\tLAST SEEN\tLOAD")
+	for _, node := range nodes {
+		seen := "N/A"
+		if !node.LastSeen.IsZero() {
+			seen = node.LastSeen.Format("15:04:05")
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n", node.NodeID, node.Address, node.Status, seen, node.Load)
+	}
+	w.Flush()
 	return nil
 }
 
