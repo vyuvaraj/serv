@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"servstore/pkg/otel"
+	"servstore/pkg/wasm"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ type LocalStore struct {
 	rootDir       string
 	mu            sync.RWMutex
 	encryptionKey []byte // nil means encryption disabled
+	coldTier      *ColdTierManager // nil means cold-tiering disabled
+	coldCancel    context.CancelFunc // cancel the background sweep goroutine
 }
 
 func NewLocalStore(rootDir string) (*LocalStore, error) {
@@ -496,6 +499,17 @@ func (s *LocalStore) GetObject(ctx context.Context, bucket, key, versionID strin
 	}
 
 	dataPath := s.getObjectDataPath(bucket, key, targetVer.VersionID)
+
+	// Cold-tier re-hydration: if the data file is absent but a .cold stub exists,
+	// transparently fetch the block back from the remote before opening it.
+	if _, statErr := os.Stat(dataPath); os.IsNotExist(statErr) {
+		sp := stubPath(dataPath)
+		if _, stubErr := os.Stat(sp); stubErr == nil && s.coldTier != nil {
+			if hydrateErr := s.coldTier.FetchBack(context.Background(), dataPath); hydrateErr != nil {
+				return nil, nil, fmt.Errorf("cold tier re-hydration failed: %w", hydrateErr)
+			}
+		}
+	}
 
 	if s.encryptionKey != nil {
 		// Read, decrypt, and return an in-memory reader
@@ -1484,3 +1498,167 @@ func (s *LocalStore) ListLocalKeys(ctx context.Context) ([]LocalKey, error) {
 	return keys, nil
 }
 
+func (s *LocalStore) SemanticSearch(ctx context.Context, bucket, query string, limit int) ([]*ObjectVersion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	_, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return nil, err
+	}
+
+	keys, err := s.scanMetadataKeys(bucket)
+	if err != nil {
+		return nil, err
+	}
+
+	queryTokens := Tokenize(query)
+	queryTF := ComputeTF(queryTokens)
+
+	type match struct {
+		ver   *ObjectVersion
+		score float64
+	}
+	var matches []match
+
+	for _, key := range keys {
+		om, err := s.readObjectMeta(bucket, key)
+		if err != nil {
+			continue
+		}
+
+		var latest *ObjectVersion
+		for i := range om.Versions {
+			if om.Versions[i].IsLatest {
+				latest = &om.Versions[i]
+				break
+			}
+		}
+		if latest == nil && len(om.Versions) > 0 {
+			latest = &om.Versions[0]
+		}
+
+		if latest == nil || latest.IsDeleteMarker {
+			continue
+		}
+
+		// Read file content if it is a text file
+		if strings.HasPrefix(latest.ContentType, "text/") || strings.Contains(key, ".txt") || strings.Contains(key, ".md") {
+			dataPath := s.getObjectDataPath(bucket, key, latest.VersionID)
+			fileData, err := os.ReadFile(dataPath)
+			if err != nil {
+				continue
+			}
+
+			// If encrypted, decrypt it first
+			var plaintext []byte
+			if s.encryptionKey != nil {
+				plaintext, err = decryptPayload(s.encryptionKey, fileData)
+				if err != nil {
+					continue
+				}
+			} else {
+				plaintext = fileData
+			}
+
+			docTokens := Tokenize(string(plaintext))
+			docTF := ComputeTF(docTokens)
+
+			score := CosineSimilarity(queryTF, docTF)
+			if score > 0.05 { // threshold to filter out irrelevant docs
+				matches = append(matches, match{ver: latest, score: score})
+			}
+		}
+	}
+
+	// Sort by score descending
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].score > matches[j].score
+	})
+
+	var results []*ObjectVersion
+	for i := 0; i < len(matches) && (limit <= 0 || i < limit); i++ {
+		results = append(results, matches[i].ver)
+	}
+
+	return results, nil
+}
+
+// WASMTransform reads the WASM binary stored at wasmKey, reads the target
+// object at targetKey (optional versionID), runs the binary in a sandboxed
+// wazero runtime with the target data piped to stdin, and returns the bytes
+// written to stdout together with the target object's original content-type.
+func (s *LocalStore) WASMTransform(ctx context.Context, bucket, wasmKey, targetKey, versionID string, memLimitMB, timeoutSec int) ([]byte, string, error) {
+	// 1. Read WASM binary (stored as a normal object)
+	wasmRC, _, err := s.GetObject(ctx, bucket, wasmKey, "")
+	if err != nil {
+		return nil, "", fmt.Errorf("wasm transform: get wasm binary %q: %w", wasmKey, err)
+	}
+	defer wasmRC.Close()
+	wasmBytes, err := io.ReadAll(wasmRC)
+	if err != nil {
+		return nil, "", fmt.Errorf("wasm transform: read wasm binary: %w", err)
+	}
+
+	// 2. Read target object
+	targetRC, targetVer, err := s.GetObject(ctx, bucket, targetKey, versionID)
+	if err != nil {
+		return nil, "", fmt.Errorf("wasm transform: get target %q: %w", targetKey, err)
+	}
+	defer targetRC.Close()
+	targetBytes, err := io.ReadAll(targetRC)
+	if err != nil {
+		return nil, "", fmt.Errorf("wasm transform: read target: %w", err)
+	}
+
+	// 3. Execute inside isolated sandbox
+	output, err := wasm.Execute(ctx, wasmBytes, targetBytes, memLimitMB, timeoutSec)
+	if err != nil {
+		return nil, "", err
+	}
+	return output, targetVer.ContentType, nil
+}
+
+// SetColdTier configures and starts the cold-storage tiering background sweep.
+// Calling SetColdTier again replaces the previous configuration and restarts
+// the sweep goroutine.
+func (s *LocalStore) SetColdTier(cfg ColdTierConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Cancel any existing sweep goroutine
+	if s.coldCancel != nil {
+		s.coldCancel()
+	}
+
+	mgr := newColdTierManager(s, cfg)
+	s.coldTier = mgr
+
+	sweepCtx, cancel := context.WithCancel(context.Background())
+	s.coldCancel = cancel
+	mgr.Start(sweepCtx)
+	return nil
+}
+
+// GetColdTierConfig returns the active cold-tier config and whether one is set.
+func (s *LocalStore) GetColdTierConfig() (ColdTierConfig, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.coldTier == nil {
+		return ColdTierConfig{}, false
+	}
+	return s.coldTier.cfg, true
+}
+
+// RunColdSweep triggers an immediate cold-tier archival sweep.
+// Satisfies the optional sweeper interface used by the S3 API handler.
+// Returns the number of blocks archived and any accumulated errors.
+func (s *LocalStore) RunColdSweep(ctx context.Context) (int, []error) {
+	s.mu.RLock()
+	mgr := s.coldTier
+	s.mu.RUnlock()
+	if mgr == nil {
+		return 0, nil
+	}
+	return mgr.RunSweep(ctx)
+}

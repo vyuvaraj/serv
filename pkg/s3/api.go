@@ -239,6 +239,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.handleListObjectVersions(w, r, bucket)
 			} else if r.URL.Query().Has("lifecycle") {
 				g.handleGetBucketLifecycle(w, r, bucket)
+			} else if r.URL.Query().Has("cold-tier") {
+				g.handleGetBucketColdTier(w, r, bucket)
 			} else {
 				g.handleListObjects(w, r, bucket)
 			}
@@ -247,8 +249,16 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.handlePutBucketVersioning(w, r, bucket)
 			} else if r.URL.Query().Has("lifecycle") {
 				g.handlePutBucketLifecycle(w, r, bucket)
+			} else if r.URL.Query().Has("cold-tier") {
+				g.handlePutBucketColdTier(w, r, bucket)
 			} else {
 				g.handleCreateBucket(w, r, bucket)
+			}
+		case http.MethodPost:
+			if r.URL.Query().Has("cold-tier") && r.URL.Query().Has("sweep") {
+				g.handleRunColdSweep(w, r, bucket)
+			} else {
+				g.writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed on bucket level")
 			}
 		case http.MethodDelete:
 			if r.URL.Query().Has("lifecycle") {
@@ -278,7 +288,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			g.handlePutObject(w, r, bucket, key)
 		}
 	case http.MethodPost:
-		if query.Has("uploads") {
+		if query.Has("transform") && query.Get("target-key") != "" {
+			g.handleWASMTransform(w, r, bucket, key)
+		} else if query.Has("uploads") {
 			g.handleInitiateMultipart(w, r, bucket, key)
 		} else if query.Has("uploadId") {
 			g.handleCompleteMultipart(w, r, bucket, key)
@@ -467,7 +479,23 @@ func (g *Gateway) handleListObjects(w http.ResponseWriter, r *http.Request, buck
 		}
 	}
 
-	objects, commonPrefixes, err := g.store.ListObjects(r.Context(), bucket, prefix, delimiter, marker, maxKeys)
+	// Dynamic Semantic Search routing
+	var objects []*storage.ObjectVersion
+	var commonPrefixes []string
+	var err error
+
+	if query.Get("query") == "semantic" && query.Get("q") != "" {
+		maxResults := maxKeys
+		if maxResultsStr := query.Get("max-results"); maxResultsStr != "" {
+			if mr, errmr := strconv.Atoi(maxResultsStr); errmr == nil {
+				maxResults = mr
+			}
+		}
+		objects, err = g.store.SemanticSearch(r.Context(), bucket, query.Get("q"), maxResults)
+	} else {
+		objects, commonPrefixes, err = g.store.ListObjects(r.Context(), bucket, prefix, delimiter, marker, maxKeys)
+	}
+
 	if err != nil {
 		if errors.Is(err, storage.ErrBucketNotFound) {
 			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
@@ -1703,5 +1731,132 @@ func (g *Gateway) deleteShardFromNode(ctx context.Context, bucket, key, versionI
 		return fmt.Errorf("node %s returned status %d", nodeID, resp.StatusCode)
 	}
 	return nil
+}
+
+// handleWASMTransform — POST /<bucket>/<wasm-key>?transform=true&target-key=<key>
+// Executes the WASM binary stored at <wasm-key> against the object at target-key.
+// Optional query params: mem-limit=<MB> (default 64), timeout=<sec> (default 30).
+func (g *Gateway) handleWASMTransform(w http.ResponseWriter, r *http.Request, bucket, wasmKey string) {
+	q := r.URL.Query()
+	targetKey := q.Get("target-key")
+	versionID := q.Get("versionId")
+
+	memLimitMB := 64
+	if s := q.Get("mem-limit"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			memLimitMB = v
+		}
+	}
+	timeoutSec := 30
+	if s := q.Get("timeout"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			timeoutSec = v
+		}
+	}
+
+	output, contentType, err := g.store.WASMTransform(r.Context(), bucket, wasmKey, targetKey, versionID, memLimitMB, timeoutSec)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchKey", err.Error())
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "TransformError", err.Error())
+		return
+	}
+
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-ServStore-Transform", "wasm")
+	w.Header().Set("Content-Length", strconv.Itoa(len(output)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(output)
+}
+
+// handlePutBucketColdTier — PUT /<bucket>?cold-tier
+// Body: JSON ColdTierConfig. Activates cold-storage tiering for the store.
+func (g *Gateway) handlePutBucketColdTier(w http.ResponseWriter, r *http.Request, bucket string) {
+	// Verify bucket exists
+	if _, err := g.store.GetBucket(r.Context(), bucket); err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	var cfg storage.ColdTierConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		g.writeError(w, http.StatusBadRequest, "MalformedBody", "Invalid cold-tier config JSON: "+err.Error())
+		return
+	}
+
+	if err := g.store.SetColdTier(cfg); err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGetBucketColdTier — GET /<bucket>?cold-tier
+// Returns the current cold-tier config as JSON, or 404 if not configured.
+func (g *Gateway) handleGetBucketColdTier(w http.ResponseWriter, r *http.Request, bucket string) {
+	if _, err := g.store.GetBucket(r.Context(), bucket); err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	cfg, ok := g.store.GetColdTierConfig()
+	if !ok {
+		g.writeError(w, http.StatusNotFound, "NoColdTierConfig", "Cold-tier is not configured on this store.")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(cfg)
+}
+
+// handleRunColdSweep — POST /<bucket>?cold-tier&sweep
+// Immediately runs an archival sweep and returns a JSON summary.
+func (g *Gateway) handleRunColdSweep(w http.ResponseWriter, r *http.Request, bucket string) {
+	if _, err := g.store.GetBucket(r.Context(), bucket); err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
+
+	// The ColdTierManager lives on the concrete LocalStore.
+	// We expose RunSweep indirectly: cast store to *storage.LocalStore if possible.
+	type sweeper interface {
+		RunColdSweep(ctx context.Context) (int, []error)
+	}
+	sw, ok := g.store.(sweeper)
+	if !ok {
+		g.writeError(w, http.StatusNotImplemented, "NotImplemented", "Cold-tier sweep not available on this storage backend.")
+		return
+	}
+
+	archived, errs := sw.RunColdSweep(r.Context())
+	errMsgs := make([]string, len(errs))
+	for i, e := range errs {
+		errMsgs[i] = e.Error()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"archived": archived,
+		"errors":   errMsgs,
+	})
 }
 

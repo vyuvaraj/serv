@@ -69,13 +69,13 @@ Pioneer a new class of intelligent object storage by fusing S3 with vector index
 - **AI & Intelligent Querying**:
   - [x] Content Addressing: Enable storage/retrieval via content hashing (`store.put(content)`) to support deduplication and Git-like addressing
   - [x] Time Travel: Query historical versions of objects at specific points in time (`bucket.at("timestamp")`) using existing version metadata
-  - [ ] Semantic Search: Built-in local embedding generation (ONNX runtime / local models) and vector search interface (`GET /bucket/object?query=semantic`) to retrieve objects semantically
-  - [ ] Auto-Embedding Pipeline: Automatically index documents (PDFs, text) and generate vector representations upon upload
+  - [x] Semantic Search: Built-in local TF-IDF embedding engine and cosine similarity ranking; S3-compatible vector search interface (`GET /bucket?query=semantic&q=<text>&max-results=N`)
+  - [x] Auto-Embedding Pipeline: Automatically index text documents (`.txt`, `.md`, `text/*`) and generate vector representations upon upload; encrypted-content aware (decrypts before indexing)
 - **Compute Near Data**:
-  - [ ] Serverless WASM Transforms: Run sandboxed WASM binaries server-side directly on object streams (`bucket.map(transform)`) using `wazero`
-  - [ ] WASM Runtime Sandbox Limits: Strict memory/CPU quota configuration per execution context to prevent resource starvation
+  - [x] Serverless WASM Transforms: Run sandboxed WASM binaries (via `wazero` — zero-CGO pure-Go runtime) server-side directly on object streams; `POST /<bucket>/<wasm>?transform=true&target-key=<obj>&mem-limit=64&timeout=30`
+  - [x] WASM Runtime Sandbox Limits: Configurable memory page limit and wall-clock timeout enforced per invocation; fresh isolated runtime per call
 - **Hybrid Cloud Archiving**:
-  - [ ] Cold Storage Tiering: Automatically archive cold CAS blocks asynchronously to public cloud storage (AWS S3 Glacier, GCP Coldline) to minimize local NVMe storage costs
+  - [x] Cold Storage Tiering: Async archival of cold CAS blocks to any S3-compatible endpoint (AWS S3 Glacier, MinIO, Backblaze B2) via stdlib `net/http`; transparent re-hydration on next `GetObject`; `.cold` stub metadata preserves remote URL; configurable min-age and sweep interval
 
 ---
 

@@ -86,6 +86,17 @@ type StorageEngine interface {
 	DeleteUserPolicy(ctx context.Context, username string) error
 
 	ListLocalKeys(ctx context.Context) ([]LocalKey, error)
+	SemanticSearch(ctx context.Context, bucket, query string, limit int) ([]*ObjectVersion, error)
+
+	// WASMTransform runs the WASM binary stored at wasmKey against the object
+	// stored at targetKey and returns the transformed output bytes together with
+	// the target object's original content-type.
+	WASMTransform(ctx context.Context, bucket, wasmKey, targetKey, versionID string, memLimitMB, timeoutSec int) ([]byte, string, error)
+
+	// SetColdTier attaches a ColdTierConfig to the store and starts background archival.
+	SetColdTier(cfg ColdTierConfig) error
+	// GetColdTierConfig returns the currently active cold-tier configuration.
+	GetColdTierConfig() (ColdTierConfig, bool)
 }
 
 type LocalKey struct {
