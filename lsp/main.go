@@ -106,6 +106,15 @@ type ParameterInformation struct {
 	Label string `json:"label"`
 }
 
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes"`
+}
+
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
 // --- JSON-RPC Types ---
 
 type JSONRPCMessage struct {
@@ -204,6 +213,10 @@ func (s *Server) handleMessage(msg JSONRPCMessage) {
 		s.handleDefinition(msg)
 	case "textDocument/references":
 		s.handleReferences(msg)
+	case "textDocument/prepareRename":
+		s.handlePrepareRename(msg)
+	case "textDocument/rename":
+		s.handleRename(msg)
 	case "textDocument/documentSymbol":
 		s.handleDocumentSymbol(msg)
 	case "textDocument/signatureHelp":
@@ -225,6 +238,7 @@ func (s *Server) handleInitialize(msg JSONRPCMessage) {
 			"hoverProvider":              true,
 			"definitionProvider":         true,
 			"referencesProvider":         true,
+			"renameProvider":             true,
 			"documentSymbolProvider":     true,
 			"documentFormattingProvider": true,
 			"codeActionProvider":         true,
