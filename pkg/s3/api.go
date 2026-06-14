@@ -120,17 +120,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.handleGetBucketVersioning(w, r, bucket)
 			} else if r.URL.Query().Has("versions") {
 				g.handleListObjectVersions(w, r, bucket)
+			} else if r.URL.Query().Has("lifecycle") {
+				g.handleGetBucketLifecycle(w, r, bucket)
 			} else {
 				g.handleListObjects(w, r, bucket)
 			}
 		case http.MethodPut:
 			if r.URL.Query().Has("versioning") {
 				g.handlePutBucketVersioning(w, r, bucket)
+			} else if r.URL.Query().Has("lifecycle") {
+				g.handlePutBucketLifecycle(w, r, bucket)
 			} else {
 				g.handleCreateBucket(w, r, bucket)
 			}
 		case http.MethodDelete:
-			g.handleDeleteBucket(w, r, bucket)
+			if r.URL.Query().Has("lifecycle") {
+				g.handleDeleteBucketLifecycle(w, r, bucket)
+			} else {
+				g.handleDeleteBucket(w, r, bucket)
+			}
 		case http.MethodHead:
 			g.handleHeadBucket(w, r, bucket)
 		default:
@@ -147,6 +155,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		if query.Has("uploadId") && query.Has("partNumber") {
 			g.handleUploadPart(w, r, bucket, key)
+		} else if query.Has("lock") {
+			g.handleLockObject(w, r, bucket, key)
 		} else {
 			g.handlePutObject(w, r, bucket, key)
 		}
@@ -558,6 +568,10 @@ func (g *Gateway) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if errors.Is(err, storage.ErrObjectLocked) {
+			g.writeError(w, http.StatusLocked, "ObjectLocked", err.Error())
+			return
+		}
 		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
 		return
 	}
@@ -663,5 +677,127 @@ func (g *Gateway) handleAbortMultipart(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleLockObject processes PUT /<bucket>/<key>?lock&retain-until=<RFC3339>
+// It sets a WORM lock on the latest (or specified) object version.
+func (g *Gateway) handleLockObject(w http.ResponseWriter, r *http.Request, bucket, key string) {
+	query := r.URL.Query()
+	retainUntilStr := query.Get("retain-until")
+	versionID := query.Get("versionId")
+
+	if retainUntilStr == "" {
+		g.writeError(w, http.StatusBadRequest, "InvalidArgument", "Missing required query param: retain-until (RFC3339 timestamp)")
+		return
+	}
+
+	retainUntil, err := time.Parse(time.RFC3339, retainUntilStr)
+	if err != nil {
+		g.writeError(w, http.StatusBadRequest, "InvalidArgument", "retain-until must be a valid RFC3339 timestamp (e.g. 2026-12-31T00:00:00Z)")
+		return
+	}
+
+	if !retainUntil.After(time.Now()) {
+		g.writeError(w, http.StatusBadRequest, "InvalidArgument", "retain-until must be a future timestamp")
+		return
+	}
+
+	ver, err := g.store.LockObject(r.Context(), bucket, key, versionID, retainUntil)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrBucketNotFound):
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		case errors.Is(err, storage.ErrObjectNotFound):
+			g.writeError(w, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
+		case errors.Is(err, storage.ErrInvalidVersion):
+			g.writeError(w, http.StatusBadRequest, "InvalidArgument", "The specified version ID does not exist.")
+		default:
+			g.writeError(w, http.StatusBadRequest, "InvalidArgument", err.Error())
+		}
+		return
+	}
+
+	w.Header().Set("x-amz-object-lock-retain-until-date", ver.RetainUntil.UTC().Format(time.RFC3339))
+	if ver.VersionID != "" && ver.VersionID != "null" {
+		w.Header().Set("x-amz-version-id", ver.VersionID)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// ---------- Lifecycle handlers ----------
+
+func (g *Gateway) handleGetBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
+	rules, err := g.store.GetBucketLifecycle(r.Context(), bucket)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	if len(rules) == 0 {
+		g.writeError(w, http.StatusNotFound, "NoSuchLifecycleConfiguration", "The lifecycle configuration does not exist.")
+		return
+	}
+
+	cfg := LifecycleConfiguration{Xmlns: xmlNamespace}
+	for _, rule := range rules {
+		status := "Disabled"
+		if rule.Enabled {
+			status = "Enabled"
+		}
+		cfg.Rules = append(cfg.Rules, LifecycleRule{
+			ID:     rule.ID,
+			Status: status,
+			Filter: LifecycleFilter{Prefix: rule.Prefix},
+			Expiration: LifecycleExpiration{Days: rule.ExpirationDays},
+		})
+	}
+	g.writeXML(w, http.StatusOK, cfg)
+}
+
+func (g *Gateway) handlePutBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
+	var cfg LifecycleConfiguration
+	if err := xml.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		g.writeError(w, http.StatusBadRequest, "MalformedXML", "The XML body is malformed.")
+		return
+	}
+
+	var rules []storage.LifecycleRule
+	for _, rule := range cfg.Rules {
+		if rule.Expiration.Days <= 0 {
+			g.writeError(w, http.StatusBadRequest, "InvalidArgument", "Expiration Days must be a positive integer.")
+			return
+		}
+		rules = append(rules, storage.LifecycleRule{
+			ID:             rule.ID,
+			Enabled:        rule.Status == "Enabled",
+			Prefix:         rule.Filter.Prefix,
+			ExpirationDays: rule.Expiration.Days,
+		})
+	}
+
+	if err := g.store.SetBucketLifecycle(r.Context(), bucket, rules); err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleDeleteBucketLifecycle(w http.ResponseWriter, r *http.Request, bucket string) {
+	if err := g.store.DeleteBucketLifecycle(r.Context(), bucket); err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

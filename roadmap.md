@@ -19,11 +19,11 @@ Establish the single-node storage engine, S3 compatibility layer, and visual con
 Enhance the single-node capabilities with enterprise security, management utilities, and observability.
 - **Extended S3 Features**:
   - [x] Multipart Upload support (Initiate, Upload Part, Complete, Abort)
-  - [ ] Lifecycle policies (Auto-expire/transition objects)
-  - [ ] Object locking (WORM - Write Once Read Many support)
+  - [x] Lifecycle policies (Auto-expire/transition objects)
+  - [x] Object locking (WORM - Write Once Read Many support)
 - **Security & IAM**:
-  - [ ] TLS 1.3 enforcement
-  - [ ] AES-256 Encryption-at-Rest
+  - [x] TLS 1.3 enforcement
+  - [x] AES-256 Encryption-at-Rest
   - [ ] JWT / OIDC / LDAP Integration for console and API auth
   - [ ] RBAC (Role-Based Access Control) authorization policies
 - **Observability**:
@@ -31,7 +31,7 @@ Enhance the single-node capabilities with enterprise security, management utilit
   - [x] Prometheus metrics endpoint (Request rate, latency, storage utilization, active connections)
   - [x] OpenTelemetry (OTel) tracing integration for API handlers
 - **CLI Client**:
-  - [ ] A lightweight Go CLI (`servstore-cli`) to manage buckets, objects, policy configurations, and cluster state from the terminal
+  - [x] A lightweight Go CLI (`servstore-cli`) to manage buckets, objects, policy configurations, and cluster state from the terminal
 
 ---
 

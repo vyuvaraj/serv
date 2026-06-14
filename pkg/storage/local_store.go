@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/rand"
@@ -19,8 +20,9 @@ import (
 )
 
 type LocalStore struct {
-	rootDir string
-	mu      sync.RWMutex
+	rootDir       string
+	mu            sync.RWMutex
+	encryptionKey []byte // nil means encryption disabled
 }
 
 func NewLocalStore(rootDir string) (*LocalStore, error) {
@@ -32,6 +34,12 @@ func NewLocalStore(rootDir string) (*LocalStore, error) {
 		return nil, err
 	}
 	return &LocalStore{rootDir: absPath}, nil
+}
+
+// WithEncryptionKey configures AES-256 encryption at rest using the given passphrase.
+// The passphrase is hashed with SHA-256 to produce a 32-byte key.
+func (s *LocalStore) WithEncryptionKey(passphrase string) {
+	s.encryptionKey = deriveKey(passphrase)
 }
 
 func (s *LocalStore) getBucketDir(bucket string) string {
@@ -250,8 +258,19 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	if b.Versioning == "Enabled" {
 		versionID = generateUUID()
 	} else {
-		// Disabled or Suspended stores with "null" version ID
 		versionID = "null"
+	}
+
+	// WORM check: if versioning is disabled/suspended and the existing "null" version
+	// is locked, reject the overwrite.
+	if b.Versioning != "Enabled" {
+		if existing, err2 := s.readObjectMeta(bucket, key); err2 == nil {
+			for _, ver := range existing.Versions {
+				if ver.VersionID == "null" && ver.isLocked() {
+					return nil, ErrObjectLocked
+				}
+			}
+		}
 	}
 
 	// Read content and calculate MD5
@@ -270,17 +289,32 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	}()
 
 	hasher := md5.New()
-	mw := io.MultiWriter(tmpFile, hasher)
-
-	written, err := io.Copy(mw, reader)
+	// Read all data first so we can encrypt before writing
+	plaintext, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, err
 	}
+	written := int64(len(plaintext))
 	if size > 0 && written != size {
 		return nil, fmt.Errorf("size mismatch: expected %d, got %d", size, written)
 	}
-
+	hasher.Write(plaintext)
 	etag := hex.EncodeToString(hasher.Sum(nil))
+
+	// Encrypt if key is configured
+	var payload []byte
+	if s.encryptionKey != nil {
+		payload, err = encryptPayload(s.encryptionKey, plaintext)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		payload = plaintext
+	}
+
+	if _, err := tmpFile.Write(payload); err != nil {
+		return nil, err
+	}
 
 	// Close temp file before renaming
 	_ = tmpFile.Close()
@@ -403,11 +437,24 @@ func (s *LocalStore) GetObject(ctx context.Context, bucket, key, versionID strin
 	}
 
 	dataPath := s.getObjectDataPath(bucket, key, targetVer.VersionID)
+
+	if s.encryptionKey != nil {
+		// Read, decrypt, and return an in-memory reader
+		ciphertext, err := os.ReadFile(dataPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		plaintext, err := decryptPayload(s.encryptionKey, ciphertext)
+		if err != nil {
+			return nil, nil, err
+		}
+		return io.NopCloser(bytes.NewReader(plaintext)), targetVer, nil
+	}
+
 	file, err := os.Open(dataPath)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return file, targetVer, nil
 }
 
@@ -484,6 +531,11 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 			return nil, ErrInvalidVersion
 		}
 
+		// WORM check: reject deletion of a locked version
+		if om.Versions[foundIndex].isLocked() {
+			return nil, ErrObjectLocked
+		}
+
 		deletedVer := om.Versions[foundIndex]
 		if !deletedVer.IsDeleteMarker {
 			dataPath := s.getObjectDataPath(bucket, key, versionID)
@@ -515,6 +567,12 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 	// - If versioning is Enabled/Suspended: Create a Delete Marker.
 	// - If versioning is Disabled: Delete permanently.
 	if b.Versioning == "Enabled" {
+		// WORM check: if the latest version is locked, reject placing a delete marker
+		for _, ver := range om.Versions {
+			if ver.IsLatest && ver.isLocked() {
+				return nil, ErrObjectLocked
+			}
+		}
 		// Clear IsLatest from existing
 		for i := range om.Versions {
 			om.Versions[i].IsLatest = false
@@ -786,24 +844,36 @@ func (s *LocalStore) UploadPart(ctx context.Context, bucket, key, uploadID strin
 	}
 
 	partPath := s.getPartPath(bucket, uploadID, partNumber)
-	file, err := os.Create(partPath)
+
+	plaintext, err := io.ReadAll(reader)
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
-
-	hasher := md5.New()
-	mw := io.MultiWriter(file, hasher)
-
-	written, err := io.Copy(mw, reader)
-	if err != nil {
-		return "", err
-	}
+	written := int64(len(plaintext))
 	if size > 0 && written != size {
 		return "", fmt.Errorf("size mismatch for part: expected %d, got %d", size, written)
 	}
 
-	return hex.EncodeToString(hasher.Sum(nil)), nil
+	hasher := md5.New()
+	hasher.Write(plaintext)
+	etag := hex.EncodeToString(hasher.Sum(nil))
+
+	// Encrypt each part individually if key is configured
+	var payload []byte
+	if s.encryptionKey != nil {
+		payload, err = encryptPayload(s.encryptionKey, plaintext)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		payload = plaintext
+	}
+
+	if err := os.WriteFile(partPath, payload, 0644); err != nil {
+		return "", err
+	}
+
+	return etag, nil
 }
 
 func (s *LocalStore) CompleteMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []PartInfo, contentType string) (*ObjectVersion, error) {
@@ -841,22 +911,45 @@ func (s *LocalStore) CompleteMultipartUpload(ctx context.Context, bucket, key, u
 	defer outFile.Close()
 
 	hasher := md5.New()
-	mw := io.MultiWriter(outFile, hasher)
 
 	var totalSize int64
+	var assembledPlaintext []byte
 	for _, part := range parts {
 		partPath := s.getPartPath(bucket, uploadID, part.PartNumber)
-		partFile, err := os.Open(partPath)
+		partData, err := os.ReadFile(partPath)
 		if err != nil {
 			return nil, fmt.Errorf("missing or invalid part %d: %w", part.PartNumber, err)
 		}
-		
-		written, err := io.Copy(mw, partFile)
-		partFile.Close()
+
+		// Decrypt each part before assembling
+		var partPlain []byte
+		if s.encryptionKey != nil {
+			partPlain, err = decryptPayload(s.encryptionKey, partData)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt part %d: %w", part.PartNumber, err)
+			}
+		} else {
+			partPlain = partData
+		}
+		assembledPlaintext = append(assembledPlaintext, partPlain...)
+		totalSize += int64(len(partPlain))
+	}
+
+	hasher.Write(assembledPlaintext)
+
+	// Encrypt the complete assembled object before writing
+	var finalPayload []byte
+	if s.encryptionKey != nil {
+		finalPayload, err = encryptPayload(s.encryptionKey, assembledPlaintext)
 		if err != nil {
 			return nil, err
 		}
-		totalSize += written
+	} else {
+		finalPayload = assembledPlaintext
+	}
+
+	if _, err := outFile.Write(finalPayload); err != nil {
+		return nil, err
 	}
 
 	etag := hex.EncodeToString(hasher.Sum(nil))
@@ -926,4 +1019,206 @@ func (s *LocalStore) AbortMultipartUpload(ctx context.Context, bucket, key, uplo
 
 	uploadDir := s.getMultipartUploadDir(bucket, uploadID)
 	return os.RemoveAll(uploadDir)
+}
+
+// isLocked returns true if this version has an active WORM lock.
+func (v *ObjectVersion) isLocked() bool {
+	return v.Locked && v.RetainUntil != nil && time.Now().Before(*v.RetainUntil)
+}
+
+// ---------- Lifecycle ----------
+
+func (s *LocalStore) SetBucketLifecycle(ctx context.Context, bucket string, rules []LifecycleRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	b, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return err
+	}
+	b.Lifecycle = rules
+	data, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+}
+
+func (s *LocalStore) GetBucketLifecycle(ctx context.Context, bucket string) ([]LifecycleRule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	b, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return b.Lifecycle, nil
+}
+
+func (s *LocalStore) DeleteBucketLifecycle(ctx context.Context, bucket string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	b, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return err
+	}
+	b.Lifecycle = nil
+	data, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+}
+
+// ApplyLifecycle scans all buckets and permanently deletes object versions
+// that have exceeded their lifecycle expiry days. Locked (WORM) versions are skipped.
+// This is intended to be called periodically from a background goroutine.
+func (s *LocalStore) ApplyLifecycle(ctx context.Context) (expired int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := os.ReadDir(s.rootDir)
+	if err != nil {
+		return 0, err
+	}
+
+	now := time.Now()
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		bucketName := entry.Name()
+		b, err := s.readBucketMeta(bucketName)
+		if err != nil || len(b.Lifecycle) == 0 {
+			continue
+		}
+
+		keys, err := s.scanMetadataKeys(bucketName)
+		if err != nil {
+			continue
+		}
+
+		for _, key := range keys {
+			om, err := s.readObjectMeta(bucketName, key)
+			if err != nil {
+				continue
+			}
+
+			var surviving []ObjectVersion
+			changed := false
+
+			for _, ver := range om.Versions {
+				if ver.IsDeleteMarker || ver.isLocked() {
+					surviving = append(surviving, ver)
+					continue
+				}
+
+				// Find the first matching enabled rule for this key
+				matched := false
+				for _, rule := range b.Lifecycle {
+					if !rule.Enabled || rule.ExpirationDays <= 0 {
+						continue
+					}
+					if rule.Prefix != "" && !strings.HasPrefix(key, rule.Prefix) {
+						continue
+					}
+					age := now.Sub(ver.LastModified)
+					if age >= time.Duration(rule.ExpirationDays)*24*time.Hour {
+						// Expire this version
+						dataPath := s.getObjectDataPath(bucketName, key, ver.VersionID)
+						_ = os.Remove(dataPath)
+						expired++
+						matched = true
+						changed = true
+						break
+					}
+				}
+				if !matched {
+					surviving = append(surviving, ver)
+				}
+			}
+
+			if !changed {
+				continue
+			}
+
+			if len(surviving) == 0 {
+				_ = os.Remove(s.getObjectMetaPath(bucketName, key))
+				continue
+			}
+
+			// Ensure at least one version is marked latest
+			hasLatest := false
+			for _, v := range surviving {
+				if v.IsLatest {
+					hasLatest = true
+					break
+				}
+			}
+			if !hasLatest {
+				surviving[0].IsLatest = true
+			}
+
+			om.Versions = surviving
+			_ = s.writeObjectMeta(bucketName, key, om)
+		}
+	}
+
+	return expired, nil
+}
+
+
+// LockObject sets a WORM retain-until date on a specific object version.
+// Once locked, the version cannot be deleted or overwritten until the date passes.
+func (s *LocalStore) LockObject(ctx context.Context, bucket, key, versionID string, retainUntil time.Time) (*ObjectVersion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return nil, err
+	}
+
+	om, err := s.readObjectMeta(bucket, key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Default to latest version if no versionID supplied
+	if versionID == "" {
+		for i := range om.Versions {
+			if om.Versions[i].IsLatest {
+				versionID = om.Versions[i].VersionID
+				break
+			}
+		}
+	}
+
+	foundIndex := -1
+	for i, ver := range om.Versions {
+		if ver.VersionID == versionID {
+			foundIndex = i
+			break
+		}
+	}
+	if foundIndex == -1 {
+		return nil, ErrInvalidVersion
+	}
+
+	// Only allow extending a lock, not shortening it (WORM compliance)
+	if om.Versions[foundIndex].RetainUntil != nil && retainUntil.Before(*om.Versions[foundIndex].RetainUntil) {
+		return nil, fmt.Errorf("cannot shorten an existing WORM lock: current retain-until is %s", om.Versions[foundIndex].RetainUntil.Format(time.RFC3339))
+	}
+
+	om.Versions[foundIndex].Locked = true
+	om.Versions[foundIndex].RetainUntil = &retainUntil
+
+	if err := s.writeObjectMeta(bucket, key, om); err != nil {
+		return nil, err
+	}
+
+	result := om.Versions[foundIndex]
+	return &result, nil
 }

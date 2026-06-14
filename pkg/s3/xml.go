@@ -121,3 +121,27 @@ type CompleteMultipartUploadResult struct {
 	Key      string   `xml:"Key"`
 	ETag     string   `xml:"ETag"`
 }
+
+// ---------- Lifecycle XML types ----------
+
+type LifecycleConfiguration struct {
+	XMLName xml.Name        `xml:"LifecycleConfiguration"`
+	Xmlns   string          `xml:"xmlns,attr,omitempty"`
+	Rules   []LifecycleRule `xml:"Rule"`
+}
+
+type LifecycleRule struct {
+	ID     string          `xml:"ID"`
+	Status string          `xml:"Status"` // "Enabled" | "Disabled"
+	Filter LifecycleFilter `xml:"Filter"`
+	Expiration LifecycleExpiration `xml:"Expiration"`
+}
+
+type LifecycleFilter struct {
+	Prefix string `xml:"Prefix"`
+}
+
+type LifecycleExpiration struct {
+	Days int `xml:"Days"`
+}
+
