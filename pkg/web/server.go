@@ -230,6 +230,19 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
+		// If membership manager is active, register/gossip this new node
+		if wc.cluster != nil {
+			payload := cluster.GossipPayload{
+				SourceNode: cluster.NodeInfo{
+					NodeID:   req.NodeID,
+					Address:  req.Address,
+					Status:   "online",
+					LastSeen: time.Now(),
+				},
+				Peers: make(map[string]*cluster.NodeInfo),
+			}
+			wc.cluster.MergeGossip(payload)
+		}
 		if wc.raftNode != nil {
 			if err := wc.raftNode.Join(req.NodeID, req.Address); err != nil {
 				http.Error(w, "Join failed: "+err.Error(), http.StatusInternalServerError)
@@ -238,7 +251,11 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		http.Error(w, "Raft not enabled", http.StatusServiceUnavailable)
+		if wc.cluster != nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, "Cluster not enabled", http.StatusServiceUnavailable)
 		return
 	}
 

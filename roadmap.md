@@ -52,7 +52,7 @@ Graduate from single-node to a consistent, fault-tolerant distributed system.
 ## Phase 4: Horizontal Scaling & Cloud-Native Kubernetes Integration
 Bring ServStore to high-scale production and Kubernetes environments.
 - **Scalability**:
-  - [ ] Horizontal scalability (Adding nodes dynamically to increase storage capacity and throughput)
+  - [x] Horizontal scalability (Adding nodes dynamically to increase storage capacity and throughput)
   - [ ] Multi-region replication and active-active clustering
 - **Kubernetes Operator**:
   - [ ] ServStore Kubernetes Operator for orchestration
