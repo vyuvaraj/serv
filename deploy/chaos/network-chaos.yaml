@@ -1,0 +1,21 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: servstore-network-loss
+  namespace: default
+spec:
+  action: delay
+  mode: all
+  selector:
+    labelSelectors:
+      'app.kubernetes.io/name': 'servstore'
+  delay:
+    latency: '200ms'
+    correlation: '50'
+    jitter: '10ms'
+  loss:
+    loss: '15'
+    correlation: '50'
+  duration: '10m'
+  scheduler:
+    cron: '*/30 * * * *'

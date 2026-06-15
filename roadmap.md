@@ -83,7 +83,7 @@ Pioneer a new class of intelligent object storage by fusing S3 with vector index
 Ensure production readiness through rigorous validation, resiliency checks, and performance benchmarks.
 - **Resiliency & Validation**:
   - [x] Jepsen Testing: Rigorous testing of the Raft FSM and cluster consensus layer under simulated network partitions
-  - [ ] Chaos Mesh Integration: Simulate arbitrary disk latency, packet loss, and node crashes in Kubernetes to validate auto-healing
+  - [x] Chaos Mesh Integration: Simulate arbitrary disk latency, packet loss, and node crashes in Kubernetes to validate auto-healing
   - [x] API Fuzzing: Auto-generate malformed S3 requests to ensure HTTP routing and parser stability
 - **High-Performance Optimization**:
   - [x] Direct I/O and Zero-Copy: Optimize storage engine pipelines to bypass OS page cache where appropriate for maximum disk throughput
