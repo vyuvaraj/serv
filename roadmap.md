@@ -82,7 +82,7 @@ Pioneer a new class of intelligent object storage by fusing S3 with vector index
 ## Phase 6: Enterprise Hardening & Chaos Engineering
 Ensure production readiness through rigorous validation, resiliency checks, and performance benchmarks.
 - **Resiliency & Validation**:
-  - [ ] Jepsen Testing: Rigorous testing of the Raft FSM and cluster consensus layer under simulated network partitions
+  - [x] Jepsen Testing: Rigorous testing of the Raft FSM and cluster consensus layer under simulated network partitions
   - [ ] Chaos Mesh Integration: Simulate arbitrary disk latency, packet loss, and node crashes in Kubernetes to validate auto-healing
   - [ ] API Fuzzing: Auto-generate malformed S3 requests to ensure HTTP routing and parser stability
 - **High-Performance Optimization**:
