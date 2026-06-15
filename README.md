@@ -244,6 +244,62 @@ aws s3api get-object --bucket mybucket --key archived.bin /tmp/out.bin --endpoin
 
 ---
 
+## Kubernetes & Cloud-Native Deployment (Phase 4)
+
+ServStore includes a custom Kubernetes Operator, Helm Chart package, and Container Storage Interface (CSI) node plugin.
+
+### 1. Custom Resource Definitions (CRDs)
+Deploy ServStore resources declaratively in Kubernetes:
+```yaml
+# Create a 3-node S3 storage cluster with Reed-Solomon Erasure Coding enabled
+apiVersion: storage.servstore.io/v1alpha1
+kind: ServStoreCluster
+metadata:
+  name: my-s3-cluster
+spec:
+  replicas: 3
+  image: ghcr.io/vyuvaraj/servstore:latest
+  erasureCoding:
+    enabled: true
+    dataShards: 2
+    parityShards: 1
+  storage:
+    size: 50Gi
+```
+
+### 2. Deploy using Helm
+```bash
+# Template or deploy the cluster and operator
+helm install my-release ./deploy/helm/servstore
+```
+
+### 3. Tenant Rate Limiting
+Apply QoS rate limits per namespace/tenant:
+```bash
+# Set rate-limiting header in requests to S3 Gateway
+curl -H "X-ServStore-Namespace: tenant-alpha" http://localhost:9000/mybucket/file.txt
+```
+If traffic limits are exceeded, ServStore responds with `HTTP 429 Too Many Requests` and a dynamic `Retry-After` header.
+
+---
+
+## Enterprise Hardening & Performance (Phase 6)
+
+### 1. Resiliency & Chaos Mesh
+Manifests are provided in `deploy/chaos/` to execute automated testing:
+- **`pod-chaos.yaml`**: Intermittently fails pods to verify Raft leader re-election stability.
+- **`network-chaos.yaml`**: Simulates packet loss and network delay to verify gossip protocols.
+- **`io-chaos.yaml`**: Injects simulated read/write disk errors on `/data` to test S3 gateway failover routing.
+
+### 2. Direct I/O Bypass
+For objects larger than 16MB, ServStore automatically uses sector-aligned Direct I/O (`FILE_FLAG_NO_BUFFERING` on Windows) to bypass the OS page cache for direct disk throughput.
+
+### 3. Parallel Hashing
+When processing large objects (>8MB), ServStore automatically parallelizes BLAKE3 checksum calculations across multiple CPU threads using concurrent chunk hashing, performing root tree reduction.
+
+---
+
 ## Roadmap
 
-See [roadmap.md](roadmap.md) for the full phase-by-phase implementation plan. **Phases 1–5 are now fully complete.** Phase 6 (Enterprise Hardening) is the final phase.
+See [roadmap.md](roadmap.md) for the full phase-by-phase implementation plan. **All Phases 1–6 are now 100% complete and fully verified.**
+
