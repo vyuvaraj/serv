@@ -1,3 +1,5 @@
+//go:build !wasm
+
 package runtime
 
 import (
@@ -564,3 +566,4 @@ func truncateQuery(query string) string {
 	}
 	return query[:200] + "..."
 }
+

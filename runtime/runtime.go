@@ -1,3 +1,5 @@
+//go:build !wasm
+
 package runtime
 
 import (
@@ -31,9 +33,6 @@ var (
 	tlsKeyFile  string
 	tlsEnabled  bool
 )
-
-// Noop is a no-op sentinel used by generated test files to satisfy the runtime import.
-func Noop() {}
 
 // getCliFlag parses a --flag value from os.Args.
 // Returns empty string if not found.

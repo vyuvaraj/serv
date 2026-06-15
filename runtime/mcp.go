@@ -1,3 +1,5 @@
+//go:build !wasm
+
 package runtime
 
 import (
@@ -183,3 +185,4 @@ func handleMCPRequest(req jsonRPCRequest) {
 		sendRPCError(req.ID, -32601, "Method not found: "+req.Method)
 	}
 }
+
