@@ -150,3 +150,23 @@ func TestExecute_ServLangWASM(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, string(output))
 	}
 }
+
+func TestExecute_ServLangComplexWASM(t *testing.T) {
+	wasmPath := "../../../Serv-lang/test_wasm_complex.wasm"
+	wasmBytes, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Skip("test_wasm_complex.wasm not compiled, compile first using serv build")
+	}
+
+	ctx := context.Background()
+	input := []byte("complex hello")
+	output, err := wasm.Execute(ctx, wasmBytes, input, 64, 30)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	expected := "COMPLEX_RESULT: 24"
+	if string(output) != expected {
+		t.Errorf("expected %q, got %q", expected, string(output))
+	}
+}
