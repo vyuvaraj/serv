@@ -19,6 +19,7 @@ func TestLocalStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to initialize store: %v", err)
 	}
+	defer store.Close()
 
 	ctx := context.Background()
 
@@ -201,6 +202,7 @@ func TestMultipartUpload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to initialize store: %v", err)
 	}
+	defer store.Close()
 
 	ctx := context.Background()
 	bucketName := "multi-bucket"

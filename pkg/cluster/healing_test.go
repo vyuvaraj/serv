@@ -75,11 +75,13 @@ func TestHealingManagerAutoHealingAndRebalancing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to initialize store 1: %v", err)
 	}
+	defer store1.Close()
 
 	store2, err := storage.NewLocalStore(dir2)
 	if err != nil {
 		t.Fatalf("failed to initialize store 2: %v", err)
 	}
+	defer store2.Close()
 
 	ctx := context.Background()
 	_ = store1.CreateBucket(ctx, "test-bucket")

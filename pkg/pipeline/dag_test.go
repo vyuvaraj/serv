@@ -73,6 +73,9 @@ func newTestStore(t *testing.T) (storage.StorageEngine, string) {
 	if err != nil {
 		t.Fatalf("NewLocalStore: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
 	bucket := "test"
 	if err := store.CreateBucket(context.Background(), bucket); err != nil {
 		t.Fatalf("CreateBucket: %v", err)

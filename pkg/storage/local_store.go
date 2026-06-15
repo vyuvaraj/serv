@@ -19,12 +19,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/pebble"
 	"github.com/zeebo/blake3"
 )
 
 type LocalStore struct {
 	rootDir       string
 	mu            sync.RWMutex
+	pebbleDB      *pebble.DB
 	encryptionKey []byte // nil means encryption disabled
 	coldTier      *ColdTierManager // nil means cold-tiering disabled
 	coldCancel    context.CancelFunc // cancel the background sweep goroutine
@@ -38,7 +40,32 @@ func NewLocalStore(rootDir string) (*LocalStore, error) {
 	if err := os.MkdirAll(absPath, 0755); err != nil {
 		return nil, err
 	}
-	return &LocalStore{rootDir: absPath}, nil
+
+	dbPath := filepath.Join(absPath, ".metadata_db")
+	db, err := pebble.Open(dbPath, &pebble.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open pebble db: %w", err)
+	}
+
+	return &LocalStore{
+		rootDir:  absPath,
+		pebbleDB: db,
+	}, nil
+}
+
+func (s *LocalStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.coldCancel != nil {
+		s.coldCancel()
+	}
+	if s.pebbleDB != nil {
+		err := s.pebbleDB.Close()
+		s.pebbleDB = nil
+		return err
+	}
+	return nil
 }
 
 // WithEncryptionKey configures AES-256 encryption at rest using the given passphrase.
@@ -49,14 +76,6 @@ func (s *LocalStore) WithEncryptionKey(passphrase string) {
 
 func (s *LocalStore) getBucketDir(bucket string) string {
 	return filepath.Join(s.rootDir, bucket)
-}
-
-func (s *LocalStore) getBucketMetaPath(bucket string) string {
-	return filepath.Join(s.getBucketDir(bucket), "bucket.json")
-}
-
-func (s *LocalStore) getObjectMetaPath(bucket, key string) string {
-	return filepath.Join(s.getBucketDir(bucket), ".metadata", key+".json")
 }
 
 func (s *LocalStore) getObjectDataPath(bucket, key, versionID string) string {
@@ -77,13 +96,10 @@ func (s *LocalStore) CreateBucket(ctx context.Context, bucket string) error {
 	defer s.mu.Unlock()
 
 	bucketDir := s.getBucketDir(bucket)
-	if _, err := os.Stat(bucketDir); err == nil {
+	if _, err := s.readBucketMeta(bucket); err == nil {
 		return ErrBucketExists
 	}
 
-	if err := os.MkdirAll(filepath.Join(bucketDir, ".metadata"), 0755); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(filepath.Join(bucketDir, ".data"), 0755); err != nil {
 		return err
 	}
@@ -94,61 +110,47 @@ func (s *LocalStore) CreateBucket(ctx context.Context, bucket string) error {
 		Versioning:  "Disabled",
 	}
 
-	metaData, err := json.Marshal(meta)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(s.getBucketMetaPath(bucket), metaData, 0644)
+	return s.writeBucketMeta(bucket, &meta)
 }
 
 func (s *LocalStore) DeleteBucket(ctx context.Context, bucket string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if _, err := s.readBucketMeta(bucket); err != nil {
+		return err
+	}
+
+	// Verify the bucket is empty by scanning Pebble for any objects in this bucket
+	prefix := []byte("o:" + bucket + ":")
+	iter, err := s.pebbleDB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+	})
+	if err != nil {
+		return err
+	}
+	defer iter.Close()
+
+	hasObjects := false
+	for iter.First(); iter.Valid() && bytes.HasPrefix(iter.Key(), prefix); {
+		var om ObjectMeta
+		if json.Unmarshal(iter.Value(), &om) == nil && len(om.Versions) > 0 {
+			hasObjects = true
+			break
+		}
+		break
+	}
+	if hasObjects {
+		return fmt.Errorf("bucket is not empty")
+	}
+
+	// Delete bucket metadata
+	if err := s.pebbleDB.Delete([]byte("b:"+bucket), pebble.Sync); err != nil {
+		return err
+	}
+
+	// Clean up data directories on disk
 	bucketDir := s.getBucketDir(bucket)
-	if _, err := os.Stat(bucketDir); os.IsNotExist(err) {
-		return ErrBucketNotFound
-	}
-
-	// Verify the bucket is empty (except for metadata and bucket.json)
-	// In S3, bucket must be empty to be deleted.
-	// We can check if any user objects exist.
-	metaDir := filepath.Join(bucketDir, ".metadata")
-	_, err := os.ReadDir(metaDir)
-	if err == nil {
-		// Filter out directory entries that might not be objects or check if empty
-		hasObjects := false
-		var checkEmpty func(string) bool
-		checkEmpty = func(path string) bool {
-			entries, err := os.ReadDir(path)
-			if err != nil {
-				return false
-			}
-			for _, entry := range entries {
-				if entry.IsDir() {
-					if checkEmpty(filepath.Join(path, entry.Name())) {
-						return true
-					}
-				} else {
-					// Check if there are active versions
-					data, err := os.ReadFile(filepath.Join(path, entry.Name()))
-					if err == nil {
-						var objMeta ObjectMeta
-						if json.Unmarshal(data, &objMeta) == nil && len(objMeta.Versions) > 0 {
-							return true
-						}
-					}
-				}
-			}
-			return false
-		}
-		hasObjects = checkEmpty(metaDir)
-		if hasObjects {
-			return fmt.Errorf("bucket is not empty")
-		}
-	}
-
 	return os.RemoveAll(bucketDir)
 }
 
@@ -156,37 +158,49 @@ func (s *LocalStore) ListBuckets(ctx context.Context) ([]Bucket, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	entries, err := os.ReadDir(s.rootDir)
+	prefix := []byte("b:")
+	iter, err := s.pebbleDB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+	})
 	if err != nil {
 		return nil, err
 	}
+	defer iter.Close()
 
 	var buckets []Bucket
-	for _, entry := range entries {
-		if entry.IsDir() {
-			b, err := s.readBucketMeta(entry.Name())
-			if err == nil {
-				buckets = append(buckets, *b)
-			}
+	for iter.First(); iter.Valid() && bytes.HasPrefix(iter.Key(), prefix); iter.Next() {
+		var b Bucket
+		if err := json.Unmarshal(iter.Value(), &b); err == nil {
+			buckets = append(buckets, b)
 		}
 	}
 	return buckets, nil
 }
 
 func (s *LocalStore) readBucketMeta(bucket string) (*Bucket, error) {
-	metaPath := s.getBucketMetaPath(bucket)
-	data, err := os.ReadFile(metaPath)
+	key := []byte("b:" + bucket)
+	val, closer, err := s.pebbleDB.Get(key)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, ErrBucketNotFound
 		}
 		return nil, err
 	}
+	defer closer.Close()
 	var b Bucket
-	if err := json.Unmarshal(data, &b); err != nil {
+	if err := json.Unmarshal(val, &b); err != nil {
 		return nil, err
 	}
 	return &b, nil
+}
+
+func (s *LocalStore) writeBucketMeta(bucket string, b *Bucket) error {
+	data, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	key := []byte("b:" + bucket)
+	return s.pebbleDB.Set(key, data, pebble.Sync)
 }
 
 func (s *LocalStore) GetBucket(ctx context.Context, bucket string) (*Bucket, error) {
@@ -205,12 +219,7 @@ func (s *LocalStore) SetBucketVersioning(ctx context.Context, bucket string, sta
 	}
 
 	b.Versioning = status
-	data, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+	return s.writeBucketMeta(bucket, b)
 }
 
 func (s *LocalStore) SetBucketContentAddressable(ctx context.Context, bucket string, enabled bool) error {
@@ -223,23 +232,19 @@ func (s *LocalStore) SetBucketContentAddressable(ctx context.Context, bucket str
 	}
 
 	b.ContentAddressable = enabled
-	data, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+	return s.writeBucketMeta(bucket, b)
 }
 
 func (s *LocalStore) readObjectMeta(bucket, key string) (*ObjectMeta, error) {
-	metaPath := s.getObjectMetaPath(bucket, key)
-	data, err := os.ReadFile(metaPath)
+	dbKey := []byte("o:" + bucket + ":" + key)
+	data, closer, err := s.pebbleDB.Get(dbKey)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, ErrObjectNotFound
 		}
 		return nil, err
 	}
+	defer closer.Close()
 	var om ObjectMeta
 	if err := json.Unmarshal(data, &om); err != nil {
 		return nil, err
@@ -248,15 +253,12 @@ func (s *LocalStore) readObjectMeta(bucket, key string) (*ObjectMeta, error) {
 }
 
 func (s *LocalStore) writeObjectMeta(bucket, key string, om *ObjectMeta) error {
-	metaPath := s.getObjectMetaPath(bucket, key)
-	if err := os.MkdirAll(filepath.Dir(metaPath), 0755); err != nil {
-		return err
-	}
+	dbKey := []byte("o:" + bucket + ":" + key)
 	data, err := json.Marshal(om)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(metaPath, data, 0644)
+	return s.pebbleDB.Set(dbKey, data, pebble.Sync)
 }
 
 func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) (ov *ObjectVersion, err error) {
@@ -724,7 +726,7 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 
 		// If no versions left, delete the metadata file entirely
 		if len(om.Versions) == 0 {
-			_ = os.Remove(s.getObjectMetaPath(bucket, key))
+			_ = s.pebbleDB.Delete([]byte("o:"+bucket+":"+key), pebble.Sync)
 			return &deletedVer, nil
 		}
 
@@ -824,34 +826,31 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 				}
 			}
 		}
-		_ = os.Remove(s.getObjectMetaPath(bucket, key))
+		_ = s.pebbleDB.Delete([]byte("o:"+bucket+":"+key), pebble.Sync)
 		return &ObjectVersion{Key: key, IsDeleteMarker: true}, nil
 	}
 }
 
 // Helper to list keys in .metadata recursively
 func (s *LocalStore) scanMetadataKeys(bucket string) ([]string, error) {
-	metaDir := filepath.Join(s.getBucketDir(bucket), ".metadata")
-	var keys []string
-	err := filepath.Walk(metaDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && strings.HasSuffix(path, ".json") {
-			rel, err := filepath.Rel(metaDir, path)
-			if err == nil {
-				key := strings.TrimSuffix(rel, ".json")
-				// Convert windows slash to standard URL/S3 slash
-				key = filepath.ToSlash(key)
-				keys = append(keys, key)
-			}
-		}
-		return nil
+	prefix := []byte("o:" + bucket + ":")
+	iter, err := s.pebbleDB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
 	})
-	if os.IsNotExist(err) {
-		return nil, nil
+	if err != nil {
+		return nil, err
 	}
-	return keys, err
+	defer iter.Close()
+
+	var keys []string
+	for iter.First(); iter.Valid() && bytes.HasPrefix(iter.Key(), prefix); iter.Next() {
+		k := string(iter.Key())
+		parts := strings.SplitN(k, ":", 3)
+		if len(parts) == 3 {
+			keys = append(keys, parts[2])
+		}
+	}
+	return keys, nil
 }
 
 func (s *LocalStore) ListObjects(ctx context.Context, bucket, prefix, delimiter, marker string, maxKeys int) ([]*ObjectVersion, []string, error) {
@@ -1234,11 +1233,7 @@ func (s *LocalStore) SetBucketLifecycle(ctx context.Context, bucket string, rule
 		return err
 	}
 	b.Lifecycle = rules
-	data, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+	return s.writeBucketMeta(bucket, b)
 }
 
 func (s *LocalStore) GetBucketLifecycle(ctx context.Context, bucket string) ([]LifecycleRule, error) {
@@ -1261,11 +1256,7 @@ func (s *LocalStore) DeleteBucketLifecycle(ctx context.Context, bucket string) e
 		return err
 	}
 	b.Lifecycle = nil
-	data, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.getBucketMetaPath(bucket), data, 0644)
+	return s.writeBucketMeta(bucket, b)
 }
 
 // ApplyLifecycle scans all buckets and permanently deletes object versions
@@ -1342,7 +1333,7 @@ func (s *LocalStore) ApplyLifecycle(ctx context.Context) (expired int, err error
 			}
 
 			if len(surviving) == 0 {
-				_ = os.Remove(s.getObjectMetaPath(bucketName, key))
+				_ = s.pebbleDB.Delete([]byte("o:"+bucketName+":"+key), pebble.Sync)
 				continue
 			}
 
@@ -1420,31 +1411,27 @@ func (s *LocalStore) LockObject(ctx context.Context, bucket, key, versionID stri
 	return &result, nil
 }
 
-func (s *LocalStore) getUserPolicyPath(username string) string {
-	return filepath.Join(s.rootDir, ".system", "iam", "policies", username+".json")
-}
-
 func (s *LocalStore) PutUserPolicy(ctx context.Context, username string, policy []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := s.getUserPolicyPath(username)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, policy, 0644)
+	key := []byte("p:" + username)
+	return s.pebbleDB.Set(key, policy, pebble.Sync)
 }
 
 func (s *LocalStore) GetUserPolicy(ctx context.Context, username string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	path := s.getUserPolicyPath(username)
-	data, err := os.ReadFile(path)
+	key := []byte("p:" + username)
+	data, closer, err := s.pebbleDB.Get(key)
 	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return nil, os.ErrNotExist
+		}
 		return nil, err
 	}
+	defer closer.Close()
 	return data, nil
 }
 
@@ -1452,9 +1439,9 @@ func (s *LocalStore) DeleteUserPolicy(ctx context.Context, username string) erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := s.getUserPolicyPath(username)
-	err := os.Remove(path)
-	if err != nil && !os.IsNotExist(err) {
+	key := []byte("p:" + username)
+	err := s.pebbleDB.Delete(key, pebble.Sync)
+	if err != nil && !errors.Is(err, pebble.ErrNotFound) {
 		return err
 	}
 	return nil
@@ -1465,40 +1452,23 @@ func (s *LocalStore) ListLocalKeys(ctx context.Context) ([]LocalKey, error) {
 	defer s.mu.RUnlock()
 
 	var keys []LocalKey
-	entries, err := os.ReadDir(s.rootDir)
+	prefix := []byte("o:")
+	iter, err := s.pebbleDB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+	})
 	if err != nil {
 		return nil, err
 	}
+	defer iter.Close()
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		bucketName := entry.Name()
-		if bucketName == "policies" || strings.HasPrefix(bucketName, ".") {
-			continue
-		}
-		metaDir := filepath.Join(s.rootDir, bucketName, ".metadata")
-		if _, err := os.Stat(metaDir); os.IsNotExist(err) {
-			continue
-		}
-		err = filepath.Walk(metaDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() && strings.HasSuffix(info.Name(), ".json") {
-				rel, err := filepath.Rel(metaDir, path)
-				if err != nil {
-					return err
-				}
-				key := strings.TrimSuffix(rel, ".json")
-				key = filepath.ToSlash(key)
-				keys = append(keys, LocalKey{Bucket: bucketName, Key: key})
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
+	for iter.First(); iter.Valid() && bytes.HasPrefix(iter.Key(), prefix); iter.Next() {
+		k := string(iter.Key())
+		parts := strings.SplitN(k, ":", 3)
+		if len(parts) == 3 {
+			keys = append(keys, LocalKey{
+				Bucket: parts[1],
+				Key:    parts[2],
+			})
 		}
 	}
 	return keys, nil

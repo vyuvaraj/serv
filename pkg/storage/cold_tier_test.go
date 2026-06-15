@@ -61,6 +61,7 @@ func TestColdTier_SweepAndRehydrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStore: %v", err)
 	}
+	defer s.Close()
 
 	ctx := context.Background()
 	bucket := "cold-bucket"
@@ -162,6 +163,7 @@ func TestColdTier_SweepAndRehydrate(t *testing.T) {
 func TestColdTier_GetColdTierConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	s, _ := NewLocalStore(tmpDir)
+	defer s.Close()
 
 	// Before setting, should return false
 	_, ok := s.GetColdTierConfig()

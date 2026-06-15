@@ -79,7 +79,9 @@ func TestCrossRegionReplication(t *testing.T) {
 	defer os.RemoveAll(dir2)
 
 	store1, _ := storage.NewLocalStore(dir1)
+	defer store1.Close()
 	store2, _ := storage.NewLocalStore(dir2)
+	defer store2.Close()
 
 	ctx := context.Background()
 	_ = store1.CreateBucket(ctx, "crr-bucket")

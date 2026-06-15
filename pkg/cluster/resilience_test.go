@@ -175,6 +175,9 @@ func newTestRaftNode(t *testing.T, id string, port int) *testRaftNode {
 func (n *testRaftNode) cleanup() {
 	n.raftNode.Close()
 	n.stream.Close()
+	if ls, ok := n.store.(*storage.LocalStore); ok {
+		ls.Close()
+	}
 	os.RemoveAll(n.dataDir)
 }
 

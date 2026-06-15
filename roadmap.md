@@ -94,7 +94,7 @@ Ensure production readiness through rigorous validation, resiliency checks, and 
 ## Phase 7: Serv-verse & Next-Gen Storage Enhancements (Proposed)
 Transition ServStore into a high-capacity, metadata-optimized cluster integrated with the broader Serv ecosystem.
 - **Next-Gen Storage Core**:
-  - [ ] **LSM-Tree Metadata Engine**: Replace basic Raft state machine file logging with a structured LSM-tree key-value store (e.g. Pebble) for sub-millisecond metadata operations at scale.
+  - [x] **LSM-Tree Metadata Engine**: Replace basic Raft state machine file logging with a structured LSM-tree key-value store (e.g. Pebble) for sub-millisecond metadata operations at scale.
   - [ ] **HNSW Vector Indexing**: Upgrade TF-IDF to a true HNSW vector index using local ONNX embeddings for advanced semantic search queries.
 - **Compute Transform Enhancements**:
   - [x] **Transform Pipeline DAG Engine**: Multi-stage WASM pipeline execution via `POST /<bucket>?pipeline=true`. Stages are chained in order — stdout of each feeds stdin of the next. Pre-flight object validation, per-stage trace, optional result storage via `output_key`, and fail-fast partial trace on stage error. Powered by `pkg/pipeline`.

@@ -23,6 +23,7 @@ func TestMetadataFSMApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create local store: %v", err)
 	}
+	defer store.Close()
 
 	fsm := NewMetadataFSM(store)
 
