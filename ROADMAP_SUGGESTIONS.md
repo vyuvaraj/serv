@@ -19,7 +19,7 @@ The current roadmaps don't address the debugging experience or error model compl
 | Status | Item | Description | Priority |
 |--------|------|-------------|----------|
 | ⬜ | Stack traces in Serv | Map Go panics back to `.srv` line numbers using source maps | High |
-| ⬜ | `?` operator fix | Propagate actual error values, not just `nil` | High |
+| ✅ | `?` operator fix | Propagate actual error values, not just `nil` | High |
 | ⬜ | Error types | `error { code: int, message: string }` — structured errors beyond strings | Medium |
 | ⬜ | `finally` block | `try { } catch (e) { } finally { }` — guaranteed cleanup | Medium |
 | ⬜ | Panic recovery context | Show which route/scheduler/subscriber triggered the panic | Medium |
