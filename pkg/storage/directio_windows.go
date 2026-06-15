@@ -1,9 +1,10 @@
+//go:build windows
+
 package storage
 
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"syscall"
 )
 
@@ -13,29 +14,13 @@ const (
 )
 
 // WriteFileDirectIO writes data directly to disk bypassing the host OS page cache.
-// On Windows, it uses syscall flags FILE_FLAG_NO_BUFFERING and FILE_FLAG_WRITE_THROUGH.
-// On Linux/macOS/other POSIX platforms, it defaults to standard OS write paths to remain
-// fully portable and platform-independent (falling back safely).
 func WriteFileDirectIO(path string, data []byte) error {
-	if runtime.GOOS == "windows" {
-		return writeWindowsDirectIO(path, data)
-	}
-
-	// POSIX fallback write using default file creation parameters
-	return os.WriteFile(path, data, 0644)
-}
-
-func writeWindowsDirectIO(path string, data []byte) error {
 	pathPtr, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
 		return err
 	}
 
 	// 1. Allocate sector-aligned memory buffer for Direct I/O writes.
-	// Windows FILE_FLAG_NO_BUFFERING requires:
-	// - File access offsets must be integer multiples of sector size.
-	// - File write sizes must be integer multiples of sector size.
-	// - Memory buffer addresses must be aligned to sector boundaries.
 	alignedLength := (len(data) + sectorSize - 1) & ^(sectorSize - 1)
 	alignedBuffer := make([]byte, alignedLength)
 	copy(alignedBuffer, data)
