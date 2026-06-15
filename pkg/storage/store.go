@@ -93,6 +93,12 @@ type StorageEngine interface {
 	// the target object's original content-type.
 	WASMTransform(ctx context.Context, bucket, wasmKey, targetKey, versionID string, memLimitMB, timeoutSec int) ([]byte, string, error)
 
+	// GetObjectBytes reads the object at (bucket, key, versionID) fully into
+	// memory and returns the raw bytes. It is a convenience wrapper around
+	// GetObject that is safe to use when the entire payload needs to be
+	// buffered — e.g. loading WASM binaries or feeding pipeline stage inputs.
+	GetObjectBytes(ctx context.Context, bucket, key, versionID string) ([]byte, error)
+
 	// SetColdTier attaches a ColdTierConfig to the store and starts background archival.
 	SetColdTier(cfg ColdTierConfig) error
 	// GetColdTierConfig returns the currently active cold-tier configuration.

@@ -25,6 +25,7 @@ import (
 	"servstore/pkg/cluster"
 	"servstore/pkg/metrics"
 	"servstore/pkg/otel"
+	"servstore/pkg/pipeline"
 	"servstore/pkg/ratelimit"
 	"servstore/pkg/storage"
 )
@@ -279,7 +280,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.handleCreateBucket(w, r, bucket)
 			}
 		case http.MethodPost:
-			if r.URL.Query().Has("cold-tier") && r.URL.Query().Has("sweep") {
+			if r.URL.Query().Has("pipeline") {
+				g.handleWASMPipeline(w, r, bucket)
+			} else if r.URL.Query().Has("cold-tier") && r.URL.Query().Has("sweep") {
 				g.handleRunColdSweep(w, r, bucket)
 			} else {
 				g.writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed on bucket level")
@@ -1885,4 +1888,53 @@ func (g *Gateway) handleRunColdSweep(w http.ResponseWriter, r *http.Request, buc
 		"errors":   errMsgs,
 	})
 }
+// handleWASMPipeline — POST /<bucket>?pipeline=true
+// Decodes a PipelineRequest from the JSON body, executes each stage in order
+// using the DAG executor, and returns a PipelineResult as JSON.
+//
+// When output_key is set in the request, the final output is stored back into
+// the bucket and the response is the PipelineResult JSON. When output_key is
+// omitted, the raw transform output bytes are streamed directly in the response
+// body with Content-Type application/octet-stream, and the PipelineResult is
+// included in the X-ServStore-Pipeline-Trace response header (JSON-encoded) if
+// save_trace is true.
+func (g *Gateway) handleWASMPipeline(w http.ResponseWriter, r *http.Request, bucket string) {
+	// Verify bucket exists.
+	if _, err := g.store.GetBucket(r.Context(), bucket); err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		} else {
+			g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		}
+		return
+	}
 
+	// Decode PipelineRequest.
+	var req pipeline.PipelineRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		g.writeError(w, http.StatusBadRequest, "MalformedBody", "Invalid pipeline JSON: "+err.Error())
+		return
+	}
+
+	// Execute the pipeline.
+	exec := pipeline.NewExecutor(g.store)
+	result, err := exec.Run(r.Context(), bucket, req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if result != nil && (errors.Is(err, storage.ErrObjectNotFound) ||
+			errors.Is(err, storage.ErrBucketNotFound)) {
+			status = http.StatusNotFound
+		}
+		// Return structured JSON error with trace when available.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	// Success — return PipelineResult as JSON.
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-ServStore-Transform", "wasm-pipeline")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(result)
+}

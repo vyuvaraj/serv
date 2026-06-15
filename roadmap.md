@@ -97,7 +97,7 @@ Transition ServStore into a high-capacity, metadata-optimized cluster integrated
   - [ ] **LSM-Tree Metadata Engine**: Replace basic Raft state machine file logging with a structured LSM-tree key-value store (e.g. Pebble) for sub-millisecond metadata operations at scale.
   - [ ] **HNSW Vector Indexing**: Upgrade TF-IDF to a true HNSW vector index using local ONNX embeddings for advanced semantic search queries.
 - **Compute Transform Enhancements**:
-  - [ ] **Transform Pipeline DAG Engine**: Support execution of server-side WASM transform pipelines linked in a Directed Acyclic Graph (DAG) flow.
+  - [x] **Transform Pipeline DAG Engine**: Multi-stage WASM pipeline execution via `POST /<bucket>?pipeline=true`. Stages are chained in order — stdout of each feeds stdin of the next. Pre-flight object validation, per-stage trace, optional result storage via `output_key`, and fail-fast partial trace on stage error. Powered by `pkg/pipeline`.
 - **Ecosystem Integration (Serv-verse)**:
   - [ ] **Unified Management Console (ServConsole)**: Establish a single glassmorphic dashboard visualizing cluster metrics, OTel traces, rate limits, and replication state.
   - [ ] **serv-lang Native Tooling**: Optimize client libraries and add compiler-level support for native S3 pipeline configuration.

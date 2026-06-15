@@ -1625,6 +1625,19 @@ func (s *LocalStore) WASMTransform(ctx context.Context, bucket, wasmKey, targetK
 	return output, targetVer.ContentType, nil
 }
 
+// GetObjectBytes reads the object at (bucket, key, versionID) fully into memory
+// and returns the raw bytes. It is a convenience wrapper around GetObject for
+// cases where the entire payload must be buffered (e.g. WASM binaries or
+// pipeline stage inputs).
+func (s *LocalStore) GetObjectBytes(ctx context.Context, bucket, key, versionID string) ([]byte, error) {
+	rc, _, err := s.GetObject(ctx, bucket, key, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
 // SetColdTier configures and starts the cold-storage tiering background sweep.
 // Calling SetColdTier again replaces the previous configuration and restarts
 // the sweep goroutine.
