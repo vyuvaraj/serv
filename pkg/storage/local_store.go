@@ -302,7 +302,6 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	}
 
 	hasher := md5.New()
-	b3Hasher := blake3.New()
 	// Read all data first so we can encrypt before writing
 	plaintext, err := io.ReadAll(reader)
 	if err != nil {
@@ -315,8 +314,7 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 	hasher.Write(plaintext)
 	etag := hex.EncodeToString(hasher.Sum(nil))
 
-	b3Hasher.Write(plaintext)
-	b3Checksum := hex.EncodeToString(b3Hasher.Sum(nil))
+	b3Checksum := ParallelBlake3Hash(plaintext)
 
 	// If bucket is ContentAddressable, use cas-<checksum> as the version ID
 	if b.ContentAddressable {
@@ -357,14 +355,22 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 			payload = plaintext
 		}
 
-		if _, err := tmpFile.Write(payload); err != nil {
-			return nil, err
-		}
-
-		// Close temp file before renaming
-		_ = tmpFile.Close()
-		if err := os.Rename(tmpFile.Name(), dataPath); err != nil {
-			return nil, err
+		// DirectIO logic: Bypass OS page cache for large writes (>16MB)
+		const directIOThreshold = 16 * 1024 * 1024
+		if len(payload) >= directIOThreshold {
+			_ = tmpFile.Close() // Close placeholder temp file
+			if err := WriteFileDirectIO(dataPath, payload); err != nil {
+				return nil, err
+			}
+		} else {
+			if _, err := tmpFile.Write(payload); err != nil {
+				return nil, err
+			}
+			// Close temp file before renaming
+			_ = tmpFile.Close()
+			if err := os.Rename(tmpFile.Name(), dataPath); err != nil {
+				return nil, err
+			}
 		}
 	}
 
