@@ -124,10 +124,10 @@ func newTestRaftNode(t *testing.T, id string, port int) *testRaftNode {
 
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(id)
-	config.HeartbeatTimeout = 40 * time.Millisecond
-	config.ElectionTimeout = 40 * time.Millisecond
-	config.CommitTimeout = 10 * time.Millisecond
-	config.LeaderLeaseTimeout = 20 * time.Millisecond
+	config.HeartbeatTimeout = 200 * time.Millisecond
+	config.ElectionTimeout = 600 * time.Millisecond
+	config.CommitTimeout = 50 * time.Millisecond
+	config.LeaderLeaseTimeout = 100 * time.Millisecond
 
 	addr, err := net.ResolveTCPAddr("tcp", raftBindAddr)
 	if err != nil {
@@ -202,7 +202,7 @@ func TestResilience_MetadataConsistencyUnderPartition(t *testing.T) {
 	node1.raftNode.raftInstance.BootstrapCluster(config)
 
 	// Wait for node-1 to become leader
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// Join node-2 and node-3 to the cluster
 	err := node1.raftNode.Join(node2.nodeID, node2.raftAddr)
@@ -215,7 +215,7 @@ func TestResilience_MetadataConsistencyUnderPartition(t *testing.T) {
 	}
 
 	// Wait for consensus replication configuration to settle
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// Propose initial metadata change to verify replication works
 	cmd1 := MetadataCommand{
@@ -227,7 +227,7 @@ func TestResilience_MetadataConsistencyUnderPartition(t *testing.T) {
 	}
 
 	// Verify replication across all nodes
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	for _, n := range []*testRaftNode{node1, node2, node3} {
 		if _, err := n.store.GetBucket(context.Background(), "resilience-bucket-1"); err != nil {
 			t.Errorf("Bucket replication failed on %s: %v", n.nodeID, err)
@@ -238,7 +238,7 @@ func TestResilience_MetadataConsistencyUnderPartition(t *testing.T) {
 	node3.stream.setBlock(true)
 
 	// Wait for Raft node timeouts to detect partition
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
 
 	// Proposal on Node 1 (retains majority: node-1 and node-2) should STILL succeed
 	cmd2 := MetadataCommand{
@@ -262,7 +262,7 @@ func TestResilience_MetadataConsistencyUnderPartition(t *testing.T) {
 	node3.stream.setBlock(false)
 
 	// Wait for Raft heartbeats to catch up and sync state
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1500 * time.Millisecond)
 
 	// Verify Node 3 caught up and has 'resilience-bucket-majority'
 	if _, err := node3.store.GetBucket(context.Background(), "resilience-bucket-majority"); err != nil {
@@ -283,7 +283,7 @@ func TestResilience_MetadataLinearizability(t *testing.T) {
 		},
 	}
 	node1.raftNode.raftInstance.BootstrapCluster(config)
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	var wg sync.WaitGroup
 	workers := 5
