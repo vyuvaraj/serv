@@ -273,9 +273,10 @@ func callOpenAI(endpoint string, body map[string]interface{}) map[string]interfa
 
 func anthropicComplete(prompt string, maxTokens int, temperature float64) interface{} {
 	body := map[string]interface{}{
-		"model":      aiModel,
-		"max_tokens": maxTokens,
-		"messages":   []map[string]string{{"role": "user", "content": prompt}},
+		"model":       aiModel,
+		"max_tokens":  maxTokens,
+		"messages":    []map[string]string{{"role": "user", "content": prompt}},
+		"temperature": temperature,
 	}
 	jsonBody, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", aiBaseURL+"/messages", bytes.NewReader(jsonBody))

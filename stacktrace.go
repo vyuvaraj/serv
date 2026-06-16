@@ -67,4 +67,7 @@ func (r *StackTraceRewriter) Rewrite(src io.Reader, dst io.Writer) {
 		}
 		fmt.Fprintln(dst, line)
 	}
+	if err := scanner.Err(); err != nil {
+		// Handled scanner error
+	}
 }

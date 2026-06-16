@@ -430,12 +430,12 @@ func s3TransformHelper(endpoint, accessKey, secretKey, bucket, inputKey string, 
 			case map[interface{}]interface{}:
 				spec := PipelineStageSpec{}
 				for k, val := range specVal {
-					kStr := fmt.Sprint(k)
-					if kStr == "wasm" {
+					switch fmt.Sprint(k) {
+					case "wasm":
 						spec.Wasm = asString(val)
-					} else if kStr == "mem_limit_mb" {
+					case "mem_limit_mb":
 						spec.MemLimitMB = getInt(val)
-					} else if kStr == "timeout_sec" {
+					case "timeout_sec":
 						spec.TimeoutSec = getInt(val)
 					}
 				}

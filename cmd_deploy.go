@@ -112,7 +112,7 @@ CMD ["./service"]
 }
 
 func generateRailwayConfig(targetDir, appName, srvFile string) {
-	railwayJSON := fmt.Sprintf(`{
+	railwayJSON := `{
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
@@ -123,7 +123,7 @@ func generateRailwayConfig(targetDir, appName, srvFile string) {
     "restartPolicyMaxRetries": 10
   }
 }
-`)
+`
 
 	dockerfile := fmt.Sprintf(`FROM golang:1.23-alpine AS builder
 WORKDIR /app
