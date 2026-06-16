@@ -46,6 +46,7 @@ func main() {
 	case "run":
 		runCmd := flag.NewFlagSet("run", flag.ExitOnError)
 		watchFlag := runCmd.Bool("watch", false, "Watch files and hot-reload")
+		profileFlag := runCmd.Bool("profile", false, "Enable CPU and memory profiling")
 		if err := runCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
@@ -58,7 +59,7 @@ func main() {
 		if *watchFlag {
 			runServWatch(args[0])
 		} else {
-			runServ(args[0], args[1:])
+			runServ(args[0], args[1:], *profileFlag)
 		}
 
 	case "dockerize":

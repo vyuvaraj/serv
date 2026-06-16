@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -20,16 +22,49 @@ type MapStringFloat struct {
 	sync.RWMutex
 }
 
-func MetricInc(name string) {
-	metricsMu.Lock()
-	defer metricsMu.Unlock()
-	metricsCounters[name]++
+func getMetricKey(name string, labels ...interface{}) string {
+	if len(labels) == 0 {
+		return name
+	}
+
+	var labelMap map[string]interface{}
+	first := labels[0]
+	if sm, ok := first.(*SafeMap); ok {
+		labelMap = sm.All()
+	} else if m, ok := first.(map[string]interface{}); ok {
+		labelMap = m
+	}
+
+	if len(labelMap) == 0 {
+		return name
+	}
+
+	var keys []string
+	for k := range labelMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%q", k, fmt.Sprint(labelMap[k])))
+	}
+
+	return fmt.Sprintf("%s{%s}", name, strings.Join(parts, ","))
 }
 
-func MetricGauge(name string, val float64) {
+func MetricInc(name string, labels ...interface{}) {
+	metricsMu.Lock()
+	defer metricsMu.Unlock()
+	key := getMetricKey(name, labels...)
+	metricsCounters[key]++
+}
+
+func MetricGauge(name string, val float64, labels ...interface{}) {
 	metricsGauges.Lock()
 	defer metricsGauges.Unlock()
-	metricsGauges.m[name] = val
+	key := getMetricKey(name, labels...)
+	metricsGauges.m[key] = val
 }
 
 // JSON native support

@@ -38,7 +38,12 @@ func ReleaseSemaphore(id string) {
 // Await runs a function asynchronously and blocks until it returns.
 func Await(fn func() interface{}) interface{} {
 	ch := make(chan interface{}, 1)
+	parentTrace := GetActiveTrace()
 	go func() {
+		if parentTrace != nil {
+			SetActiveTrace(parentTrace)
+			defer ClearActiveTrace()
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				ch <- nil
@@ -54,8 +59,13 @@ func AwaitAll(fns []func() interface{}) interface{} {
 	results := make([]interface{}, len(fns))
 	var wg sync.WaitGroup
 	wg.Add(len(fns))
+	parentTrace := GetActiveTrace()
 	for i, fn := range fns {
 		go func(idx int, f func() interface{}) {
+			if parentTrace != nil {
+				SetActiveTrace(parentTrace)
+				defer ClearActiveTrace()
+			}
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {

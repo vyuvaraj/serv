@@ -74,6 +74,14 @@ func logStructuredWithFields(level string, fields map[string]interface{}, args .
 		return
 	}
 	msg := sanitizeLog(fmt.Sprint(args...))
+	if active := GetActiveTrace(); active != nil {
+		if fields == nil {
+			fields = make(map[string]interface{})
+		}
+		if _, ok := fields["trace_id"]; !ok {
+			fields["trace_id"] = active.TraceID
+		}
+	}
 	if logJSON {
 		entry := map[string]interface{}{
 			"level":     level,
