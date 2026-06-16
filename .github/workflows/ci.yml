@@ -41,7 +41,13 @@ jobs:
       - name: Run unit tests
         shell: pwsh
         run: |
-          $testFiles = @("examples\12_static_types.srv", "examples\14_phase3_features.srv", "examples\20_raw_strings.srv")
+          $testFiles = @(
+            "test_sample.srv",
+            "examples\12_static_types.srv",
+            "examples\14_phase3_features.srv",
+            "examples\20_raw_strings.srv",
+            "examples\50_new_features.srv"
+          )
           $failed = @()
           foreach ($file in $testFiles) {
             if (Test-Path $file) {
@@ -53,7 +59,7 @@ jobs:
             Write-Host "Failed tests: $($failed -join ', ')"
             exit 1
           }
-          Write-Host "All unit tests passed"
+          Write-Host "All $($testFiles.Count) test files passed"
 
       - name: Check formatting
         shell: pwsh
