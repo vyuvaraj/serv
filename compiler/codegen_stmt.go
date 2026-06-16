@@ -864,7 +864,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 				val = fmt.Sprintf("toString(%s)", val)
 			default:
 				if strings.HasPrefix(targetType, "*") || c.isStructType(targetType) {
-					goType := targetType
+					goType := strings.TrimSuffix(targetType, "?")
 					if !strings.HasPrefix(goType, "*") {
 						goType = "*" + goType
 					}
@@ -885,7 +885,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			goType = "*" + s.Type
 		}
 		c.varTypes[s.Name] = s.Type
-
+ 
 		// Apply type coercion if the value is dynamic (interface{})
 		inferred := c.getExpressionType(s.Value)
 		if inferred == "interface{}" {
@@ -900,7 +900,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 				val = fmt.Sprintf("toString(%s)", val)
 			default:
 				if c.isStructType(s.Type) {
-					val = fmt.Sprintf("interface{}(%s).(*%s)", val, s.Type)
+					val = fmt.Sprintf("interface{}(%s).(*%s)", val, strings.TrimSuffix(s.Type, "?"))
 				}
 			}
 		}
@@ -915,7 +915,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 		if ident, ok := callExpr.Function.(*Identifier); ok {
 			if retType, exists := c.funcReturnTypes[ident.Value]; exists {
 				if c.isStructType(retType) {
-					goType = "*" + retType
+					goType = "*" + strings.TrimSuffix(retType, "?")
 					c.varTypes[s.Name] = retType
 				} else {
 					gt := toGoType(retType)
@@ -1012,6 +1012,13 @@ func (c *Codegen) genReturnStmt(s *ReturnStmt) (string, error) {
 			val = fmt.Sprintf("interface{}(%s).(%s)", val, c.currentFn.ReturnType)
 		}
 	}
+	if c.currentFn != nil && c.currentFn.ReturnType != "" {
+		retType := toGoType(c.currentFn.ReturnType)
+		if retType == "interface{}" && c.isStructType(c.currentFn.ReturnType) {
+			goRetType := "*" + strings.TrimSuffix(c.currentFn.ReturnType, "?")
+			val = fmt.Sprintf("interface{}(%s).(%s)", val, goRetType)
+		}
+	}
 
 	return fmt.Sprintf("return %s\n", val), nil
 }
@@ -1075,7 +1082,7 @@ func (c *Codegen) genFnDecl(s *FnDecl) (string, error) {
 		} else {
 			retType = toGoType(s.ReturnType)
 			if retType == "interface{}" && c.isStructType(s.ReturnType) {
-				retType = "*" + s.ReturnType
+				retType = "*" + strings.TrimSuffix(s.ReturnType, "?")
 			}
 		}
 	}
