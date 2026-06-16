@@ -238,6 +238,9 @@ func AddBeforeQueryHook(hook func(interface{}, interface{}) interface{}) {
 }
 
 func DBQuery(query string, args ...interface{}) interface{} {
+	if mockFn, exists := GetMock("runtime.DBQuery:" + query); exists {
+		return mockFn(query, args)
+	}
 	endSpan := TraceDB("query", query)
 	defer endSpan()
 
@@ -324,6 +327,9 @@ func DBQuery(query string, args ...interface{}) interface{} {
 // DBQueryPage executes a paginated MongoDB find query.
 // Usage: db.queryPage("collection", filter, page, pageSize)
 func DBQueryPage(collection string, args ...interface{}) interface{} {
+	if mockFn, exists := GetMock("runtime.DBQueryPage:" + collection); exists {
+		return mockFn(collection, args)
+	}
 	endSpan := TraceDB("queryPage", collection)
 	defer endSpan()
 
@@ -392,6 +398,9 @@ func DBQueryPage(collection string, args ...interface{}) interface{} {
 // DBFindOne finds a single document matching the filter.
 // Usage: db.findOne("collection", filter)
 func DBFindOne(collection string, args ...interface{}) interface{} {
+	if mockFn, exists := GetMock("runtime.DBFindOne:" + collection); exists {
+		return mockFn(collection, args)
+	}
 	endSpan := TraceDB("findOne", collection)
 	defer endSpan()
 
@@ -623,4 +632,31 @@ func DBQuerySafe(query string, args ...interface{}) interface{} {
 		result = DBQuery(query, args...)
 	}()
 	return [2]interface{}{result, errVal}
+}
+
+func ResetDBState() {
+	if dbInstance != nil {
+		rows, err := dbInstance.Query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+		if err == nil {
+			var tables []string
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err == nil {
+					tables = append(tables, name)
+				}
+			}
+			rows.Close()
+			for _, table := range tables {
+				dbInstance.Exec("DELETE FROM " + table + ";")
+			}
+		}
+	}
+	if mongoDB != nil {
+		cols, err := mongoDB.ListCollectionNames(dbCtx, bson.D{})
+		if err == nil {
+			for _, col := range cols {
+				mongoDB.Collection(col).Drop(dbCtx)
+			}
+		}
+	}
 }

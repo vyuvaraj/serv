@@ -204,6 +204,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseMatchStatement()
 	case TOKEN_TEST:
 		return p.parseTestStatement()
+	case TOKEN_MOCK:
+		return p.parseMockStatement()
 	case TOKEN_ENUM:
 		return p.parseEnumStatement()
 	case TOKEN_MIGRATION:

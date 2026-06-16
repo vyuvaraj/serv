@@ -77,6 +77,7 @@ func main() {
 	case "test":
 		testCmd := flag.NewFlagSet("test", flag.ExitOnError)
 		coverFlag := testCmd.Bool("cover", false, "Report test coverage")
+		filterFlag := testCmd.String("filter", "", "Filter tests by name")
 		if err := testCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
@@ -85,7 +86,7 @@ func main() {
 		if len(args) < 1 {
 			args = []string{"."}
 		}
-		runTests(args[0], *coverFlag)
+		runTests(args[0], *coverFlag, *filterFlag)
 
 	case "lint":
 		lintCmd := flag.NewFlagSet("lint", flag.ExitOnError)

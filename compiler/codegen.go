@@ -248,10 +248,12 @@ case *SubscribeStmt:
 return c.genSubscribeStmt(s)
 case *PublishStmt:
 return c.genPublishStmt(s)
-case *SpawnStmt:
-return c.genSpawnStmt(s)
-case *TestStmt:
-return c.genTestStmt(s)
+	case *SpawnStmt:
+		return c.genSpawnStmt(s)
+	case *MockStmt:
+		return c.genMockStmt(s)
+	case *TestStmt:
+		return c.genTestStmt(s)
 case *DestructureLetStmt:
 return c.genDestructureLetStmt(s)
 case *LetStmt:

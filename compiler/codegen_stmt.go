@@ -606,6 +606,7 @@ go func() {
 }
 
 func (c *Codegen) genTestStmt(s *TestStmt) (string, error) {
+	c.imports[`"serv/runtime"`] = true
 	c.inFunction = true
 	oldConcurrent := c.inConcurrentContext
 	c.inConcurrentContext = hasConcurrency(s.Body)
@@ -627,6 +628,8 @@ func (c *Codegen) genTestStmt(s *TestStmt) (string, error) {
 
 	var finalBody strings.Builder
 	finalBody.WriteString("{\n")
+	finalBody.WriteString("\truntime.ResetTestState()\n")
+	finalBody.WriteString("\tdefer runtime.ResetTestState()\n")
 
 	// BeforeEach blocks
 	for _, before := range c.beforeEachBlocks {
@@ -673,6 +676,40 @@ func (c *Codegen) genTestStmt(s *TestStmt) (string, error) {
 		c.testFuncs = append(c.testFuncs, fmt.Sprintf("func %s(t *testing.T) %s\n", funcName, finalBody.String()))
 	}
 	return "", nil
+}
+
+func (c *Codegen) genMockStmt(s *MockStmt) (string, error) {
+	callExpr, ok := s.Target.(*CallExpr)
+	if !ok {
+		return "", fmt.Errorf("mock target must be a function call expression")
+	}
+
+	funcName, err := c.genExpression(callExpr.Function)
+	if err != nil {
+		return "", err
+	}
+
+	var keyParts []string
+	keyParts = append(keyParts, fmt.Sprintf("%q", funcName))
+	for _, arg := range callExpr.Arguments {
+		argStr, err := c.genExpression(arg)
+		if err != nil {
+			return "", err
+		}
+		keyParts = append(keyParts, fmt.Sprintf("fmt.Sprint(%s)", argStr))
+	}
+
+	keyExpr := strings.Join(keyParts, " + \":\" + ")
+
+	c.imports[`"serv/runtime"`] = true
+	c.imports[`"fmt"`] = true
+	bodyCode, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+
+	mockCode := fmt.Sprintf("runtime.RegisterMock(%s, func(args ...interface{}) interface{} %s)\n", keyExpr, bodyCode)
+	return mockCode, nil
 }
 
 func (c *Codegen) genBeforeEachStmt(s *BeforeEachStmt) (string, error) {

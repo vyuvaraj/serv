@@ -396,4 +396,7 @@ func TraceScheduler(jobType, schedule string) func()               { return func
 func TraceWebSocket(path, event string) func()                      { return func() {} }
 func TraceExtern(source, funcName string) func()                   { return func() {} }
 
+func ResetDBState() {}
+func ClearCache()   {}
+
 // ── Metrics Stubs ────────────────────────────────────────────────────────────
