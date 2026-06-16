@@ -1,8 +1,11 @@
 package runtime
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -124,5 +127,111 @@ func TestTracePropagation(t *testing.T) {
 		if span.TraceID != expectedRootTraceID {
 			t.Errorf("Span %s has mismatched TraceID: expected %s, got %s", span.Name, expectedRootTraceID, span.TraceID)
 		}
+	}
+}
+
+func TestMetricsFormatting(t *testing.T) {
+	// Reset metrics map
+	metricsMu.Lock()
+	metricsCounters = make(map[string]int64)
+	metricsMu.Unlock()
+
+	metricsGauges.Lock()
+	metricsGauges.m = make(map[string]float64)
+	metricsGauges.Unlock()
+
+	// 1. Counter with labels
+	MetricInc("http_requests", map[string]interface{}{
+		"status": "200",
+		"method": "GET",
+	})
+
+	// 2. Gauge with labels
+	MetricGauge("cpu_usage", 0.45, map[string]interface{}{
+		"core": "0",
+	})
+
+	// 3. Record metrics response
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	rr := httptest.NewRecorder()
+	handleMetrics(rr, req)
+
+	body := rr.Body.String()
+	t.Logf("Metrics Output:\n%s", body)
+
+	// Verify counter formatting: name_total{sorted_labels} value
+	expectedCounterLine := `http_requests_total{method="GET",status="200"} 1`
+	if !strings.Contains(body, expectedCounterLine) {
+		t.Errorf("Expected metrics body to contain: %q, but got:\n%s", expectedCounterLine, body)
+	}
+
+	// Verify gauge formatting: name{labels} value
+	expectedGaugeLine := `cpu_usage{core="0"} 0.450000`
+	if !strings.Contains(body, expectedGaugeLine) {
+		t.Errorf("Expected metrics body to contain: %q, but got:\n%s", expectedGaugeLine, body)
+	}
+}
+
+func TestTracePropagationInConcurrency(t *testing.T) {
+	otelEnabled = true
+	defer func() { otelEnabled = false }()
+
+	parentTrace := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	trace := TraceRequest("GET", "/test-trace", parentTrace)
+	SetActiveTrace(trace)
+	defer ClearActiveTrace()
+
+	// 1. Verify Await propagates trace
+	Await(func() interface{} {
+		active := GetActiveTrace()
+		if active == nil {
+			t.Error("Expected active trace in Await goroutine, got nil")
+		} else if active.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+			t.Errorf("Expected trace ID 4bf92f3577b34da6a3ce929d0e0e4736, got %s", active.TraceID)
+		}
+		return nil
+	})
+
+	// 2. Verify AwaitAll propagates trace
+	AwaitAll([]func() interface{}{
+		func() interface{} {
+			active := GetActiveTrace()
+			if active == nil {
+				t.Error("Expected active trace in AwaitAll goroutine 1, got nil")
+			} else if active.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+				t.Errorf("Expected trace ID 4bf92f3577b34da6a3ce929d0e0e4736, got %s", active.TraceID)
+			}
+			return nil
+		},
+		func() interface{} {
+			active := GetActiveTrace()
+			if active == nil {
+				t.Error("Expected active trace in AwaitAll goroutine 2, got nil")
+			} else if active.TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+				t.Errorf("Expected trace ID 4bf92f3577b34da6a3ce929d0e0e4736, got %s", active.TraceID)
+			}
+			return nil
+		},
+	})
+}
+
+func TestLogCorrelation(t *testing.T) {
+	otelEnabled = true
+	defer func() { otelEnabled = false }()
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr) // restore stderr (make sure to import os if needed, wait log.SetOutput(nil) or os.Stderr is fine)
+
+	parentTrace := "00-5bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	trace := TraceRequest("GET", "/test-log", parentTrace)
+	SetActiveTrace(trace)
+	defer ClearActiveTrace()
+
+	LogInfo("Hello observability test")
+
+	output := buf.String()
+	if !strings.Contains(output, "trace_id=5bf92f3577b34da6a3ce929d0e0e4736") {
+		t.Errorf("Expected log output to contain trace_id correlation, but got: %s", output)
 	}
 }

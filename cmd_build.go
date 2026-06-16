@@ -122,7 +122,7 @@ func buildServNoExit(srvFile, outputBinary, target string) (string, error) {
 	return filepath.Join(filepath.Dir(absPath), outputBinary), nil
 }
 
-func runServ(srvFile string, extraArgs []string) {
+func runServ(srvFile string, extraArgs []string, profile bool) {
 	binPath, err := buildServNoExit(srvFile, "temp_service.exe", "")
 	if err != nil {
 		fmt.Printf("Build failed: %v\n", err)
@@ -135,6 +135,9 @@ func runServ(srvFile string, extraArgs []string) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if profile {
+		cmd.Env = append(os.Environ(), "SERV_PROFILE=true")
+	}
 
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("Service exited with error: %v\n", err)

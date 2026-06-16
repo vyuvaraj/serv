@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -209,6 +210,31 @@ func StartServer() interface{} {
 			startMCPServer()
 			return nil
 		}
+	}
+
+	if os.Getenv("SERV_PROFILE") == "true" {
+		cpuFile, err := os.Create("cpu.pprof")
+		if err == nil {
+			pprof.StartCPUProfile(cpuFile)
+			LogInfo("CPU Profiling started. Output: cpu.pprof")
+		}
+
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-c
+			pprof.StopCPUProfile()
+			if cpuFile != nil {
+				cpuFile.Close()
+			}
+			memFile, err := os.Create("mem.pprof")
+			if err == nil {
+				pprof.WriteHeapProfile(memFile)
+				memFile.Close()
+				LogInfo("Memory profile written. Output: mem.pprof")
+			}
+			os.Exit(0)
+		}()
 	}
 
 	RunMigrations()
@@ -486,7 +512,11 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	metricsMu.RLock()
 	for k, v := range metricsCounters {
-		fmt.Fprintf(w, "%s_total %d\n", k, v)
+		if idx := strings.Index(k, "{"); idx != -1 {
+			fmt.Fprintf(w, "%s_total%s %d\n", k[:idx], k[idx:], v)
+		} else {
+			fmt.Fprintf(w, "%s_total %d\n", k, v)
+		}
 	}
 	metricsMu.RUnlock()
 
