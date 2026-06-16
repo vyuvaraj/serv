@@ -44,15 +44,28 @@ Serv is a modern, high-level DSL (Domain-Specific Language) designed specificall
 ## Getting Started
 
 ### Prerequisites
-- **Go**: Version 1.18 or higher is required to build the compiler and execute Go-transpiled code.
+- **Go**: Version 1.22 or higher is required to build the compiler and execute Go-transpiled code.
 - **Python 3.x**: Optional (needed if using Python external functions).
 
-### Building the Compiler
-To build the Serv compiler from source, clone or navigate to the repository directory and run:
-```bash
-go build -o serv.exe main.go
+### Install via Scoop (Windows)
+```powershell
+scoop bucket add serv https://github.com/vyuvaraj/scoop-serv
+scoop install serv
 ```
-This compiles the Serv CLI (`serv.exe`). Add this binary to your system PATH for global access.
+
+### Install via Script (Windows)
+```powershell
+irm https://raw.githubusercontent.com/vyuvaraj/Serv-lang/main/release-scripts/install.ps1 | iex
+```
+
+### Build from Source
+```bash
+git clone https://github.com/vyuvaraj/Serv-lang.git
+cd Serv-lang
+go build -o serv.exe .
+```
+
+Add the binary to your system PATH for global access.
 
 ---
 
