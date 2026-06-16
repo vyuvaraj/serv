@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"serv/compiler"
@@ -133,8 +134,18 @@ func runServ(srvFile string, extraArgs []string, profile bool, env string) {
 	fmt.Printf("Running native service: %s...\n", binPath)
 	cmd := exec.Command(binPath, extraArgs...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		fmt.Printf("Failed to create stdout pipe: %v\n", err)
+		os.Exit(1)
+	}
+	
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Printf("Failed to create stderr pipe: %v\n", err)
+		os.Exit(1)
+	}
+
 	cmd.Env = os.Environ()
 	if profile {
 		cmd.Env = append(cmd.Env, "SERV_PROFILE=true")
@@ -143,7 +154,27 @@ func runServ(srvFile string, extraArgs []string, profile bool, env string) {
 		cmd.Env = append(cmd.Env, "SERV_ENV="+env)
 	}
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("Failed to start service: %v\n", err)
+		os.Exit(1)
+	}
+
+	rewriter := NewStackTraceRewriter(srvFile)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		rewriter.Rewrite(stdoutPipe, os.Stdout)
+		wg.Done()
+	}()
+	go func() {
+		rewriter.Rewrite(stderrPipe, os.Stderr)
+		wg.Done()
+	}()
+
+	err = cmd.Wait()
+	wg.Wait()
+
+	if err != nil {
 		fmt.Printf("Service exited with error: %v\n", err)
 		os.Exit(1)
 	}
@@ -169,8 +200,18 @@ func runServWatch(srvFile string, env string) {
 
 		fmt.Printf("[WATCH] Starting service: %s\n", binPath)
 		cmd = exec.Command(binPath)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			fmt.Printf("[WATCH] Failed to create stdout pipe: %v\n", err)
+			return
+		}
+		
+		stderrPipe, err := cmd.StderrPipe()
+		if err != nil {
+			fmt.Printf("[WATCH] Failed to create stderr pipe: %v\n", err)
+			return
+		}
+
 		cmd.Env = os.Environ()
 		if env != "" {
 			cmd.Env = append(cmd.Env, "SERV_ENV="+env)
@@ -178,7 +219,12 @@ func runServWatch(srvFile string, env string) {
 
 		if err := cmd.Start(); err != nil {
 			fmt.Printf("[WATCH] Failed to start service: %v\n", err)
+			return
 		}
+
+		rewriter := NewStackTraceRewriter(srvFile)
+		go rewriter.Rewrite(stdoutPipe, os.Stdout)
+		go rewriter.Rewrite(stderrPipe, os.Stderr)
 	}
 
 	restart()

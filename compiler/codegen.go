@@ -513,10 +513,13 @@ defer func() {
 	c.varTypes = oldVarTypes
 }()
 
-var out bytes.Buffer
-out.WriteString("{\n")
-for _, s := range block.Statements {
-gen, err := c.genStatement(s)
+	var out bytes.Buffer
+	out.WriteString("{\n")
+	for _, s := range block.Statements {
+		if tok := stmtToken(s); tok.Line > 0 {
+			out.WriteString(fmt.Sprintf("\t// .srv line %d\n", tok.Line))
+		}
+		gen, err := c.genStatement(s)
 if err != nil {
 return "", err
 }

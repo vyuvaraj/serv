@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"serv/compiler"
 )
@@ -96,9 +97,37 @@ func runTests(srvFile string, withCoverage bool, filter string) {
 
 	cmd := exec.Command(goPath, testArgs...)
 	cmd.Dir = buildDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	testErr := cmd.Run()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		fmt.Printf("Failed to create stdout pipe: %v\n", err)
+		os.Exit(1)
+	}
+
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Printf("Failed to create stderr pipe: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := cmd.Start(); err != nil {
+		fmt.Printf("Failed to start tests: %v\n", err)
+		os.Exit(1)
+	}
+
+	rewriter := NewStackTraceRewriter(srvFile)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		rewriter.Rewrite(stdoutPipe, os.Stdout)
+		wg.Done()
+	}()
+	go func() {
+		rewriter.Rewrite(stderrPipe, os.Stderr)
+		wg.Done()
+	}()
+
+	testErr := cmd.Wait()
+	wg.Wait()
 
 	// Show coverage summary if requested
 	if withCoverage {

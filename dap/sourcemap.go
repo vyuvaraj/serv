@@ -131,6 +131,29 @@ func (sm *SourceMap) nearestGoLine(srvLine int) (goLine int, ok bool) {
 	return bestGoLine, true
 }
 
+// GoToSrvApprox returns the .srv line number for the given Go line, or if no
+// exact mapping exists, the closest preceding Go line that has a mapping.
+func (sm *SourceMap) GoToSrvApprox(goLine int) (srvLine int, ok bool) {
+	if srvLine, ok = sm.goToSrv[goLine]; ok {
+		return srvLine, true
+	}
+	if len(sm.sortedGoLines) == 0 {
+		return 0, false
+	}
+	bestGoLine := -1
+	for _, gl := range sm.sortedGoLines {
+		if gl <= goLine {
+			bestGoLine = gl
+		} else {
+			break
+		}
+	}
+	if bestGoLine != -1 {
+		return sm.goToSrv[bestGoLine], true
+	}
+	return sm.goToSrv[sm.sortedGoLines[0]], true
+}
+
 // GoFile returns the absolute path of the generated Go source file.
 func (sm *SourceMap) GoFile() string { return sm.goFile }
 
