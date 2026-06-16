@@ -30,6 +30,7 @@ type LocalStore struct {
 	encryptionKey []byte // nil means encryption disabled
 	coldTier      *ColdTierManager // nil means cold-tiering disabled
 	coldCancel    context.CancelFunc // cancel the background sweep goroutine
+	hnswIndices   map[string]*HNSWIndex
 }
 
 func NewLocalStore(rootDir string) (*LocalStore, error) {
@@ -48,8 +49,9 @@ func NewLocalStore(rootDir string) (*LocalStore, error) {
 	}
 
 	return &LocalStore{
-		rootDir:  absPath,
-		pebbleDB: db,
+		rootDir:     absPath,
+		pebbleDB:    db,
+		hnswIndices: make(map[string]*HNSWIndex),
 	}, nil
 }
 
@@ -430,6 +432,14 @@ func (s *LocalStore) PutObject(ctx context.Context, bucket, key string, reader i
 		return nil, err
 	}
 
+	if strings.HasPrefix(contentType, "text/") || strings.Contains(key, ".txt") || strings.Contains(key, ".md") {
+		idx, err := s.getOrBuildHNSWIndexNoLock(bucket)
+		if err == nil {
+			vector := GenerateEmbedding(string(plaintext))
+			idx.Insert(key, vector)
+		}
+	}
+
 	return &newVer, nil
 }
 
@@ -727,6 +737,7 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 		// If no versions left, delete the metadata file entirely
 		if len(om.Versions) == 0 {
 			_ = s.pebbleDB.Delete([]byte("o:"+bucket+":"+key), pebble.Sync)
+			s.updateHNSWIndexOnDeleteNoLock(bucket, key, nil)
 			return &deletedVer, nil
 		}
 
@@ -734,6 +745,7 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 			return nil, err
 		}
 
+		s.updateHNSWIndexOnDeleteNoLock(bucket, key, om)
 		return &deletedVer, nil
 	}
 
@@ -766,6 +778,7 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 		if err := s.writeObjectMeta(bucket, key, om); err != nil {
 			return nil, err
 		}
+		s.updateHNSWIndexOnDeleteNoLock(bucket, key, om)
 		return &delMarker, nil
 	} else if b.Versioning == "Suspended" {
 		// Suspend: overwrite "null" version with a delete marker (or append delete marker "null")
@@ -795,6 +808,7 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 		if err := s.writeObjectMeta(bucket, key, om); err != nil {
 			return nil, err
 		}
+		s.updateHNSWIndexOnDeleteNoLock(bucket, key, om)
 		return &delMarker, nil
 	} else {
 		// Versioning Disabled: Permanent deletion of all versions
@@ -827,6 +841,7 @@ func (s *LocalStore) DeleteObject(ctx context.Context, bucket, key, versionID st
 			}
 		}
 		_ = s.pebbleDB.Delete([]byte("o:"+bucket+":"+key), pebble.Sync)
+		s.updateHNSWIndexOnDeleteNoLock(bucket, key, nil)
 		return &ObjectVersion{Key: key, IsDeleteMarker: true}, nil
 	}
 }
@@ -1475,34 +1490,28 @@ func (s *LocalStore) ListLocalKeys(ctx context.Context) ([]LocalKey, error) {
 }
 
 func (s *LocalStore) SemanticSearch(ctx context.Context, bucket, query string, limit int) ([]*ObjectVersion, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	_, err := s.readBucketMeta(bucket)
 	if err != nil {
 		return nil, err
 	}
 
-	keys, err := s.scanMetadataKeys(bucket)
+	idx, err := s.getOrBuildHNSWIndexNoLock(bucket)
 	if err != nil {
 		return nil, err
 	}
 
-	queryTokens := Tokenize(query)
-	queryTF := ComputeTF(queryTokens)
+	queryVector := GenerateEmbedding(query)
+	matchedNodes := idx.Search(queryVector, limit)
 
-	type match struct {
-		ver   *ObjectVersion
-		score float64
-	}
-	var matches []match
-
-	for _, key := range keys {
-		om, err := s.readObjectMeta(bucket, key)
+	var results []*ObjectVersion
+	for _, node := range matchedNodes {
+		om, err := s.readObjectMeta(bucket, node.Key)
 		if err != nil {
 			continue
 		}
-
 		var latest *ObjectVersion
 		for i := range om.Versions {
 			if om.Versions[i].IsLatest {
@@ -1513,20 +1522,55 @@ func (s *LocalStore) SemanticSearch(ctx context.Context, bucket, query string, l
 		if latest == nil && len(om.Versions) > 0 {
 			latest = &om.Versions[0]
 		}
+		if latest != nil && !latest.IsDeleteMarker {
+			results = append(results, latest)
+		}
+	}
 
+	return results, nil
+}
+
+func (s *LocalStore) getOrBuildHNSWIndexNoLock(bucket string) (*HNSWIndex, error) {
+	if s.hnswIndices == nil {
+		s.hnswIndices = make(map[string]*HNSWIndex)
+	}
+	if idx, exists := s.hnswIndices[bucket]; exists {
+		return idx, nil
+	}
+
+	idx := NewHNSWIndex()
+	s.hnswIndices[bucket] = idx
+
+	keys, err := s.scanMetadataKeys(bucket)
+	if err != nil {
+		return idx, nil
+	}
+
+	for _, key := range keys {
+		om, err := s.readObjectMeta(bucket, key)
+		if err != nil {
+			continue
+		}
+		var latest *ObjectVersion
+		for i := range om.Versions {
+			if om.Versions[i].IsLatest {
+				latest = &om.Versions[i]
+				break
+			}
+		}
+		if latest == nil && len(om.Versions) > 0 {
+			latest = &om.Versions[0]
+		}
 		if latest == nil || latest.IsDeleteMarker {
 			continue
 		}
 
-		// Read file content if it is a text file
 		if strings.HasPrefix(latest.ContentType, "text/") || strings.Contains(key, ".txt") || strings.Contains(key, ".md") {
 			dataPath := s.getObjectDataPath(bucket, key, latest.VersionID)
 			fileData, err := os.ReadFile(dataPath)
 			if err != nil {
 				continue
 			}
-
-			// If encrypted, decrypt it first
 			var plaintext []byte
 			if s.encryptionKey != nil {
 				plaintext, err = decryptPayload(s.encryptionKey, fileData)
@@ -1537,27 +1581,69 @@ func (s *LocalStore) SemanticSearch(ctx context.Context, bucket, query string, l
 				plaintext = fileData
 			}
 
-			docTokens := Tokenize(string(plaintext))
-			docTF := ComputeTF(docTokens)
-
-			score := CosineSimilarity(queryTF, docTF)
-			if score > 0.05 { // threshold to filter out irrelevant docs
-				matches = append(matches, match{ver: latest, score: score})
-			}
+			vector := GenerateEmbedding(string(plaintext))
+			idx.Insert(key, vector)
 		}
 	}
 
-	// Sort by score descending
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
-	})
+	return idx, nil
+}
 
-	var results []*ObjectVersion
-	for i := 0; i < len(matches) && (limit <= 0 || i < limit); i++ {
-		results = append(results, matches[i].ver)
+func (s *LocalStore) updateHNSWIndexOnDeleteNoLock(bucket, key string, om *ObjectMeta) {
+	idx, exists := s.hnswIndices[bucket]
+	if !exists || idx == nil {
+		return
 	}
 
-	return results, nil
+	var latest *ObjectVersion
+	if om != nil {
+		for i := range om.Versions {
+			if om.Versions[i].IsLatest {
+				latest = &om.Versions[i]
+				break
+			}
+		}
+		if latest == nil && len(om.Versions) > 0 {
+			latest = &om.Versions[0]
+		}
+	}
+
+	if latest == nil || latest.IsDeleteMarker {
+		idx.mu.Lock()
+		idx.deleteNodeNoLock(key)
+		idx.mu.Unlock()
+		return
+	}
+
+	if strings.HasPrefix(latest.ContentType, "text/") || strings.Contains(key, ".txt") || strings.Contains(key, ".md") {
+		dataPath := s.getObjectDataPath(bucket, key, latest.VersionID)
+		fileData, err := os.ReadFile(dataPath)
+		if err != nil {
+			idx.mu.Lock()
+			idx.deleteNodeNoLock(key)
+			idx.mu.Unlock()
+			return
+		}
+		var plaintext []byte
+		if s.encryptionKey != nil {
+			var decErr error
+			plaintext, decErr = decryptPayload(s.encryptionKey, fileData)
+			if decErr != nil {
+				idx.mu.Lock()
+				idx.deleteNodeNoLock(key)
+				idx.mu.Unlock()
+				return
+			}
+		} else {
+			plaintext = fileData
+		}
+		vector := GenerateEmbedding(string(plaintext))
+		idx.Insert(key, vector)
+	} else {
+		idx.mu.Lock()
+		idx.deleteNodeNoLock(key)
+		idx.mu.Unlock()
+	}
 }
 
 // WASMTransform reads the WASM binary stored at wasmKey, reads the target

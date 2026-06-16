@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"testing"
 )
@@ -70,5 +71,53 @@ func TestSemanticSearch(t *testing.T) {
 	}
 	if results2[0].Key != "recipe.txt" {
 		t.Errorf("expected top match to be 'recipe.txt', got %s", results2[0].Key)
+	}
+}
+
+func TestHNSWProperties(t *testing.T) {
+	// 1. Test embedding properties
+	embedding := GenerateEmbedding("This is a simple sentence to check embedding dimensions and L2 normalization.")
+	if len(embedding) != 128 {
+		t.Fatalf("expected embedding dimension 128, got %d", len(embedding))
+	}
+	sumSq := 0.0
+	for _, val := range embedding {
+		sumSq += val * val
+	}
+	if math.Abs(sumSq-1.0) > 1e-9 {
+		t.Errorf("expected normalized vector sum of squares to be 1.0, got %f", sumSq)
+	}
+
+	// 2. Test HNSW indexing directly
+	idx := NewHNSWIndex()
+	v1 := GenerateEmbedding("machine learning")
+	v2 := GenerateEmbedding("deep neural networks")
+	v3 := GenerateEmbedding("baking chocolate chip cookies")
+
+	idx.Insert("ml", v1)
+	idx.Insert("nn", v2)
+	idx.Insert("cookies", v3)
+
+	// Search closest to "machine learning neural networks"
+	queryVec := GenerateEmbedding("neural networks machine learning")
+	results := idx.Search(queryVec, 2)
+	if len(results) < 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Key == "cookies" {
+		t.Errorf("unexpected top result: %s", results[0].Key)
+	}
+
+	// 3. Test deletion from index
+	idx.Insert("cookies", v3)
+	idx.mu.Lock()
+	idx.deleteNodeNoLock("cookies")
+	idx.mu.Unlock()
+
+	resultsAfterDelete := idx.Search(queryVec, 3)
+	for _, r := range resultsAfterDelete {
+		if r.Key == "cookies" {
+			t.Error("expected 'cookies' to be deleted from the index")
+		}
 	}
 }
