@@ -895,7 +895,9 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 					if !strings.HasPrefix(goType, "*") {
 						goType = "*" + goType
 					}
-					val = fmt.Sprintf("interface{}(%s).(%s)", val, goType)
+					if val != "nil" {
+						val = fmt.Sprintf("interface{}(%s).(%s)", val, goType)
+					}
 				}
 			}
 		} else if inferred != "interface{}" {
@@ -927,7 +929,9 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 				val = fmt.Sprintf("toString(%s)", val)
 			default:
 				if c.isStructType(s.Type) {
-					val = fmt.Sprintf("interface{}(%s).(*%s)", val, strings.TrimSuffix(s.Type, "?"))
+					if val != "nil" {
+						val = fmt.Sprintf("interface{}(%s).(*%s)", val, strings.TrimSuffix(s.Type, "?"))
+					}
 				}
 			}
 		}
@@ -1036,14 +1040,18 @@ func (c *Codegen) genReturnStmt(s *ReturnStmt) (string, error) {
 			typeParamSet[tp] = true
 		}
 		if typeParamSet[c.currentFn.ReturnType] || (strings.HasPrefix(c.currentFn.ReturnType, "[]") && typeParamSet[strings.TrimPrefix(c.currentFn.ReturnType, "[]")]) {
-			val = fmt.Sprintf("interface{}(%s).(%s)", val, c.currentFn.ReturnType)
+			if val != "nil" {
+				val = fmt.Sprintf("interface{}(%s).(%s)", val, c.currentFn.ReturnType)
+			}
 		}
 	}
 	if c.currentFn != nil && c.currentFn.ReturnType != "" {
 		retType := toGoType(c.currentFn.ReturnType)
 		if retType == "interface{}" && c.isStructType(c.currentFn.ReturnType) {
-			goRetType := "*" + strings.TrimSuffix(c.currentFn.ReturnType, "?")
-			val = fmt.Sprintf("interface{}(%s).(%s)", val, goRetType)
+			if val != "nil" {
+				goRetType := "*" + strings.TrimSuffix(c.currentFn.ReturnType, "?")
+				val = fmt.Sprintf("interface{}(%s).(%s)", val, goRetType)
+			}
 		}
 	}
 
