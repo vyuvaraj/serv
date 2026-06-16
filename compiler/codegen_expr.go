@@ -1021,7 +1021,11 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			}
 			fields = append(fields, fmt.Sprintf("%s: %s", capitalizeFirst(k), vStr))
 		}
-		return fmt.Sprintf("&%s{\n\t\t%s,\n\t}", e.TypeName, strings.Join(fields, ",\n\t\t")), nil
+		typeArgStr := ""
+		if len(e.TypeArgs) > 0 {
+			typeArgStr = "[" + strings.Join(e.TypeArgs, ", ") + "]"
+		}
+		return fmt.Sprintf("&%s%s{\n\t\t%s,\n\t}", e.TypeName, typeArgStr, strings.Join(fields, ",\n\t\t")), nil
 
 	case *AssertExpr:
 		// Generate structured assertion messages based on the condition type

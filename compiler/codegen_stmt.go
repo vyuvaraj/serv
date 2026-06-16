@@ -220,10 +220,33 @@ func (c *Codegen) genForStmt(s *ForStmt) (string, error) {
 
 func (c *Codegen) genStructDecl(s *StructDecl) (string, error) {
 	var out bytes.Buffer
-	out.WriteString(fmt.Sprintf("type %s struct {\n", s.Name))
+
+	typeParamSet := make(map[string]bool)
+	for _, tp := range s.TypeParams {
+		typeParamSet[tp] = true
+	}
+
+	typeParamStr := ""
+	if len(s.TypeParams) > 0 {
+		var tps []string
+		for i, tp := range s.TypeParams {
+			constraint := "any"
+			if i < len(s.TypeConstraints) && s.TypeConstraints[i] != "" {
+				constraint = servConstraintToGo(s.TypeConstraints[i])
+			}
+			tps = append(tps, tp+" "+constraint)
+		}
+		typeParamStr = "[" + strings.Join(tps, ", ") + "]"
+	}
+
+	out.WriteString(fmt.Sprintf("type %s%s struct {\n", s.Name, typeParamStr))
 	for _, f := range s.Fields {
 		goType := toGoType(f.Type)
-		if goType == "interface{}" && !strings.HasSuffix(f.Type, "?") && !strings.Contains(f.Type, "|") {
+		if typeParamSet[f.Type] {
+			goType = f.Type
+		} else if strings.HasPrefix(f.Type, "[]") && typeParamSet[strings.TrimPrefix(f.Type, "[]")] {
+			goType = "[]" + strings.TrimPrefix(f.Type, "[]")
+		} else if goType == "interface{}" && !strings.HasSuffix(f.Type, "?") && !strings.Contains(f.Type, "|") {
 			goType = f.Type
 		}
 		out.WriteString(fmt.Sprintf("\t%s %s\n", capitalizeFirst(f.Name), goType))
@@ -840,7 +863,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			case "string":
 				val = fmt.Sprintf("toString(%s)", val)
 			default:
-				if strings.HasPrefix(targetType, "*") || c.structTypes[targetType] {
+				if strings.HasPrefix(targetType, "*") || c.isStructType(targetType) {
 					goType := targetType
 					if !strings.HasPrefix(goType, "*") {
 						goType = "*" + goType
@@ -876,18 +899,22 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			case "string":
 				val = fmt.Sprintf("toString(%s)", val)
 			default:
-				if c.structTypes[s.Type] {
+				if c.isStructType(s.Type) {
 					val = fmt.Sprintf("interface{}(%s).(*%s)", val, s.Type)
 				}
 			}
 		}
 	} else if structLit, ok := s.Value.(*StructLiteral); ok {
-		goType = "*" + structLit.TypeName
-		c.varTypes[s.Name] = structLit.TypeName
+		typeArgStr := ""
+		if len(structLit.TypeArgs) > 0 {
+			typeArgStr = "[" + strings.Join(structLit.TypeArgs, ", ") + "]"
+		}
+		goType = "*" + structLit.TypeName + typeArgStr
+		c.varTypes[s.Name] = structLit.TypeName + typeArgStr
 	} else if callExpr, ok := s.Value.(*CallExpr); ok {
 		if ident, ok := callExpr.Function.(*Identifier); ok {
 			if retType, exists := c.funcReturnTypes[ident.Value]; exists {
-				if c.structTypes[retType] {
+				if c.isStructType(retType) {
 					goType = "*" + retType
 					c.varTypes[s.Name] = retType
 				} else {
@@ -976,6 +1003,15 @@ func (c *Codegen) genReturnStmt(s *ReturnStmt) (string, error) {
 			}
 		}
 	}
+	if c.currentFn != nil && len(c.currentFn.TypeParams) > 0 {
+		typeParamSet := make(map[string]bool)
+		for _, tp := range c.currentFn.TypeParams {
+			typeParamSet[tp] = true
+		}
+		if typeParamSet[c.currentFn.ReturnType] || (strings.HasPrefix(c.currentFn.ReturnType, "[]") && typeParamSet[strings.TrimPrefix(c.currentFn.ReturnType, "[]")]) {
+			val = fmt.Sprintf("interface{}(%s).(%s)", val, c.currentFn.ReturnType)
+		}
+	}
 
 	return fmt.Sprintf("return %s\n", val), nil
 }
@@ -1038,7 +1074,7 @@ func (c *Codegen) genFnDecl(s *FnDecl) (string, error) {
 			retType = "[]" + strings.TrimPrefix(s.ReturnType, "[]")
 		} else {
 			retType = toGoType(s.ReturnType)
-			if retType == "interface{}" && c.structTypes[s.ReturnType] {
+			if retType == "interface{}" && c.isStructType(s.ReturnType) {
 				retType = "*" + s.ReturnType
 			}
 		}

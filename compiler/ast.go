@@ -799,9 +799,11 @@ type StructField struct {
 }
 
 type StructDecl struct {
-	Token  Token
-	Name   string
-	Fields []StructField
+	Token           Token
+	Name            string
+	TypeParams      []string // generic type parameters: [T, U]
+	TypeConstraints []string // constraints: [Comparable, Numeric] (empty = any)
+	Fields          []StructField
 }
 
 func (s *StructDecl) statementNode()       {}
@@ -818,6 +820,7 @@ func (s *StructDecl) String() string {
 type StructLiteral struct {
 	Token    Token
 	TypeName string
+	TypeArgs []string // generic type arguments: Box[int]
 	Fields   map[string]Expression
 	KeyOrder []string
 }
