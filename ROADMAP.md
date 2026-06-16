@@ -117,13 +117,13 @@ To move Serv beyond a simple microservice tool into a premium, world-class progr
 
 | # | Item | Effort | Description |
 |---|------|--------|-------------|
-| 10.1 | **Generics (Parametric Polymorphism)** | Large | Introduce type-safe generics (e.g., `fn map[T, U](arr: []T)`) to avoid `interface{}` casting on collections. |
-| 10.2 | **First-Class Actor Model** | Large | Formalize `spawn` with local mailboxes, message routing, and supervisor trees for robust concurrency. |
-| 10.3 | **Database Schema ORM Generation** | Medium | Compile schema files into strongly-typed query methods, ensuring compile-time safe database interaction. |
-| 10.4 | **Distributed Trace Propagation** | Medium | Automatically trace HTTP headers, message brokers, and actor spawns with OpenTelemetry context propagation. |
-| 10.5 | **AOT Optimization Pass** | Medium | Build AST optimizations (inlining, constant folding, loop unrolling) before emitting target Go source. |
+| 10.1 | **Generics (Parametric Polymorphism)** | Large | ✅ Done — Introduce type-safe generics (e.g., `fn map[T, U](arr: []T)`) to avoid `interface{}` casting on collections. |
+| 10.2 | **First-Class Actor Model** | Large | ✅ Done — Formalize `spawn` with local mailboxes, message routing, and supervisor trees for robust concurrency. |
+| 10.3 | **Database Schema ORM Generation** | Medium | ✅ Done — Compile schema files into strongly-typed query methods, ensuring compile-time safe database interaction. |
+| 10.4 | **Distributed Trace Propagation** | Medium | ✅ Done — Automatically trace HTTP headers, message brokers, and actor spawns with OpenTelemetry context propagation. |
+| 10.5 | **AOT Optimization Pass** | Medium | ✅ Done — Build AST optimizations (constant folding, dead branch, unreachable code elimination). |
 | 10.6 | **WASM Target Compilation** | Large | ✅ Done — `serv build <file.srv> --target wasm` compiles `.srv` files to WASI-compliant WebAssembly. Supported full log formatting via stderr and stubs/abstractions for all non-wasm runtime components. Verified under ServStore transform pipelines. |
-| 10.7 | **Stateful Workflows** | Large | Introduce native Temporal-like `workflow` blocks with automatic state-checkpointing and resilient task retries. |
+| 10.7 | **Stateful Workflows** | Large | ✅ Done — Introduce native Temporal-like `workflow` blocks with automatic state-checkpointing and resilient task retries. |
 | 10.8 | **LSP Debugger (DAP) Support** | Medium | ✅ Done — `serv debug <file.srv>` launches a DAP proxy (stdio) backed by Delve. Translates `.srv` breakpoints ↔ generated Go lines using `// .srv line N` source map comments. Full VS Code support: breakpoints, step, stack frames mapped back to `.srv` source. |
 | 10.9 | **Serv-verse Core Integrations** | Large | Develop unified connectors and drivers targeting ServQueue (distributed event bus) and ServGate (API Gateway). |
 
@@ -161,10 +161,10 @@ To prepare Serv-lang for production usage and support larger codebases, the foll
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 11.1 | **Project Manifest (`serv.toml`)** | Medium | A configuration file defining project metadata, entry points, environment profiles, and dependency locks. | ⬜ Planned |
-| 11.2 | **Multi-File Compilation** | Medium | Enable compiling whole directories (`serv build ./`) rather than single-file structures. | ⬜ Planned |
+| 11.1 | **Project Manifest (`serv.toml`)** | Medium | A configuration file defining project metadata, entry points, environment profiles, and dependency locks. | ✅ Done |
+| 11.2 | **Multi-File Compilation** | Medium | Enable compiling whole directories (`serv build ./`) rather than single-file structures. | ✅ Done |
 | 11.3 | **Panic Stack Trace Mapping** | Medium | Map Go runtime panic traces back to original `.srv` line numbers using emitted source map comments. | ⬜ Planned |
-| 11.4 | **Structured Mocking in Tests** | Medium | Add support to stub out network calls (`mock http.get`) and database operations (`mock db.query`) inside test blocks. | ⬜ Planned |
+| 11.4 | **Structured Mocking in Tests** | Medium | Add support to stub out network calls (`mock http.get`) and database operations (`mock db.query`) inside test blocks. | ✅ Done |
 | 11.5 | **Scoped Symbol Table Refactor** | Large | Refactor the compiler internals to use proper lexical scopes instead of a simple flat symbol table. | ⬜ Planned |
 | 11.6 | **Environment Profiles** | Small | Support loading environment-specific variables and configuration files based on flag (e.g., `--env staging`). | ⬜ Planned |
 
