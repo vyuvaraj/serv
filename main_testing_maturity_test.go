@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"serv/runtime"
@@ -149,9 +150,9 @@ test "skip test" {
 		done <- buf.String()
 	}()
 
-	// We filter for "match", so it should run "match test" and skip "skip test".
+	// We filter for "Match", so it should run "match test" and skip "skip test".
 	// Since "skip test" is skipped, the runTests command should succeed and not crash/exit.
-	runTests(tmpFile.Name(), false, "match")
+	runTests(tmpFile.Name(), false, "Match")
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -159,10 +160,10 @@ test "skip test" {
 
 	t.Logf("Filtered Tests Output:\n%s", output)
 
-	if !strings.Contains(output, "Test_match_test") {
-		t.Error("Expected test output to contain Test_match_test")
+	if !strings.Contains(output, "Test_MatchTest") {
+		t.Error("Expected test output to contain Test_MatchTest")
 	}
-	if strings.Contains(output, "Test_skip_test") {
-		t.Error("Expected test output to NOT contain Test_skip_test")
+	if strings.Contains(output, "Test_SkipTest") {
+		t.Error("Expected test output to NOT contain Test_SkipTest")
 	}
 }
