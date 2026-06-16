@@ -429,6 +429,8 @@ case *InterfaceDecl:
 return c.genInterfaceDecl(s)
 case *BrokerStmt:
 return c.genBrokerStmt(s)
+case *AiStmt:
+return c.genAiStmt(s)
 	case *ServerStmt:
 		return c.genServerStmt(s)
 	case *CorsStmt:

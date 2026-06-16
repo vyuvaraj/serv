@@ -74,6 +74,23 @@ func main() {
 		}
 		dockerizeServ(args[0])
 
+	case "deploy":
+		deployCmd := flag.NewFlagSet("deploy", flag.ExitOnError)
+		targetFlag := deployCmd.String("target", "", "Deploy target: fly, railway, render, docker")
+		if err := deployCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Printf("Error parsing arguments: %v\n", err)
+			os.Exit(1)
+		}
+		if *targetFlag == "" {
+			fmt.Println("Usage: serv deploy --target <fly|railway|render|docker> [file.srv]")
+			os.Exit(1)
+		}
+		args := deployCmd.Args()
+		if len(args) < 1 {
+			args = []string{"."}
+		}
+		deployServ(args[0], *targetFlag)
+
 	case "test":
 		testCmd := flag.NewFlagSet("test", flag.ExitOnError)
 		coverFlag := testCmd.Bool("cover", false, "Report test coverage")
@@ -189,5 +206,6 @@ func printUsage() {
 	fmt.Println("  serv publish <package-dir>                 Publish a Serv module to the registry")
 	fmt.Println("  serv debug <file.srv>                       Debug a Serv file (requires dlv: go install github.com/go-delve/delve/cmd/dlv@latest)")
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
+	fmt.Println("  serv deploy --target <target> [file.srv]   Generate deploy config (fly, railway, render, docker)")
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
 }

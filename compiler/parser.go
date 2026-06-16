@@ -77,6 +77,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(TOKEN_LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(TOKEN_FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(TOKEN_CACHE, p.parseCacheIdentifier)
+	p.registerPrefix(TOKEN_AI, p.parseAiIdentifier)
 	p.registerPrefix(TOKEN_WORKFLOW, p.parseWorkflowIdentifier)
 	p.registerPrefix(TOKEN_ASSERT, p.parseAssertExpression)
 	p.registerPrefix(TOKEN_TRUE, p.parseBooleanLiteral)
@@ -171,6 +172,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseExternStatement()
 	case TOKEN_BROKER:
 		return p.parseBrokerStatement()
+	case TOKEN_AI:
+		return p.parseAiStatement()
 	case TOKEN_SERVER:
 		return p.parseServerStatement()
 	case TOKEN_ROUTE:

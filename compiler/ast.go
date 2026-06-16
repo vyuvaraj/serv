@@ -79,9 +79,19 @@ type BrokerStmt struct {
 	Value Expression
 }
 
+// AI Statement: ai "openai://gpt-4"
+type AiStmt struct {
+	Token Token
+	Value Expression
+}
+
 func (b *BrokerStmt) statementNode()       {}
 func (b *BrokerStmt) TokenLiteral() string { return b.Token.Literal }
 func (b *BrokerStmt) String() string       { return "broker " + b.Value.String() + "\n" }
+
+func (a *AiStmt) statementNode()       {}
+func (a *AiStmt) TokenLiteral() string { return a.Token.Literal }
+func (a *AiStmt) String() string       { return "ai " + a.Value.String() + "\n" }
 
 // Server Statement
 type ServerStmt struct {

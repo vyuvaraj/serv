@@ -15,6 +15,13 @@ func (p *Parser) parseBrokerStatement() Statement {
 	return stmt
 }
 
+func (p *Parser) parseAiStatement() Statement {
+	stmt := &AiStmt{Token: p.curToken}
+	p.nextToken()
+	stmt.Value = p.parseExpression(LOWEST)
+	return stmt
+}
+
 func (p *Parser) parseServerStatement() Statement {
 	stmt := &ServerStmt{Token: p.curToken}
 	p.nextToken()

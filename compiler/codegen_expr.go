@@ -151,6 +151,17 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			}
 		}
 
+		if objStr == "ai" {
+			switch e.Field {
+			case "complete":
+				return "runtime.AIComplete", nil
+			case "embed":
+				return "runtime.AIEmbed", nil
+			case "chat":
+				return "runtime.AIChat", nil
+			}
+		}
+
 		if objStr == "s3" {
 			switch e.Field {
 			case "init":

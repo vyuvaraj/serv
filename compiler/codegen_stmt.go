@@ -332,6 +332,14 @@ func (c *Codegen) genBrokerStmt(s *BrokerStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\truntime.InitBroker(fmt.Sprint(%s))\n}\n\n", val), nil
 }
 
+func (c *Codegen) genAiStmt(s *AiStmt) (string, error) {
+	val, err := c.genExpression(s.Value)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func init() {\n\truntime.InitAI(fmt.Sprint(%s))\n}\n\n", val), nil
+}
+
 func (c *Codegen) genServerStmt(s *ServerStmt) (string, error) {
 	val, err := c.genExpression(s.Value)
 	if err != nil {

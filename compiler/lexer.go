@@ -14,6 +14,7 @@ const (
 
 	// Keywords
 	TOKEN_BROKER     TokenType = "BROKER"
+	TOKEN_AI         TokenType = "AI"
 	TOKEN_SERVER     TokenType = "SERVER"
 	TOKEN_ROUTE      TokenType = "ROUTE"
 	TOKEN_EVERY      TokenType = "EVERY"
@@ -501,7 +502,8 @@ func isDigit(ch byte) bool {
 
 var keywords = map[string]TokenType{
 	"broker":    TOKEN_BROKER,
-	"server":    TOKEN_SERVER,
+	"ai":       TOKEN_AI,
+	"server":   TOKEN_SERVER,
 	"route":     TOKEN_ROUTE,
 	"every":     TOKEN_EVERY,
 	"cron":      TOKEN_CRON,
