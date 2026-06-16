@@ -42,7 +42,7 @@ foreach ($platform in $platforms) {
     # Build compiler
     $env:GOOS = $goos
     $env:GOARCH = $goarch
-    & go build -ldflags="-s -w" -o (Join-Path $stageDir "serv$ext") main.go
+    & go build -ldflags="-s -w" -o (Join-Path $stageDir "serv$ext") .
     if ($LASTEXITCODE -ne 0) { Write-Host "  FAILED: serv" -ForegroundColor Red; continue }
 
     # Build LSP
