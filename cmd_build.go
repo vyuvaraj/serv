@@ -122,7 +122,7 @@ func buildServNoExit(srvFile, outputBinary, target string) (string, error) {
 	return filepath.Join(filepath.Dir(absPath), outputBinary), nil
 }
 
-func runServ(srvFile string, extraArgs []string, profile bool) {
+func runServ(srvFile string, extraArgs []string, profile bool, env string) {
 	binPath, err := buildServNoExit(srvFile, "temp_service.exe", "")
 	if err != nil {
 		fmt.Printf("Build failed: %v\n", err)
@@ -135,8 +135,12 @@ func runServ(srvFile string, extraArgs []string, profile bool) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
 	if profile {
-		cmd.Env = append(os.Environ(), "SERV_PROFILE=true")
+		cmd.Env = append(cmd.Env, "SERV_PROFILE=true")
+	}
+	if env != "" {
+		cmd.Env = append(cmd.Env, "SERV_ENV="+env)
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -145,7 +149,7 @@ func runServ(srvFile string, extraArgs []string, profile bool) {
 	}
 }
 
-func runServWatch(srvFile string) {
+func runServWatch(srvFile string, env string) {
 	fmt.Printf("Starting Serv in Watch Mode: %s...\n", srvFile)
 
 	var cmd *exec.Cmd
@@ -167,6 +171,10 @@ func runServWatch(srvFile string) {
 		cmd = exec.Command(binPath)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		cmd.Env = os.Environ()
+		if env != "" {
+			cmd.Env = append(cmd.Env, "SERV_ENV="+env)
+		}
 
 		if err := cmd.Start(); err != nil {
 			fmt.Printf("[WATCH] Failed to start service: %v\n", err)

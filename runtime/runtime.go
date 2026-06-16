@@ -83,7 +83,8 @@ func loadYAMLConfig() {
 	// Look for custom config path in:
 	// 1. CLI flag: --config <path>
 	// 2. Env variable: SERV_CONFIG
-	// 3. Fall back: config.yml or config.yaml
+	// 3. Profile-based fallback: config.<env>.yml or config.<env>.yaml
+	// 4. Default fallback: config.yml or config.yaml
 	var configPath string
 
 	for i := 0; i < len(os.Args)-1; i++ {
@@ -95,6 +96,24 @@ func loadYAMLConfig() {
 
 	if configPath == "" {
 		configPath = os.Getenv("SERV_CONFIG")
+	}
+
+	if configPath == "" {
+		// Determine the active environment profile
+		profile := getCliFlag("env")
+		if profile == "" {
+			profile = os.Getenv("SERV_ENV")
+		}
+
+		if profile != "" {
+			ymlPath := fmt.Sprintf("config.%s.yml", profile)
+			yamlPath := fmt.Sprintf("config.%s.yaml", profile)
+			if _, err := os.Stat(ymlPath); err == nil {
+				configPath = ymlPath
+			} else if _, err := os.Stat(yamlPath); err == nil {
+				configPath = yamlPath
+			}
+		}
 	}
 
 	if configPath == "" {

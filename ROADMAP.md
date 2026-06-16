@@ -166,7 +166,7 @@ To prepare Serv-lang for production usage and support larger codebases, the foll
 | 11.3 | **Panic Stack Trace Mapping** | Medium | Map Go runtime panic traces back to original `.srv` line numbers using emitted source map comments. | ⬜ Planned |
 | 11.4 | **Structured Mocking in Tests** | Medium | Add support to stub out network calls (`mock http.get`) and database operations (`mock db.query`) inside test blocks. | ✅ Done |
 | 11.5 | **Scoped Symbol Table Refactor** | Large | Refactor the compiler internals to use proper lexical scopes instead of a simple flat symbol table. | ⬜ Planned |
-| 11.6 | **Environment Profiles** | Small | Support loading environment-specific variables and configuration files based on flag (e.g., `--env staging`). | ⬜ Planned |
+| 11.6 | **Environment Profiles** | Small | Support loading environment-specific variables and configuration files based on flag (e.g., `--env staging`). | ✅ Done |
 
 ### Detail on Phase 11 Items
 
