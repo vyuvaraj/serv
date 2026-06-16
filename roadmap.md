@@ -21,6 +21,7 @@ Enhance the single-node capabilities with enterprise security, management utilit
   - [x] Multipart Upload support (Initiate, Upload Part, Complete, Abort)
   - [x] Lifecycle policies (Auto-expire/transition objects)
   - [x] Object locking (WORM - Write Once Read Many support)
+  - [x] Pre-signed URLs (S3-compatible temporary access generation)
 - **Security & IAM**:
   - [x] TLS 1.3 enforcement
   - [x] AES-256 Encryption-at-Rest
@@ -30,8 +31,10 @@ Enhance the single-node capabilities with enterprise security, management utilit
   - [x] Structured logging (JSON format)
   - [x] Prometheus metrics endpoint (Request rate, latency, storage utilization, active connections)
   - [x] OpenTelemetry (OTel) tracing integration for API handlers
-- **CLI Client**:
+- **CLI Client & DevOps**:
   - [x] A lightweight Go CLI (`servstore-cli`) to manage buckets, objects, policy configurations, and cluster state from the terminal
+  - [x] Automated GitHub Actions CI pipeline running builds, tests, and formatting checks
+  - [x] 3-Node local clustering Docker Compose setup for instant orchestration testing
 
 ---
 
