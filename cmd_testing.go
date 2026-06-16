@@ -11,7 +11,7 @@ import (
 	"serv/compiler"
 )
 
-func runTests(srvFile string, withCoverage bool) {
+func runTests(srvFile string, withCoverage bool, filter string) {
 	absPath, program, err := parseProject(srvFile)
 	if err != nil {
 		fmt.Printf("Parse error: %v\n", err)
@@ -88,6 +88,9 @@ func runTests(srvFile string, withCoverage bool) {
 	if withCoverage {
 		coverFile := filepath.Join(buildDir, "coverage.out")
 		testArgs = append(testArgs, "-coverprofile="+coverFile)
+	}
+	if filter != "" {
+		testArgs = append(testArgs, "-run", filter)
 	}
 	testArgs = append(testArgs, "./...")
 

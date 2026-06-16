@@ -108,3 +108,9 @@ func WasmWriteOutput(data interface{}) interface{} {
 
 // Noop is a no-op sentinel used by generated test files to satisfy the runtime import.
 func Noop() {}
+
+func ResetTestState() {
+	ClearMocks()
+	ClearCache()
+	ResetDBState()
+}

@@ -39,6 +39,10 @@ func InitCache(connStr string) {
 }
 
 func CacheSet(key string, value interface{}, durationStr string) {
+	if mockFn, exists := GetMock("runtime.CacheSet:" + key); exists {
+		mockFn(key, value, durationStr)
+		return
+	}
 	endSpan := TraceCache("SET", key)
 	defer endSpan()
 
@@ -64,6 +68,9 @@ func CacheSet(key string, value interface{}, durationStr string) {
 }
 
 func CacheGet(key string) interface{} {
+	if mockFn, exists := GetMock("runtime.CacheGet:" + key); exists {
+		return mockFn(key)
+	}
 	endSpan := TraceCache("GET", key)
 	defer endSpan()
 
@@ -96,4 +103,10 @@ func CacheGet(key string) interface{} {
 		}
 		return entry.value
 	}
+}
+
+func ClearCache() {
+	localCacheMu.Lock()
+	defer localCacheMu.Unlock()
+	localCache = make(map[string]localCacheEntry)
 }

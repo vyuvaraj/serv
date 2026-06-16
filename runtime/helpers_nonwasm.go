@@ -14,6 +14,9 @@ import (
 
 // HTTP Client
 func HTTPGet(url string) interface{} {
+	if mockFn, exists := GetMock("runtime.HTTPGet:" + url); exists {
+		return mockFn(url)
+	}
 	endSpan := TraceHTTPClient("GET", url)
 	start := time.Now()
 	MetricInc("http_client_requests_total")
@@ -48,6 +51,9 @@ func HTTPGet(url string) interface{} {
 }
 
 func HTTPPost(url string, body interface{}) interface{} {
+	if mockFn, exists := GetMock("runtime.HTTPPost:" + url); exists {
+		return mockFn(url, body)
+	}
 	endSpan := TraceHTTPClient("POST", url)
 	start := time.Now()
 	MetricInc("http_client_requests_total")

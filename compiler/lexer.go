@@ -59,6 +59,7 @@ const (
 	TOKEN_WS         TokenType = "WS"
 	TOKEN_CORS       TokenType = "CORS"
 	TOKEN_RATE_LIMIT TokenType = "RATE_LIMIT"
+	TOKEN_MOCK       TokenType = "MOCK"
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -549,6 +550,7 @@ var keywords = map[string]TokenType{
 	"timeout":   TOKEN_TIMEOUT,
 	"cors":      TOKEN_CORS,
 	"rate_limit": TOKEN_RATE_LIMIT,
+	"mock":       TOKEN_MOCK,
 }
 
 func lookupIdent(ident string) TokenType {

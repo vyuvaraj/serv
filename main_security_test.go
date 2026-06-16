@@ -183,9 +183,15 @@ func TestInputSanitization(t *testing.T) {
 	rawInput := "<script>alert('xss')</script>"
 	escapedInput := "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
 
-	res, _ := http.Get(server.URL + "/echo?val=" + url.QueryEscape(rawInput))
+	res, err := http.Get(server.URL + "/echo?val=" + url.QueryEscape(rawInput))
+	if err != nil {
+		t.Fatalf("HTTP request failed: %v", err)
+	}
 	defer res.Body.Close()
-	body, _ := io.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
 
 	if string(body) != escapedInput {
 		t.Errorf("expected sanitized output %q, got %q", escapedInput, string(body))

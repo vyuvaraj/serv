@@ -125,6 +125,8 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			switch e.Field {
 			case "query":
 				return "runtime.DBQuery", nil
+			case "querySafe":
+				return "runtime.DBQuerySafe", nil
 			case "queryPage":
 				return "runtime.DBQueryPage", nil
 			case "findOne":

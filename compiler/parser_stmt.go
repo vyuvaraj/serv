@@ -244,3 +244,15 @@ func (p *Parser) parseAfterEachStatement() Statement {
 	stmt.Body = p.parseBlockStatement()
 	return stmt
 }
+
+// mock targetCall { body }
+func (p *Parser) parseMockStatement() Statement {
+	stmt := &MockStmt{Token: p.curToken}
+	p.nextToken() // consume 'mock'
+	stmt.Target = p.parseExpression(LOWEST)
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}

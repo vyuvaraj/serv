@@ -283,6 +283,24 @@ func (t *TestStmt) String() string {
     return out.String()
 }
 
+// Mock Statement
+type MockStmt struct {
+	Token  Token // TOKEN_MOCK ("mock")
+	Target Expression
+	Body   *BlockStmt
+}
+
+func (m *MockStmt) statementNode()       {}
+func (m *MockStmt) TokenLiteral() string { return m.Token.Literal }
+func (m *MockStmt) String() string {
+	var out bytes.Buffer
+	out.WriteString("mock ")
+	out.WriteString(m.Target.String())
+	out.WriteString(" ")
+	out.WriteString(m.Body.String())
+	return out.String()
+}
+
 // Assert Expression
 type AssertExpr struct {
 	Token Token
