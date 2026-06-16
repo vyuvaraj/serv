@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -344,9 +345,26 @@ func (ap *AuthProvider) verifyQuerySignature(r *http.Request) bool {
 	signedHeaders := r.URL.Query().Get("X-Amz-SignedHeaders")
 	signature := r.URL.Query().Get("X-Amz-Signature")
 	date := r.URL.Query().Get("X-Amz-Date")
+	expires := r.URL.Query().Get("X-Amz-Expires")
 
 	if credential == "" || signedHeaders == "" || signature == "" || date == "" {
 		return false
+	}
+
+	// Check if the pre-signed URL has expired
+	if expires != "" {
+		expiresSec, err := strconv.Atoi(expires)
+		if err != nil {
+			return false
+		}
+		// Parse the request date
+		reqTime, err := time.Parse("20060102T150405Z", date)
+		if err != nil {
+			return false
+		}
+		if time.Now().After(reqTime.Add(time.Duration(expiresSec) * time.Second)) {
+			return false
+		}
 	}
 
 	credParts := strings.Split(credential, "/")
@@ -482,3 +500,64 @@ func (ap *AuthProvider) GetAdminCredentials() (string, string) {
 	return "minioadmin", "minioadmin"
 }
 
+
+// GeneratePresignedURL creates a pre-signed URL for the given method, bucket, and key.
+// The URL is valid for the specified duration. It uses AWS Signature V4 query string auth.
+func (ap *AuthProvider) GeneratePresignedURL(baseURL, method, bucket, key string, expires time.Duration) (string, error) {
+	accessKey, secretKey := ap.GetAdminCredentials()
+
+	now := time.Now().UTC()
+	dateStr := now.Format("20060102")
+	amzDate := now.Format("20060102T150405Z")
+	region := "us-east-1"
+	service := "s3"
+	credentialScope := fmt.Sprintf("%s/%s/%s/aws4_request", dateStr, region, service)
+	credential := fmt.Sprintf("%s/%s", accessKey, credentialScope)
+
+	path := fmt.Sprintf("/%s/%s", bucket, key)
+	expiresSec := int(expires.Seconds())
+
+	// Build canonical query string (alphabetical order, excluding signature)
+	queryParts := []string{
+		fmt.Sprintf("X-Amz-Algorithm=%s", "AWS4-HMAC-SHA256"),
+		fmt.Sprintf("X-Amz-Credential=%s", pathEscape(credential)),
+		fmt.Sprintf("X-Amz-Date=%s", amzDate),
+		fmt.Sprintf("X-Amz-Expires=%d", expiresSec),
+		fmt.Sprintf("X-Amz-SignedHeaders=%s", "host"),
+	}
+	sortStrings(queryParts)
+	canonicalQuery := strings.Join(queryParts, "&")
+
+	// Parse host from baseURL
+	host := strings.TrimPrefix(baseURL, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimSuffix(host, "/")
+
+	// Canonical request
+	canonicalRequest := fmt.Sprintf("%s\n%s\n%s\nhost:%s\n\nhost\nUNSIGNED-PAYLOAD",
+		method,
+		path,
+		canonicalQuery,
+		host,
+	)
+
+	// String to sign
+	stringToSign := fmt.Sprintf("AWS4-HMAC-SHA256\n%s\n%s\n%s",
+		amzDate,
+		credentialScope,
+		hexEncode(sum256([]byte(canonicalRequest))),
+	)
+
+	// Signing key
+	kDate := hmacSHA256([]byte("AWS4"+secretKey), []byte(dateStr))
+	kRegion := hmacSHA256(kDate, []byte(region))
+	kService := hmacSHA256(kRegion, []byte(service))
+	kSigning := hmacSHA256(kService, []byte("aws4_request"))
+
+	signature := hexEncode(hmacSHA256(kSigning, []byte(stringToSign)))
+
+	presignedURL := fmt.Sprintf("%s%s?%s&X-Amz-Signature=%s",
+		baseURL, path, canonicalQuery, signature)
+
+	return presignedURL, nil
+}

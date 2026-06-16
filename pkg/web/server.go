@@ -301,6 +301,46 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2.5 Handle protected console endpoints
+	if path == "/console/presign" && r.Method == http.MethodPost {
+		var req struct {
+			Method  string `json:"method"`
+			Bucket  string `json:"bucket"`
+			Key     string `json:"key"`
+			Expires int    `json:"expires"` // seconds
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.Method == "" {
+			req.Method = "GET"
+		}
+		if req.Expires <= 0 {
+			req.Expires = 3600 // default 1 hour
+		}
+		if req.Expires > 604800 {
+			req.Expires = 604800 // max 7 days
+		}
+		// Determine base URL from request
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		baseURL := fmt.Sprintf("%s://%s", scheme, r.Host)
+		url, err := wc.auth.GeneratePresignedURL(baseURL, req.Method, req.Bucket, req.Key, time.Duration(req.Expires)*time.Second)
+		if err != nil {
+			http.Error(w, "Failed to generate presigned URL", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"url":     url,
+			"method":  req.Method,
+			"expires": req.Expires,
+		})
+		return
+	}
+
 	if path == "/console/cluster/status" && r.Method == http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
 		if wc.cluster != nil {

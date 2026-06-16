@@ -1,0 +1,76 @@
+# ServStore 3-Node Cluster
+# Usage: docker compose up -d
+# Console: http://localhost:9000
+# S3 API:  http://localhost:9000 (access-key: admin, secret-key: admin123)
+
+services:
+  node1:
+    build: .
+    container_name: servstore-node1
+    ports:
+      - "9000:8080"
+    volumes:
+      - node1-data:/data
+    command:
+      - "--port=8080"
+      - "--data-dir=/data"
+      - "--auth"
+      - "--access-key=admin"
+      - "--secret-key=admin123"
+      - "--node-id=node1"
+      - "--node-addr=node1:8080"
+      - "--peers=node2:8080,node3:8080"
+      - "--raft-port=8090"
+      - "--raft-bootstrap"
+      - "--replication-factor=2"
+    networks:
+      - servstore
+
+  node2:
+    build: .
+    container_name: servstore-node2
+    ports:
+      - "9001:8080"
+    volumes:
+      - node2-data:/data
+    command:
+      - "--port=8080"
+      - "--data-dir=/data"
+      - "--auth"
+      - "--access-key=admin"
+      - "--secret-key=admin123"
+      - "--node-id=node2"
+      - "--node-addr=node2:8080"
+      - "--peers=node1:8080,node3:8080"
+      - "--raft-port=8090"
+    networks:
+      - servstore
+
+  node3:
+    build: .
+    container_name: servstore-node3
+    ports:
+      - "9002:8080"
+    volumes:
+      - node3-data:/data
+    command:
+      - "--port=8080"
+      - "--data-dir=/data"
+      - "--auth"
+      - "--access-key=admin"
+      - "--secret-key=admin123"
+      - "--node-id=node3"
+      - "--node-addr=node3:8080"
+      - "--peers=node1:8080,node2:8080"
+      - "--raft-port=8090"
+    networks:
+      - servstore
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+
+networks:
+  servstore:
+    driver: bridge
