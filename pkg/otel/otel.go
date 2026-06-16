@@ -30,6 +30,10 @@ var (
 	spanFlushInterval = 2 * time.Second
 	maxBatchSize      = 50
 	flushChan         = make(chan struct{}, 1)
+
+	recentSpans     []otelSpan
+	recentSpansMu   sync.RWMutex
+	maxRecentSpans  = 100
 )
 
 type otelSpan struct {
@@ -183,6 +187,14 @@ func (s *Span) End(status int) {
 		Status:     status,
 	}
 
+	// Capture in local ring buffer
+	recentSpansMu.Lock()
+	recentSpans = append(recentSpans, span)
+	if len(recentSpans) > maxRecentSpans {
+		recentSpans = recentSpans[len(recentSpans)-maxRecentSpans:]
+	}
+	recentSpansMu.Unlock()
+
 	spanBufferMu.Lock()
 	spanBuffer = append(spanBuffer, span)
 	if len(spanBuffer) >= maxBatchSize {
@@ -193,6 +205,14 @@ func (s *Span) End(status int) {
 	} else {
 		spanBufferMu.Unlock()
 	}
+}
+
+func GetRecentSpans() []otelSpan {
+	recentSpansMu.RLock()
+	defer recentSpansMu.RUnlock()
+	res := make([]otelSpan, len(recentSpans))
+	copy(res, recentSpans)
+	return res
 }
 
 func Traceparent(ctx context.Context) string {

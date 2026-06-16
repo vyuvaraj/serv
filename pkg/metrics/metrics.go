@@ -107,3 +107,30 @@ func splitKey(key string) []string {
 	parts = append(parts, curr)
 	return parts
 }
+
+func GetMetricsSnapshot() map[string]interface{} {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+
+	httpReqs := make(map[string]int64)
+	for k, v := range registry.httpRequests {
+		httpReqs[k] = v
+	}
+
+	reqDurations := make(map[string]float64)
+	for k, v := range registry.requestDuration {
+		reqDurations[k] = v
+	}
+
+	reqCounts := make(map[string]int64)
+	for k, v := range registry.requestCount {
+		reqCounts[k] = v
+	}
+
+	return map[string]interface{}{
+		"http_requests_total":           httpReqs,
+		"http_in_flight_requests":       registry.inFlightRequests,
+		"http_request_duration_seconds": reqDurations,
+		"http_request_duration_counts":  reqCounts,
+	}
+}

@@ -15,6 +15,8 @@ import (
 
 	"servstore/pkg/auth"
 	"servstore/pkg/cluster"
+	"servstore/pkg/metrics"
+	"servstore/pkg/otel"
 	"servstore/pkg/storage"
 )
 
@@ -347,6 +349,28 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(wc.cluster.GetNodes())
 		} else {
 			w.Write([]byte(`[]`))
+		}
+		return
+	}
+
+	if path == "/console/metrics" && r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(metrics.GetMetricsSnapshot())
+		return
+	}
+
+	if path == "/console/traces" && r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(otel.GetRecentSpans())
+		return
+	}
+
+	if path == "/console/cluster/ring" && r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		if wc.cluster != nil && wc.cluster.Ring() != nil {
+			json.NewEncoder(w).Encode(wc.cluster.Ring().GetRingSnapshot())
+		} else {
+			w.Write([]byte(`{}`))
 		}
 		return
 	}

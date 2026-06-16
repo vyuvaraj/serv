@@ -119,3 +119,24 @@ func (hr *HashRing) GetNodes(key string, count int) ([]string, error) {
 
 	return chosen, nil
 }
+
+func (hr *HashRing) GetRingSnapshot() map[string]interface{} {
+	hr.mu.RLock()
+	defer hr.mu.RUnlock()
+
+	ringMap := make(map[string]string)
+	for k, v := range hr.ring {
+		ringMap[strconv.FormatUint(uint64(k), 10)] = v
+	}
+
+	uniqueNodes := make([]string, 0, len(hr.nodes))
+	for n := range hr.nodes {
+		uniqueNodes = append(uniqueNodes, n)
+	}
+
+	return map[string]interface{}{
+		"replicas": hr.replicas,
+		"ring":     ringMap,
+		"nodes":    uniqueNodes,
+	}
+}

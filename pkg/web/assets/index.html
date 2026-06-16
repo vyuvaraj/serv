@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -24,6 +25,31 @@
                 </div>
             </div>
 
+            <!-- Navigation Tabs -->
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-tab="dashboard">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="browser">
+                    <i class="fa-solid fa-folder-open"></i>
+                    <span>Object Browser</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="ring">
+                    <i class="fa-solid fa-circle-nodes"></i>
+                    <span>Consistent Ring</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="traces">
+                    <i class="fa-solid fa-wave-square"></i>
+                    <span>OTEL Traces</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="policies">
+                    <i class="fa-solid fa-user-shield"></i>
+                    <span>Access Control</span>
+                </a>
+            </nav>
+
+            <!-- Buckets quick-list inside Sidebar, only relevant for browser -->
             <div class="sidebar-section">
                 <div class="section-header">
                     <span>BUCKETS</span>
@@ -39,7 +65,7 @@
             <div class="sidebar-footer">
                 <div class="status-indicator">
                     <span class="pulse-dot"></span>
-                    <span>Single-Node Active</span>
+                    <span id="node-status-text">Single-Node Active</span>
                 </div>
             </div>
         </aside>
@@ -48,9 +74,9 @@
         <main class="main-content">
             <header class="top-bar">
                 <div class="breadcrumb">
-                    <span id="breadcrumb-bucket" class="breadcrumb-item active">Select a bucket</span>
+                    <span id="tab-title" class="breadcrumb-item active">Dashboard</span>
                     <span id="breadcrumb-separator" class="breadcrumb-separator" style="display:none;">/</span>
-                    <span id="breadcrumb-path" class="breadcrumb-item"></span>
+                    <span id="breadcrumb-bucket" class="breadcrumb-item" style="display:none;"></span>
                 </div>
                 <div class="user-profile" id="btn-logout" style="cursor: pointer;" title="Sign Out">
                     <i class="fa-solid fa-right-from-bracket"></i>
@@ -58,89 +84,268 @@
                 </div>
             </header>
 
-            <div id="no-bucket-selected" class="empty-state">
-                <div class="empty-icon">
-                    <i class="fa-solid fa-cubes"></i>
-                </div>
-                <h2>Welcome to ServStore Console</h2>
-                <p>Select an existing bucket from the sidebar or create a new one to start storing objects.</p>
-                <button class="btn btn-primary" id="btn-create-bucket-hero">
-                    <i class="fa-solid fa-plus"></i> Create Bucket
-                </button>
-            </div>
-
-            <div id="bucket-view" class="bucket-view" style="display: none;">
-                <!-- Bucket Config & Actions Bar -->
-                <div class="bucket-settings-bar card">
-                    <div class="bucket-info-meta">
-                        <h2 id="current-bucket-name">bucket-name</h2>
-                        <span class="meta-tag" id="bucket-created-time">Created: 2026-06-14</span>
-                    </div>
-                    <div class="bucket-controls">
-                        <div class="versioning-toggle-container">
-                            <span class="label-text">Object Versioning:</span>
-                            <div class="toggle-switch">
-                                <input type="checkbox" id="toggle-versioning">
-                                <label for="toggle-versioning"></label>
-                            </div>
-                            <span id="versioning-status" class="status-badge">Disabled</span>
+            <!-- Dashboard Pane -->
+            <div id="tab-pane-dashboard" class="tab-pane active">
+                <div class="metrics-grid">
+                    <div class="metric-card card">
+                        <div class="metric-header">
+                            <span>TOTAL REQUESTS</span>
+                            <i class="fa-solid fa-arrow-trend-up"></i>
                         </div>
-                        <button class="btn btn-danger btn-icon" id="btn-delete-bucket" title="Delete Bucket">
-                            <i class="fa-solid fa-trash"></i> Delete Bucket
-                        </button>
+                        <h3 id="metric-total-requests">0</h3>
+                        <span class="subtext">Processed HTTP API calls</span>
                     </div>
-                </div>
-
-                <!-- Drag & Drop Upload Zone -->
-                <div id="drop-zone" class="drop-zone card">
-                    <input type="file" id="file-input" multiple style="display: none;">
-                    <div class="drop-zone-content">
-                        <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                        <h3>Drag & drop files here</h3>
-                        <p>or click to browse from your computer</p>
-                    </div>
-                </div>
-
-                <!-- Upload Progress -->
-                <div id="upload-progress-container" class="upload-progress-container" style="display: none;">
-                    <div class="progress-info">
-                        <span id="upload-filename">file.bin</span>
-                        <span id="upload-percentage">0%</span>
-                    </div>
-                    <div class="progress-bar-bg">
-                        <div id="upload-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <!-- Object Browser -->
-                <div class="object-browser card">
-                    <div class="browser-header">
-                        <div class="search-bar">
-                            <i class="fa-solid fa-magnifying-glass"></i>
-                            <input type="text" id="object-search" placeholder="Search objects in bucket...">
+                    <div class="metric-card card">
+                        <div class="metric-header">
+                            <span>IN-FLIGHT REQUESTS</span>
+                            <i class="fa-solid fa-spinner fa-spin"></i>
                         </div>
-                        <div class="browser-actions">
-                            <button class="btn btn-secondary btn-icon" id="btn-refresh-objects" title="Refresh List">
-                                <i class="fa-solid fa-rotate"></i>
-                            </button>
+                        <h3 id="metric-inflight-requests">0</h3>
+                        <span class="subtext">Currently executing requests</span>
+                    </div>
+                    <div class="metric-card card">
+                        <div class="metric-header">
+                            <span>CLUSTER MEMBERS</span>
+                            <i class="fa-solid fa-server"></i>
+                        </div>
+                        <h3 id="metric-cluster-nodes">1</h3>
+                        <span class="subtext" id="metric-cluster-subtext">Active gossip nodes</span>
+                    </div>
+                </div>
+
+                <!-- Charts Section -->
+                <div class="charts-container">
+                    <div class="chart-card card">
+                        <h3>Request Throughput (Ops/sec)</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="throughput-chart"></canvas>
                         </div>
                     </div>
+                    <div class="chart-card card">
+                        <h3>Average Latency (ms)</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="latency-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
 
+                <!-- Gossip Node List -->
+                <div class="node-list-container card">
+                    <h3>Gossip Cluster Membership</h3>
                     <div class="table-container">
                         <table class="object-table">
                             <thead>
                                 <tr>
-                                    <th>Name</th>
-                                    <th>Size</th>
-                                    <th>Last Modified</th>
-                                    <th>ETag</th>
-                                    <th>Actions</th>
+                                    <th>Node ID</th>
+                                    <th>Address</th>
+                                    <th>Region</th>
+                                    <th>Status</th>
+                                    <th>Last Seen</th>
                                 </tr>
                             </thead>
-                            <tbody id="object-list-body">
+                            <tbody id="gossip-node-list">
                                 <!-- Filled dynamically -->
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Object Browser Pane -->
+            <div id="tab-pane-browser" class="tab-pane">
+                <div id="no-bucket-selected" class="empty-state">
+                    <div class="empty-icon">
+                        <i class="fa-solid fa-cubes"></i>
+                    </div>
+                    <h2>Welcome to ServStore Console</h2>
+                    <p>Select an existing bucket from the sidebar or create a new one to start storing objects.</p>
+                    <button class="btn btn-primary" id="btn-create-bucket-hero">
+                        <i class="fa-solid fa-plus"></i> Create Bucket
+                    </button>
+                </div>
+
+                <div id="bucket-view" class="bucket-view" style="display: none;">
+                    <!-- Bucket Config & Actions Bar -->
+                    <div class="bucket-settings-bar card">
+                        <div class="bucket-info-meta">
+                            <h2 id="current-bucket-name">bucket-name</h2>
+                            <span class="meta-tag" id="bucket-created-time">Created: 2026-06-14</span>
+                        </div>
+                        <div class="bucket-controls">
+                            <div class="versioning-toggle-container">
+                                <span class="label-text">Object Versioning:</span>
+                                <div class="toggle-switch">
+                                    <input type="checkbox" id="toggle-versioning">
+                                    <label for="toggle-versioning"></label>
+                                </div>
+                                <span id="versioning-status" class="status-badge">Disabled</span>
+                            </div>
+                            <button class="btn btn-danger btn-icon" id="btn-delete-bucket" title="Delete Bucket">
+                                <i class="fa-solid fa-trash"></i> Delete Bucket
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Drag & Drop Upload Zone -->
+                    <div id="drop-zone" class="drop-zone card">
+                        <input type="file" id="file-input" multiple style="display: none;">
+                        <div class="drop-zone-content">
+                            <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                            <h3>Drag & drop files here</h3>
+                            <p>or click to browse from your computer</p>
+                        </div>
+                    </div>
+
+                    <!-- Upload Progress -->
+                    <div id="upload-progress-container" class="upload-progress-container" style="display: none;">
+                        <div class="progress-info">
+                            <span id="upload-filename">file.bin</span>
+                            <span id="upload-percentage">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div id="upload-progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Object Browser -->
+                    <div class="object-browser card">
+                        <div class="browser-header">
+                            <div class="search-bar">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="object-search" placeholder="Search objects in bucket...">
+                            </div>
+                            <div class="browser-actions">
+                                <button class="btn btn-secondary btn-icon" id="btn-refresh-objects" title="Refresh List">
+                                    <i class="fa-solid fa-rotate"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="table-container">
+                            <table class="object-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Size</th>
+                                        <th>Last Modified</th>
+                                        <th>ETag</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="object-list-body">
+                                    <!-- Filled dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Consistent Ring Pane -->
+            <div id="tab-pane-ring" class="tab-pane">
+                <div class="ring-grid">
+                    <!-- Key lookup -->
+                    <div class="ring-card card">
+                        <h3>Consistent Hash Placement Lookup</h3>
+                        <p class="subtitle">Enter a bucket and object key to resolve which physical node holds the data partitions.</p>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="ring-lookup-bucket">Bucket Name</label>
+                            <input type="text" id="ring-lookup-bucket" placeholder="test-bucket">
+                        </div>
+                        <div class="form-group">
+                            <label for="ring-lookup-key">Object Key</label>
+                            <input type="text" id="ring-lookup-key" placeholder="documents/consensus.txt">
+                        </div>
+                        <button class="btn btn-primary" id="btn-ring-lookup">
+                            <i class="fa-solid fa-search"></i> Find Node Placement
+                        </button>
+                        <div id="ring-lookup-result" class="lookup-result-box card" style="display: none; margin-top: 20px;">
+                            <!-- Filled dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Ring visualization -->
+                    <div class="ring-card card">
+                        <h3>Consistent Hash Ring Partitions</h3>
+                        <p class="subtitle">Circular visualization of virtual nodes mapped to physical nodes.</p>
+                        <div class="ring-svg-container">
+                            <svg id="ring-svg" viewBox="0 0 400 400" width="100%" height="100%">
+                                <!-- Dynamic SVG elements -->
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OTEL Traces Pane -->
+            <div id="tab-pane-traces" class="tab-pane">
+                <div class="traces-browser card">
+                    <div class="browser-header">
+                        <h3>In-Memory OpenTelemetry Traces</h3>
+                        <div class="browser-actions">
+                            <button class="btn btn-secondary btn-icon" id="btn-refresh-traces" title="Refresh List">
+                                <i class="fa-solid fa-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="object-table">
+                            <thead>
+                                <tr>
+                                    <th>Span Name</th>
+                                    <th>Trace ID</th>
+                                    <th>Span ID</th>
+                                    <th>Kind</th>
+                                    <th>Duration</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trace-list-body">
+                                <!-- Filled dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Access Control Pane -->
+            <div id="tab-pane-policies" class="tab-pane">
+                <div class="policies-grid">
+                    <!-- User list -->
+                    <div class="policy-card card">
+                        <h3>Active Storage Users</h3>
+                        <p class="subtitle">Select a user to edit their IAM access policies.</p>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="new-user-name">Create/Configure User</label>
+                            <div class="inline-form">
+                                <input type="text" id="new-user-name" placeholder="developer-john">
+                                <button class="btn btn-primary" id="btn-select-user">Select</button>
+                            </div>
+                        </div>
+                        <div class="user-select-list" id="policy-users-list">
+                            <!-- Filled dynamically with some active users -->
+                        </div>
+                    </div>
+
+                    <!-- Policy Editor -->
+                    <div class="policy-card card">
+                        <h3>IAM Policy Editor: <span id="policy-current-user">None selected</span></h3>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="policy-json-area">JSON Policy Document</label>
+                            <textarea id="policy-json-area" rows="12" class="code-editor" placeholder='{
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": ["arn:aws:s3:::*"]
+    }
+  ]
+}'></textarea>
+                        </div>
+                        <div class="policy-actions">
+                            <button class="btn btn-danger" id="btn-delete-policy" disabled>Delete Policy</button>
+                            <button class="btn btn-primary" id="btn-save-policy" disabled>Save Policy</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -202,5 +407,6 @@
 
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
+    <script src="app.js"></script>
 </body>
 </html>
