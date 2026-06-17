@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -24,6 +25,9 @@ var uppercaseWasm = []byte{
 }
 
 func TestServQueueWasmTransformIntegration(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
 	// 1. Initialize broker engine
 	engine := broker.NewBrokerEngine()
 
@@ -67,6 +71,9 @@ func TestServQueueWasmTransformIntegration(t *testing.T) {
 }
 
 func TestHTTPPublish(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
 	engine := broker.NewBrokerEngine()
 	// Test with active authentication token
 	token := "test-token"

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"servqueue/pkg/otel"
+	"servqueue/pkg/storage"
 
 	"github.com/tetratelabs/wazero"
 )
@@ -29,21 +30,46 @@ type BrokerEngine struct {
 	transforms  map[string]wazero.CompiledModule
 	wasmManager *WasmManager
 	Metrics     BrokerMetrics
+	wal         *storage.WAL
+	raftNode    interface{} // Abstracted interface for circular references
 }
 
 func NewBrokerEngine() *BrokerEngine {
-	// Initialize manager using background context
 	mgr, err := GetWasmManager(context.Background())
 	if err != nil {
-		// Fallback setup or panic in case system/wazero setup fails
 		panic(fmt.Sprintf("Failed to initialize WASM Manager: %v", err))
 	}
 
-	return &BrokerEngine{
-		topics:      make(map[string][]chan string),
-		transforms:  make(map[string]wazero.CompiledModule),
-		wasmManager: mgr,
+	wal, walErr := storage.OpenWAL("queue.wal")
+	if walErr != nil {
+		// Log warning or fallback to in-memory if disk is write-blocked
+		wal = nil
 	}
+
+	engine := &BrokerEngine{
+		topics:     make(map[string][]chan string),
+		transforms: make(map[string]wazero.CompiledModule),
+		wasmManager: mgr,
+		wal:        wal,
+	}
+
+	// Replay WAL on startup to restore hot subscriber queues if active
+	if wal != nil {
+		if entries, recoverErr := wal.Recover(); recoverErr == nil {
+			for _, entry := range entries {
+				// Re-dispatch messages locally on restart without re-logging
+				_, _ = engine.publishLocal(context.Background(), entry.Topic, entry.Payload)
+			}
+		}
+	}
+
+	return engine
+}
+
+func (e *BrokerEngine) SetRaftNode(node interface{}) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.raftNode = node
 }
 
 // Subscribe adds a subscriber channel to a topic
@@ -106,7 +132,12 @@ func (e *BrokerEngine) RegisterTransform(ctx context.Context, topic string, wasm
 func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string) (string, error) {
 	atomic.AddUint64(&e.Metrics.MessagesPublished, 1)
 
-	// Context propagation extraction (using W3C standard traceparent from context or defaults)
+	// Append to WAL for durability first
+	if e.wal != nil {
+		_ = e.wal.Append(topic, payload)
+	}
+
+	// Context propagation extraction
 	var parentTrace string
 	if traceparentVal, ok := ctx.Value("traceparent").(string); ok {
 		parentTrace = traceparentVal
@@ -171,5 +202,58 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 		"messaging.payload_len": len(processed),
 	})
 
+	return processed, nil
+}
+
+func (e *BrokerEngine) publishLocal(ctx context.Context, topic string, payload string) (string, error) {
+	var parentTrace string
+	if traceparentVal, ok := ctx.Value("traceparent").(string); ok {
+		parentTrace = traceparentVal
+	}
+
+	span := otel.StartSpan(fmt.Sprintf("PublishLocal %s", topic), parentTrace)
+
+	e.mu.RLock()
+	compiledModule, hasTransform := e.transforms[topic]
+	e.mu.RUnlock()
+
+	var err error
+	processed := payload
+	if hasTransform && compiledModule != nil {
+		var wasmParentTrace string
+		if span != nil {
+			wasmParentTrace = fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID)
+		}
+		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Transform %s", topic), wasmParentTrace)
+
+		start := time.Now()
+		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload)
+		duration := time.Since(start)
+
+		otel.EndSpan(wasmSpan, err, map[string]interface{}{
+			"wasm.duration_ms": duration.Milliseconds(),
+			"wasm.topic":       topic,
+		})
+
+		if err != nil {
+			otel.EndSpan(span, err, map[string]interface{}{})
+			return payload, err
+		}
+	}
+
+	e.mu.RLock()
+	subs, exists := e.topics[topic]
+	e.mu.RUnlock()
+
+	if exists {
+		for _, sub := range subs {
+			select {
+			case sub <- processed:
+			default:
+			}
+		}
+	}
+
+	otel.EndSpan(span, nil, map[string]interface{}{})
 	return processed, nil
 }

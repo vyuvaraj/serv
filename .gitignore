@@ -3,3 +3,4 @@ servqueue.exe
 .build/
 dist/
 vendor/
+queue.wal
