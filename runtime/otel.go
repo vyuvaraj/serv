@@ -48,10 +48,7 @@ type otelSpan struct {
 }
 
 func initOtel() {
-	endpoint := os.Getenv("OTEL_ENDPOINT")
-	if endpoint == "" {
-		endpoint = Config("otel.endpoint")
-	}
+	endpoint := getOtelEndpoint()
 	if endpoint == "" {
 		return
 	}
@@ -71,6 +68,35 @@ func initOtel() {
 	go otelFlushLoop()
 
 	LogInfo("OpenTelemetry enabled: endpoint=", otelEndpoint, " service=", otelService)
+}
+
+func getOtelEndpoint() string {
+	if ep := os.Getenv("OTEL_ENDPOINT"); ep != "" {
+		return ep
+	}
+	if ep := Config("otel.endpoint"); ep != "" {
+		return ep
+	}
+	if ep := os.Getenv("SERV_OTLP_ENDPOINT"); ep != "" {
+		return ep
+	}
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			OTLPEndpoint string `json:"otlp_endpoint"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil {
+			if manifest.OTLPEndpoint != "" {
+				return manifest.OTLPEndpoint
+			}
+		} else {
+			if data, err := os.ReadFile(raw); err == nil {
+				if json.Unmarshal(data, &manifest) == nil && manifest.OTLPEndpoint != "" {
+					return manifest.OTLPEndpoint
+				}
+			}
+		}
+	}
+	return ""
 }
 
 var (

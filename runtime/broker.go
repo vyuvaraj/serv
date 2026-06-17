@@ -3,10 +3,15 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-stomp/stomp/v3"
@@ -233,6 +238,10 @@ func Subscribe(topic string, callback func(string)) {
 	}
 
 	if stompConn != nil {
+		if strings.HasPrefix(brokerURL, "servqueue://") {
+			go RegisterServQueueDLQ(topic, topic+".dlq")
+		}
+
 		sub, err := stompConn.Subscribe(topic, stomp.AckAuto)
 		if err == nil {
 			go func() {
@@ -257,6 +266,79 @@ func Subscribe(topic string, callback func(string)) {
 	subscribersMu.Lock()
 	subscribers[topic] = append(subscribers[topic], callback)
 	subscribersMu.Unlock()
+}
+
+func RegisterServQueueDLQ(topic string, dlqTopic string) {
+	var queueAddr = "http://localhost:8082"
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			Queue string `json:"queue"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.Queue != "" {
+			queueAddr = manifest.Queue
+		} else {
+			if data, err := os.ReadFile(raw); err == nil {
+				if json.Unmarshal(data, &manifest) == nil && manifest.Queue != "" {
+					queueAddr = manifest.Queue
+				}
+			}
+		}
+	} else {
+		addr := brokerURL
+		if strings.HasPrefix(addr, "servqueue://") {
+			addr = strings.TrimPrefix(addr, "servqueue://")
+			if strings.Contains(addr, "@") {
+				parts := strings.SplitN(addr, "@", 2)
+				addr = parts[1]
+			}
+			host := addr
+			if strings.Contains(addr, ":") {
+				host = strings.SplitN(addr, ":", 2)[0]
+			}
+			queueAddr = "http://" + host + ":8082"
+		}
+	}
+
+	url := strings.TrimSuffix(queueAddr, "/") + "/api/topics/" + topic + "/dlq"
+	
+	reqBody, err := json.Marshal(map[string]string{"dlq_topic": dlqTopic})
+	if err != nil {
+		LogWarn("Failed to marshal DLQ registration payload:", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		LogWarn("Failed to create HTTP request for DLQ registration:", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	apiToken := "secret-token"
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			AuthToken string `json:"auth_token"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.AuthToken != "" {
+			apiToken = manifest.AuthToken
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		LogWarn("Failed to register DLQ on ServQueue via HTTP:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		LogWarn("ServQueue DLQ registration returned status ", resp.StatusCode, ": ", string(bodyBytes))
+	} else {
+		LogInfo("Successfully registered DLQ ", dlqTopic, " for topic ", topic, " on ServQueue")
+	}
 }
 
 func Publish(topic string, msg interface{}) {
