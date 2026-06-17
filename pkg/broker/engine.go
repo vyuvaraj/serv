@@ -198,7 +198,7 @@ func (e *BrokerEngine) PublishPartition(ctx context.Context, topic string, key s
 		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Transform %s", topic), wasmParentTrace)
 
 		start := time.Now()
-		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload)
+		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload, wasmParentTrace)
 		duration := time.Since(start)
 
 		atomic.AddUint64(&e.Metrics.WasmDurationNs, uint64(duration.Nanoseconds()))
@@ -266,7 +266,7 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Transform %s", topic), wasmParentTrace)
 
 		start := time.Now()
-		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload)
+		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload, wasmParentTrace)
 		duration := time.Since(start)
 
 		atomic.AddUint64(&e.Metrics.WasmDurationNs, uint64(duration.Nanoseconds()))
@@ -329,7 +329,7 @@ func (e *BrokerEngine) publishLocal(ctx context.Context, topic string, payload s
 		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Transform %s", topic), wasmParentTrace)
 
 		start := time.Now()
-		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload)
+		processed, err = e.wasmManager.RunTransform(ctx, compiledModule, payload, wasmParentTrace)
 		duration := time.Since(start)
 
 		otel.EndSpan(wasmSpan, err, map[string]interface{}{

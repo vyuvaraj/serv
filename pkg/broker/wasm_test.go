@@ -26,7 +26,7 @@ func BenchmarkWasmCompilationAndExecution(b *testing.B) {
 
 	b.Run("WithCaching", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, err := mgr.RunTransform(ctx, compiled, "hello")
+			_, err := mgr.RunTransform(ctx, compiled, "hello", "")
 			if err != nil {
 				b.Fatalf("Run failed: %v", err)
 			}

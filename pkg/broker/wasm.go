@@ -55,7 +55,7 @@ func (m *WasmManager) Compile(ctx context.Context, wasmBytes []byte) (wazero.Com
 	return m.runtime.CompileModule(ctx, wasmBytes)
 }
 
-func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.CompiledModule, message string) (string, error) {
+func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.CompiledModule, message string, traceparent string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeoutSec*time.Second)
 	defer cancel()
 
@@ -67,7 +67,8 @@ func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.Compiled
 		WithStdin(stdin).
 		WithStdout(stdout).
 		WithStderr(stderr).
-		WithName("")
+		WithName("").
+		WithEnv("TRACEPARENT", traceparent)
 
 	m.mu.Lock()
 	mod, err := m.runtime.InstantiateModule(ctx, compiled, modCfg)
