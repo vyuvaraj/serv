@@ -34,6 +34,8 @@ var (
 	tlsCertFile string
 	tlsKeyFile  string
 	tlsEnabled  bool
+
+	servgateURL string
 )
 
 // getCliFlag parses a --flag value from os.Args.
@@ -211,13 +213,43 @@ func Config(key string) string {
 	return os.Getenv(key)
 }
 
+func resolveServgateAddr(port string) (string, string) {
+	if !strings.HasPrefix(port, "servgate://") {
+		return port, ""
+	}
+	urlStr := strings.TrimPrefix(port, "servgate://")
+	localPort := "8085"
+	if idx := strings.Index(urlStr, "?"); idx != -1 {
+		params := urlStr[idx+1:]
+		urlStr = urlStr[:idx]
+		for _, p := range strings.Split(params, "&") {
+			kv := strings.Split(p, "=")
+			if len(kv) == 2 && kv[0] == "port" {
+				localPort = kv[1]
+			}
+		}
+	}
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "http://" + urlStr
+	}
+	
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		localPort = envPort
+	}
+	return localPort, urlStr
+}
+
 // REST HTTP Server
 func InitServer(port string) {
-	serverPort = port
+	p, gate := resolveServgateAddr(port)
+	serverPort = p
+	servgateURL = gate
 }
 
 func InitServerTLS(port, certFile, keyFile string) {
-	serverPort = port
+	p, gate := resolveServgateAddr(port)
+	serverPort = p
+	servgateURL = gate
 	tlsCertFile = certFile
 	tlsKeyFile = keyFile
 	tlsEnabled = true
@@ -513,6 +545,10 @@ func StartServer() interface{} {
 	}()
 
 	LogInfo("Serv service listening on port ", serverPort)
+	if servgateURL != "" {
+		go announceRoutesToServGate()
+	}
+
 	if tlsEnabled {
 		LogInfo("TLS enabled with cert=", tlsCertFile, " key=", tlsKeyFile)
 		if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil && err != http.ErrServerClosed {
@@ -524,6 +560,70 @@ func StartServer() interface{} {
 		}
 	}
 	return nil
+}
+
+func announceRoutesToServGate() {
+	time.Sleep(500 * time.Millisecond)
+	
+	routesMu.RLock()
+	defer routesMu.RUnlock()
+	
+	authToken := os.Getenv("SERV_GATE_AUTH_TOKEN")
+	if authToken == "" {
+		authToken = "gateway-secret-token"
+	}
+	
+	host := os.Getenv("SERV_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	targetBase := fmt.Sprintf("http://%s:%s", host, serverPort)
+	if tlsEnabled {
+		targetBase = fmt.Sprintf("https://%s:%s", host, serverPort)
+	}
+	
+	client := &http.Client{Timeout: 3 * time.Second}
+	
+	for _, pathMap := range routes {
+		for path := range pathMap {
+			prefix := path
+			if idx := strings.Index(prefix, ":"); idx != -1 {
+				prefix = prefix[:idx]
+			}
+			prefix = "/" + strings.Trim(prefix, "/")
+			
+			payload := map[string]interface{}{
+				"prefix": prefix,
+				"target": targetBase,
+			}
+			
+			bodyBytes, err := json.Marshal(payload)
+			if err != nil {
+				continue
+			}
+			
+			req, err := http.NewRequest("POST", servgateURL+"/api/routes", strings.NewReader(string(bodyBytes)))
+			if err != nil {
+				continue
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if authToken != "" {
+				req.Header.Set("Authorization", "Bearer "+authToken)
+			}
+			
+			resp, err := client.Do(req)
+			if err != nil {
+				LogWarn("Failed to self-announce route ", prefix, " to ServGate: ", err.Error())
+				continue
+			}
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				LogInfo("Successfully self-announced route ", prefix, " to ServGate")
+			} else {
+				LogWarn("ServGate route announcement returned status ", resp.StatusCode)
+			}
+		}
+	}
 }
 
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
