@@ -2,10 +2,15 @@ package web
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"servqueue/pkg/broker"
 )
@@ -55,7 +60,17 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token != s.authToken {
+		
+		authenticated := false
+		if token == s.authToken {
+			authenticated = true
+		} else if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+			if _, ok := validateJWT(token, []byte(jwtSec)); ok {
+				authenticated = true
+			}
+		}
+
+		if !authenticated {
 			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
 			return
 		}
@@ -196,4 +211,54 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		"topic":   topic,
 		"records": 0,
 	})
+}
+
+func validateJWT(tokenStr string, secret []byte) (string, bool) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return "", false
+	}
+
+	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
+	
+	// Validate signature
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(headerPart + "." + payloadPart))
+	expectedMac := mac.Sum(nil)
+	
+	// Base64Url decode signaturePart
+	sigBytes, err := base64UrlDecode(signaturePart)
+	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
+		return "", false
+	}
+
+	// Base64Url decode payloadPart and extract username, exp
+	payloadBytes, err := base64UrlDecode(payloadPart)
+	if err != nil {
+		return "", false
+	}
+
+	var claims struct {
+		Username string `json:"username"`
+		Exp      int64  `json:"exp"`
+	}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return "", false
+	}
+
+	// Check expiration
+	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
+		return "", false
+	}
+
+	return claims.Username, true
+}
+
+func base64UrlDecode(s string) ([]byte, error) {
+	if l := len(s) % 4; l > 0 {
+		s += strings.Repeat("=", 4-l)
+	}
+	s = strings.ReplaceAll(s, "-", "+")
+	s = strings.ReplaceAll(s, "_", "/")
+	return base64.URLEncoding.DecodeString(s)
 }
