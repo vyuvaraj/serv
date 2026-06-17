@@ -23,7 +23,12 @@ With a premium glassmorphic interface, `ServConsole` gives developers a single p
 * **Key Route Tracer**: Check key placement to see exactly which consensus peer owns a particular S3 bucket key.
 * **Bucket Browser**: Inspect S3 buckets, object sizes, and version metadata.
 
-### 4. Observability & Telemetry
+### 4. Language & Compiler Integration (serv-lang)
+* **Trace Timeline Propagation**: Track distributed trace scopes initiated by `serv-lang` compiled actors across network/messaging bounds.
+* **Actor State Audit**: View trace span logs emitted by custom `.srv` services directly inside the unified event log.
+* **Declarative Schemas**: Visual foundations configured to parse future `serv-lang` compiled database schema actors.
+
+### 5. Observability & Telemetry
 * **OTel Span Waterfall**: View nested spans across network boundaries (Gateway ➔ Queue ➔ Storage) in a custom waterfall chart.
 * **Ecosystem Event Console**: Real-time unified logs from all microservices.
 
