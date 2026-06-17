@@ -1,0 +1,5 @@
+servgate.exe
+*.log
+.build/
+dist/
+vendor/
