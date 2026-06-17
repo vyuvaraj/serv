@@ -120,6 +120,59 @@ func main() {
 		w.Write([]byte("WASM Middleware " + name + " compiled and registered"))
 	})
 
+	mux.HandleFunc("/api/routes", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthToken != "" {
+			if r.Header.Get("Authorization") != "Bearer "+cfg.AuthToken {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		if r.Method == http.MethodPost {
+			var newRoute proxy.Route
+			if err := json.NewDecoder(r.Body).Decode(&newRoute); err != nil {
+				http.Error(w, "Invalid route payload", http.StatusBadRequest)
+				return
+			}
+			
+			currentCfg, err := prov.Load()
+			if err != nil {
+				if os.IsNotExist(err) {
+					currentCfg = cfg
+				} else {
+					http.Error(w, "Failed to load config: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+			
+			found := false
+			for i, rt := range currentCfg.Routes {
+				if rt.Prefix == newRoute.Prefix {
+					currentCfg.Routes[i] = newRoute
+					found = true
+					break
+				}
+			}
+			if !found {
+				currentCfg.Routes = append(currentCfg.Routes, newRoute)
+			}
+			
+			if err := prov.Save(currentCfg); err != nil {
+				http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			
+			handler.UpdateRoutes(currentCfg.Routes)
+			
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("Route registered successfully"))
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(handler.GetRoutes())
+	})
+
 	log.Printf("Starting ServGate reverse proxy on %s...", cfg.Addr)
 	server := &http.Server{
 		Addr:    cfg.Addr,

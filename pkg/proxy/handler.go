@@ -88,6 +88,12 @@ func (h *GatewayHandler) UpdateRoutes(newRoutes []Route) {
 	}
 }
 
+func (h *GatewayHandler) GetRoutes() []Route {
+	h.routesMu.RLock()
+	defer h.routesMu.RUnlock()
+	return h.routes
+}
+
 // RetryingTransport implements http.RoundTripper executing retries on network drops
 type RetryingTransport struct {
 	base http.RoundTripper
