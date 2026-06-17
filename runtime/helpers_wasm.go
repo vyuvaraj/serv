@@ -370,6 +370,7 @@ func AddRoute(method, path string, rate int, period string, handler func(Request
 func AddRouteWithMiddleware(method, path string, rate int, period string, middleware []string, handler func(Request) interface{}) {}
 func AddMCPTool(name, description string, handler func(interface{}) interface{}) {}
 func RegisterMigration(name string, handler func() interface{}) {}
+func RegisterDBSchema(schemaJSON string) {}
 func Subscribe(topic string, handler func(string) interface{}) {}
 func Publish(topic string, val interface{}) interface{}        { return nil }
 

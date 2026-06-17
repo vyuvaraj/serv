@@ -7,6 +7,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,6 +65,67 @@ func RegisterMigration(name string, f func()) {
 	migrations = append(migrations, Migration{Name: name, Func: f})
 }
 
+var (
+	dbSchemaJSON string
+	dbSchemaMu   sync.Mutex
+)
+
+func RegisterDBSchema(schemaJSON string) {
+	dbSchemaMu.Lock()
+	defer dbSchemaMu.Unlock()
+	dbSchemaJSON = schemaJSON
+}
+
+func uploadSchemaToServStore() {
+	time.Sleep(1 * time.Second)
+
+	storeURL := os.Getenv("SERV_STORE_URL")
+	if storeURL == "" {
+		if discovery := os.Getenv("SERVVERSE_DISCOVERY"); discovery != "" {
+			var disc map[string]string
+			if err := json.Unmarshal([]byte(discovery), &disc); err == nil {
+				if val, ok := disc["store"]; ok {
+					storeURL = val
+				}
+			}
+		}
+	}
+	if storeURL == "" {
+		storeURL = "http://localhost:9000"
+	}
+	storeURL = strings.TrimSuffix(storeURL, "/")
+
+	serviceName := os.Getenv("SERV_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = os.Getenv("SERVICE_NAME")
+	}
+	if serviceName == "" {
+		serviceName = filepath.Base(os.Args[0])
+		serviceName = strings.TrimSuffix(serviceName, ".exe")
+		serviceName = strings.TrimSuffix(serviceName, "-test")
+	}
+
+	url := fmt.Sprintf("%s/console/schema?service=%s", storeURL, serviceName)
+	req, err := http.NewRequest("POST", url, strings.NewReader(dbSchemaJSON))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		LogWarn("Failed to upload DB schema to ServStore: ", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		LogInfo("Successfully registered database ORM schema to ServStore")
+	} else {
+		LogWarn("ServStore schema registration returned status ", resp.StatusCode)
+	}
+}
+
 func RunMigrations() interface{} {
 	if dbInstance == nil {
 		return nil
@@ -101,6 +165,9 @@ func RunMigrations() interface{} {
 			}
 			LogInfo("Migration successful: ", m.Name)
 		}
+	}
+	if dbSchemaJSON != "" {
+		go uploadSchemaToServStore()
 	}
 	return nil
 }

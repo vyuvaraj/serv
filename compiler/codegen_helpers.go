@@ -1,7 +1,22 @@
 package compiler
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // GenerateMainFunc creates the entrypoint function main() which runs runtime.StartServer()
 func (c *Codegen) GenerateMainFunc() string {
+	if len(c.dbTables) > 0 {
+		schemaBytes, err := json.Marshal(c.dbTables)
+		if err == nil {
+			return fmt.Sprintf(`func main() {
+	runtime.RegisterDBSchema(%q)
+	runtime.StartServer()
+}
+`, string(schemaBytes))
+		}
+	}
 	return `func main() {
 	runtime.StartServer()
 }
