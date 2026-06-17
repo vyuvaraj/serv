@@ -255,6 +255,63 @@
             </div>
           </div>
         </div>
+
+        <!-- Phase 3: Cluster Operations & Repair Panel -->
+        <div class="pane-grid cluster-ops-grid">
+          <!-- Node Replication Lag -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Node Replication Lag &amp; Heartbeat Status</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-cluster">↻ Refresh</button>
+            </div>
+            <div class="table-container">
+              <table id="cluster-nodes-table">
+                <thead>
+                  <tr>
+                    <th>Node ID</th>
+                    <th>Address</th>
+                    <th>Region</th>
+                    <th>Status</th>
+                    <th>Last Heartbeat</th>
+                    <th>Replication Lag</th>
+                  </tr>
+                </thead>
+                <tbody id="cluster-nodes-body">
+                  <tr><td colspan="6" class="text-center text-muted">Loading cluster data...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Erasure Coding Health -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Erasure Coding Health</h2>
+            </div>
+            <div id="erasure-health-panel">
+              <div class="shard-diagram" id="shard-diagram">
+                <!-- Rendered dynamically -->
+              </div>
+              <div class="erasure-meta" id="erasure-meta">
+                <div class="result-label">Mode</div>
+                <div class="result-value" id="ec-mode">Replication</div>
+                <div class="result-label mt-2">Data Shards</div>
+                <div class="result-value" id="ec-data">2</div>
+                <div class="result-label mt-2">Parity Shards</div>
+                <div class="result-value" id="ec-parity">1</div>
+                <div class="result-label mt-2">Cluster State</div>
+                <div class="result-value" id="ec-state">—</div>
+              </div>
+            </div>
+
+            <div class="card-header mt-4">
+              <h2>Rebalance Trigger</h2>
+            </div>
+            <p class="section-desc">Force a gossip round across all cluster peers to trigger hash ring rebalancing and P2P self-healing.</p>
+            <button id="btn-trigger-rebalance" class="btn btn-warning w-100">⚡ Trigger Cluster Rebalance</button>
+            <div id="rebalance-status" class="status-message mt-3"></div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: TELEMETRY -->

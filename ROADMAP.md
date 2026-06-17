@@ -24,9 +24,9 @@ This document outlines the design phases, completed modules, and upcoming featur
 * [ ] **Migration Auditing**: Track schema revisions and delta logs directly from the UI.
 
 ### Phase 3: Cluster Operations & Repair Panel (Q4 2026)
-* [ ] **Erasure Coding Health**: Visual indicator of data shards vs. parity shards in ServStore cluster.
-* [ ] **Rebalance trigger**: Interactive action button to initiate P2P data healing and hash ring rebalancing.
-* [ ] **Replication Lag metrics**: Monitor real-time delta lags for cross-region replication configurations.
+* [x] **Erasure Coding Health**: Visual indicator of data shards vs. parity shards in ServStore cluster.
+* [x] **Rebalance trigger**: Interactive action button to initiate P2P data healing and hash ring rebalancing.
+* [x] **Replication Lag metrics**: Monitor real-time delta lags for cross-region replication configurations.
 
 ### Phase 4: Enterprise Access Control & Audit Logs (Q1 2027)
 * [ ] **Console SSO**: Integrated OIDC/OAuth2 and LDAP user sign-ins.

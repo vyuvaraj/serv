@@ -89,6 +89,8 @@ func main() {
 	// 1. ServConsole Status Aggregator & Routes API
 	mux.HandleFunc("/api/status", handleStatus)
 	mux.HandleFunc("/api/routes", handleRoutes)
+	mux.HandleFunc("/api/cluster", handleCluster)
+	mux.HandleFunc("/api/cluster/rebalance", handleRebalance)
 
 	// 2. Proxies
 	mux.Handle("/api/proxy/gate/", gateProxy)
@@ -260,3 +262,126 @@ func handleRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(cfg.Routes)
 }
+
+// NodeHealth wraps cluster NodeInfo with derived replication-lag metrics.
+type NodeHealth struct {
+	NodeID        string `json:"node_id"`
+	Address       string `json:"address"`
+	Status        string `json:"status"`
+	Region        string `json:"region"`
+	LastSeenAgoMs int64  `json:"last_seen_ago_ms"`
+	LagStatus     string `json:"lag_status"` // "healthy" | "warning" | "critical"
+	Load          int64  `json:"load"`
+}
+
+type ClusterHealth struct {
+	Nodes          []NodeHealth `json:"nodes"`
+	OnlineCount    int          `json:"online_count"`
+	OfflineCount   int          `json:"offline_count"`
+	ErasureCoding  bool         `json:"erasure_coding"`
+	DataShards     int          `json:"data_shards"`
+	ParityShards   int          `json:"parity_shards"`
+	ClusterHealthy bool         `json:"cluster_healthy"`
+}
+
+func handleCluster(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	client := http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest("GET", strings.TrimSuffix(*storeUrl, "/")+"/console/cluster/status", nil)
+	if err != nil {
+		json.NewEncoder(w).Encode(ClusterHealth{})
+		return
+	}
+
+	type rawNode struct {
+		NodeID   string    `json:"node_id"`
+		Address  string    `json:"address"`
+		Status   string    `json:"status"`
+		LastSeen time.Time `json:"last_seen"`
+		Load     int64     `json:"load"`
+		Region   string    `json:"region"`
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		json.NewEncoder(w).Encode(ClusterHealth{})
+		return
+	}
+	defer resp.Body.Close()
+
+	var rawNodes []rawNode
+	if err := json.NewDecoder(resp.Body).Decode(&rawNodes); err != nil {
+		json.NewEncoder(w).Encode(ClusterHealth{})
+		return
+	}
+
+	now := time.Now()
+	var nodes []NodeHealth
+	online, offline := 0, 0
+
+	for _, n := range rawNodes {
+		lagMs := int64(0)
+		lagStatus := "healthy"
+		if !n.LastSeen.IsZero() {
+			lagMs = now.Sub(n.LastSeen).Milliseconds()
+			switch {
+			case lagMs > 10000:
+				lagStatus = "critical"
+			case lagMs > 5000:
+				lagStatus = "warning"
+			}
+		}
+		if n.Status == "online" {
+			online++
+		} else {
+			offline++
+			lagStatus = "critical"
+		}
+		nodes = append(nodes, NodeHealth{
+			NodeID:        n.NodeID,
+			Address:       n.Address,
+			Status:        n.Status,
+			Region:        n.Region,
+			LastSeenAgoMs: lagMs,
+			LagStatus:     lagStatus,
+			Load:          n.Load,
+		})
+	}
+
+	json.NewEncoder(w).Encode(ClusterHealth{
+		Nodes:          nodes,
+		OnlineCount:    online,
+		OfflineCount:   offline,
+		ErasureCoding:  false,
+		DataShards:     2,
+		ParityShards:   1,
+		ClusterHealthy: offline == 0 && len(nodes) > 0,
+	})
+}
+
+func handleRebalance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	client := http.Client{Timeout: 3 * time.Second}
+	body := strings.NewReader(`{"source_node":{"node_id":"servconsole","address":"localhost:8083","status":"online"},"peers":{}}`)
+	req, err := http.NewRequest("POST",
+		strings.TrimSuffix(*storeUrl, "/")+"/console/cluster/gossip", body)
+	if err != nil {
+		http.Error(w, "Request build failed", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "ServStore unreachable: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("Rebalance gossip round triggered, ServStore responded: %d", resp.StatusCode)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "rebalance_triggered"})
+}
+

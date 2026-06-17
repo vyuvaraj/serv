@@ -51,6 +51,7 @@ function initTabs() {
       if (tabId === 'storage') {
         fetchStorageRing();
         fetchBuckets();
+        fetchClusterHealth();
       } else if (tabId === 'traces') {
         fetchTraces();
       }
@@ -642,3 +643,116 @@ function logEvent(service, message) {
   consoleScreen.appendChild(line);
   consoleScreen.scrollTop = consoleScreen.scrollHeight;
 }
+
+// ─── Phase 3: Cluster Operations & Repair Panel ───────────────────────────
+
+async function fetchClusterHealth() {
+  try {
+    const res = await fetch('/api/cluster');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderClusterNodes(data);
+    renderErasureCoding(data);
+  } catch (err) {
+    logEvent('error', `Cluster health fetch failed: ${err.message}`);
+  }
+}
+
+function renderClusterNodes(data) {
+  const tbody = document.getElementById('cluster-nodes-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const nodes = data.nodes || [];
+  if (nodes.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No cluster nodes detected — ServStore may be running in single-node mode</td></tr>`;
+    return;
+  }
+
+  nodes.forEach(node => {
+    const lagSec = (node.last_seen_ago_ms / 1000).toFixed(1);
+    const lagLabel = node.last_seen_ago_ms === 0 ? 'Local node' : `${lagSec}s ago`;
+    const statusDot = node.status === 'online'
+      ? `<span style="color:var(--success)">● Online</span>`
+      : `<span style="color:var(--danger)">● Offline</span>`;
+    const region = node.region || '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);">${node.node_id}</td>
+      <td style="font-family:var(--font-mono);">${node.address}</td>
+      <td>${region}</td>
+      <td>${statusDot}</td>
+      <td style="color:var(--text-secondary);">${lagLabel}</td>
+      <td><span class="lag-badge ${node.lag_status}">${node.lag_status.toUpperCase()}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  logEvent('store', `Cluster health: ${data.online_count} online, ${data.offline_count} offline`);
+}
+
+function renderErasureCoding(data) {
+  const diagram = document.getElementById('shard-diagram');
+  if (!diagram) return;
+  diagram.innerHTML = '';
+
+  const dataShards   = data.data_shards   || 2;
+  const parityShards = data.parity_shards || 1;
+
+  for (let i = 0; i < dataShards; i++) {
+    const tile = document.createElement('div');
+    tile.className = 'shard-tile data';
+    tile.textContent = `D${i + 1}`;
+    tile.title = `Data shard ${i + 1}`;
+    diagram.appendChild(tile);
+  }
+  for (let i = 0; i < parityShards; i++) {
+    const tile = document.createElement('div');
+    tile.className = 'shard-tile parity';
+    tile.textContent = `P${i + 1}`;
+    tile.title = `Parity shard ${i + 1}`;
+    diagram.appendChild(tile);
+  }
+
+  document.getElementById('ec-mode').textContent   = data.erasure_coding ? 'Erasure Coding (Reed-Solomon)' : 'Replication';
+  document.getElementById('ec-data').textContent   = dataShards;
+  document.getElementById('ec-parity').textContent = parityShards;
+  document.getElementById('ec-state').textContent  = data.cluster_healthy ? '✅ Healthy' : '⚠ Degraded';
+  document.getElementById('ec-state').style.color  = data.cluster_healthy ? 'var(--success)' : 'var(--warning)';
+}
+
+// Wire refresh + rebalance buttons (called once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+  const refreshBtn = document.getElementById('btn-refresh-cluster');
+  if (refreshBtn) refreshBtn.addEventListener('click', fetchClusterHealth);
+
+  const rebalanceBtn = document.getElementById('btn-trigger-rebalance');
+  if (rebalanceBtn) {
+    rebalanceBtn.addEventListener('click', async () => {
+      const statusEl = document.getElementById('rebalance-status');
+      statusEl.className = 'status-message';
+      statusEl.textContent = '⚡ Initiating gossip rebalance round...';
+      rebalanceBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/cluster/rebalance', { method: 'POST' });
+        if (res.ok) {
+          statusEl.className = 'status-message success';
+          statusEl.textContent = '✓ Rebalance gossip round triggered. Nodes will sync within ~3s.';
+          logEvent('store', 'Cluster rebalance gossip round triggered successfully.');
+          setTimeout(fetchClusterHealth, 3500);
+        } else {
+          const err = await res.text();
+          statusEl.className = 'status-message error';
+          statusEl.textContent = `Failed: ${err}`;
+        }
+      } catch (err) {
+        statusEl.className = 'status-message error';
+        statusEl.textContent = `Network error: ${err.message}`;
+      } finally {
+        rebalanceBtn.disabled = false;
+      }
+    });
+  }
+});

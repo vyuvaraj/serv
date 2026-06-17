@@ -309,6 +309,22 @@ h2 {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+.btn-secondary {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.15);
+}
+.btn-warning {
+  background: linear-gradient(135deg, hsl(40,95%,55%), hsl(30,100%,50%));
+  color: var(--bg-primary);
+  border: none;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(245,158,11,0.3);
+}
+.btn-warning:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(245,158,11,0.45);
+}
+
 .btn-primary {
   background: linear-gradient(135deg, var(--primary), hsl(250, 100%, 65%));
   color: var(--bg-primary);
@@ -701,3 +717,41 @@ tr:hover td {
   color: var(--secondary);
   margin-top: 0.25rem;
 }
+
+/* Phase 3 — Cluster Operations */
+.cluster-ops-grid {
+  margin-top: 1.25rem;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.lag-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+}
+.lag-badge.healthy  { background: rgba(16,185,129,0.12); color: var(--success); }
+.lag-badge.warning  { background: rgba(245,158,11,0.12); color: var(--warning); }
+.lag-badge.critical { background: rgba(239,68,68,0.12);  color: var(--danger); }
+
+.shard-diagram {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.shard-tile {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+.shard-tile.data   { background: rgba(6,182,212,0.2); border: 1px solid rgba(6,182,212,0.4); color: var(--secondary); }
+.shard-tile.parity { background: rgba(168,85,247,0.2); border: 1px solid rgba(168,85,247,0.4); color: var(--primary); }
+
+.erasure-meta { margin-top: 0.5rem; }
