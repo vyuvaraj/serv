@@ -199,6 +199,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if tp, exists := frame.Headers["traceparent"]; exists {
 				ctx = context.WithValue(ctx, "traceparent", tp)
 			}
+			if msgID, exists := frame.Headers["message-id"]; exists {
+				ctx = context.WithValue(ctx, "message-id", msgID)
+			} else if idVal, exists := frame.Headers["id"]; exists {
+				ctx = context.WithValue(ctx, "message-id", idVal)
+			}
 
 			_, _ = s.engine.Publish(ctx, destination, frame.Body)
 

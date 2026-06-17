@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,7 @@ type BrokerEngine struct {
 	wal         *storage.WAL
 	raftNode    interface{}
 	offloader   *storage.Offloader
+	dedup       *Deduplicator
 }
 
 func NewBrokerEngine() *BrokerEngine {
@@ -56,6 +58,7 @@ func NewBrokerEngine() *BrokerEngine {
 		dlqTopics:   make(map[string]string),
 		wasmManager: mgr,
 		wal:         wal,
+		dedup:       NewDeduplicator(5 * time.Minute),
 	}
 
 	if wal != nil {
@@ -285,6 +288,13 @@ func (e *BrokerEngine) PublishPartition(ctx context.Context, topic string, key s
 
 // Publish writes a message to a topic, running any registered WASM transform first
 func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string) (string, error) {
+	if msgID, ok := ctx.Value("message-id").(string); ok && msgID != "" {
+		if !e.dedup.Add(msgID) {
+			log.Printf("Broker: duplicate message detected for message-id: %s. Dropping.", msgID)
+			return payload, fmt.Errorf("duplicate message detected: %s", msgID)
+		}
+	}
+
 	atomic.AddUint64(&e.Metrics.MessagesPublished, 1)
 
 	if e.wal != nil {

@@ -138,3 +138,55 @@ func TestHTTPPublish(t *testing.T) {
 		t.Errorf("Expected messages_published_total to be 1, got %v", pubCount)
 	}
 }
+
+func TestMessageDeduplication(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+
+	topic := "dedup-test"
+	subChan := engine.Subscribe(topic)
+
+	ctx1 := context.WithValue(context.Background(), "message-id", "msg-12345")
+	_, err := engine.Publish(ctx1, topic, "message-payload-1")
+	if err != nil {
+		t.Fatalf("Failed to publish first message: %v", err)
+	}
+
+	select {
+	case received := <-subChan:
+		if received != "message-payload-1" {
+			t.Errorf("Expected 'message-payload-1', got %q", received)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for first message")
+	}
+
+	ctx2 := context.WithValue(context.Background(), "message-id", "msg-12345")
+	_, err = engine.Publish(ctx2, topic, "message-payload-2")
+	if err == nil {
+		t.Error("Expected error when publishing duplicate message ID, got nil")
+	}
+
+	select {
+	case received := <-subChan:
+		t.Errorf("Received duplicate message when we expected it to be dropped: %q", received)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	ctx3 := context.WithValue(context.Background(), "message-id", "msg-12346")
+	_, err = engine.Publish(ctx3, topic, "message-payload-3")
+	if err != nil {
+		t.Fatalf("Failed to publish third message: %v", err)
+	}
+
+	select {
+	case received := <-subChan:
+		if received != "message-payload-3" {
+			t.Errorf("Expected 'message-payload-3', got %q", received)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for third message")
+	}
+}

@@ -157,8 +157,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Topic   string `json:"topic"`
-		Payload string `json:"payload"`
+		Topic     string `json:"topic"`
+		Payload   string `json:"payload"`
+		MessageID string `json:"message_id,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -170,6 +171,11 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if tp := r.Header.Get("traceparent"); tp != "" {
 		ctx = context.WithValue(ctx, "traceparent", tp)
+	}
+	if req.MessageID != "" {
+		ctx = context.WithValue(ctx, "message-id", req.MessageID)
+	} else if msgID := r.Header.Get("Message-Id"); msgID != "" {
+		ctx = context.WithValue(ctx, "message-id", msgID)
 	}
 
 	res, err := s.engine.Publish(ctx, req.Topic, req.Payload)
