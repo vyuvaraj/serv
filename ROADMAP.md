@@ -182,3 +182,20 @@ To prepare Serv-lang for production usage and support larger codebases, the foll
 - **Goal**: Allow test definitions to override builtin calls temporarily during the scope of a test block.
 - **Why**: Unblocks true hermetic unit testing without needing real database connections or external API servers active.
 
+---
+
+## Phase 12: Servverse Native Integration (New — June 2026)
+
+These items complete the compiler→ecosystem loop defined in Phase 10.9 and extend Serv-lang to be a first-class citizen in multi-service Servverse deployments.
+
+| # | Item | Effort | Description |
+|---|------|--------|-------------|
+| 12.1 | **`servqueue://` compiler connector** | Large | Native URI driver for ServQueue STOMP. Enables `broker "servqueue://host"` from `.srv` code without HTTP boilerplate. Extends `runtime/broker.go`. |
+| 12.2 | **`servgate://` route registration** | Medium | Self-announce service routes to ServGate at startup via compiler-emitted registration call. Enables zero-config routing in a Servverse deployment. |
+| 12.3 | **`serv deploy --target k8s`** | Medium | Generate Kubernetes Deployment + Service YAML from `serv.toml` project manifest. |
+| 12.4 | **`serv deploy --target fly`** | Small | Generate `fly.toml` and trigger Fly.io deployment. |
+| 12.5 | **`serv new <template>`** | Small | Starter project scaffolding — `api`, `worker`, `event-processor`, `full-stack`, `microservice`. |
+| 12.6 | **`serv-ai` adapter** | Large | `ai "openai://gpt-4"`, `ai "anthropic://claude-3"`, `ai "ollama://localhost"` connection strings. Exposes `ai.complete()` and `ai.embed()` APIs. Pairs with ServStore semantic search. |
+| 12.7 | **`serv monitor`** | Medium | Terminal htop-style runtime inspector. Shows live request rate, latency percentiles, goroutine count, and route-level breakdown. Fills gap before ServMetrics exists. |
+
+> See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
