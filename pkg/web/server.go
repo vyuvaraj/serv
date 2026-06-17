@@ -95,5 +95,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "healthy",
+		"metrics": map[string]interface{}{
+			"messages_published_total": s.engine.Metrics.MessagesPublished,
+			"wasm_executions_total":    s.engine.Metrics.WasmExecutions,
+			"wasm_execution_errors":    s.engine.Metrics.WasmExecutionErrors,
+			"wasm_duration_ns":         s.engine.Metrics.WasmDurationNs,
+		},
 	})
 }

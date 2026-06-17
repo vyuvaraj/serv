@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -91,5 +92,27 @@ func TestHTTPPublish(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timeout waiting for HTTP published message")
+	}
+
+	// Verify metrics endpoint
+	statsResp, err := http.Get("http://127.0.0.1:8084/api/stats")
+	if err != nil {
+		t.Fatalf("Failed to fetch stats: %v", err)
+	}
+	defer statsResp.Body.Close()
+
+	var stats map[string]interface{}
+	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
+		t.Fatalf("Failed to decode stats: %v", err)
+	}
+
+	metrics, ok := stats["metrics"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Metrics object missing from stats response")
+	}
+
+	pubCount := metrics["messages_published_total"].(float64)
+	if pubCount != 1 {
+		t.Errorf("Expected messages_published_total to be 1, got %v", pubCount)
 	}
 }

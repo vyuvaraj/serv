@@ -4,11 +4,15 @@ import (
 	"log"
 
 	"servqueue/pkg/broker"
+	"servqueue/pkg/otel"
 	"servqueue/pkg/stomp"
 	"servqueue/pkg/web"
 )
 
 func main() {
+	// Initialize OpenTelemetry
+	otel.Init()
+
 	engine := broker.NewBrokerEngine()
 
 	stompServer := stomp.NewServer(":61613", engine)
