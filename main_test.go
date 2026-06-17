@@ -45,7 +45,7 @@ func TestServQueueWasmTransformIntegration(t *testing.T) {
 	defer engine.Unsubscribe(topic, subChan)
 
 	// Register empty/mock transform
-	engine.RegisterTransform(topic, []byte{})
+	engine.RegisterTransform(context.Background(), topic, []byte{})
 
 	// Publish message
 	msg := "hello servqueue"

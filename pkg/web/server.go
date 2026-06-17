@@ -50,13 +50,17 @@ func (s *Server) handleRegisterTransform(w http.ResponseWriter, r *http.Request)
 	}
 
 	if len(wasmBytes) == 0 {
-		s.engine.RegisterTransform(topic, nil)
+		_ = s.engine.RegisterTransform(r.Context(), topic, nil)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("WASM transform cleared for topic " + topic))
 		return
 	}
 
-	s.engine.RegisterTransform(topic, wasmBytes)
+	err = s.engine.RegisterTransform(r.Context(), topic, wasmBytes)
+	if err != nil {
+		http.Error(w, "Failed to compile WASM: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("WASM transform registered for topic " + topic))
 }
