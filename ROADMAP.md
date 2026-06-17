@@ -44,17 +44,20 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 
 ---
 
-## Phase 6: Enterprise Features & Advanced Queueing (Future)
-- [ ] **Dead Letter Queues (DLQ)**: Automatically route messages failing WASM transformations or client acknowledgments after max-retries to a dedicated `.dlq` topic.
+## Phase 6: Enterprise Features & Advanced Queueing ⚠️ High Priority
+- [ ] **Dead Letter Queues (DLQ)**: Automatically route messages failing WASM transformations or client acknowledgments after max-retries to a dedicated `.dlq` topic. *Critical reliability gap — failed transforms currently drop messages silently.*
 - [ ] **Delayed & Scheduled Messages**: Support publishing messages with a delayed delivery parameter (storing in a timed-wheel memory queue).
-- [ ] **Message Deduplication**: Deduplicate incoming publishes within a configured time-window based on unique message IDs.
+- [ ] **Message Deduplication**: Deduplicate incoming publishes within a configured time-window based on unique message IDs to enable idempotent at-least-once delivery.
 
 ---
 
-## Phase 7: Serv-verse Infrastructure Integrations (Future)
-- [ ] **ServGate API Gateway Webhook Triggers**: Support registering webhooks in `ServGate` that publish directly to `ServQueue` topics.
+## Phase 7: Serv-verse Infrastructure Integrations
+- [ ] **ServGate API Gateway Webhook Triggers**: Support registering webhooks in `ServGate` that publish directly to `ServQueue` topics on incoming HTTP events.
 - [ ] **ServConsole Unified Control Plane**: Expose complete topic administration, WAL inspection, and WASM performance debug panels directly in the central dashboard.
-- [ ] **Dynamic WASM hot-swapping**: Support uploading new WASM transform modules via the console without dropping active subscriber TCP STOMP connections.
+- [ ] **Dynamic WASM hot-swap without dropping connections**: Support uploading new WASM transform modules via the console without dropping active subscriber TCP STOMP connections.
+
+> See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
+
 
 
 
