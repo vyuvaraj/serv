@@ -42,4 +42,19 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 - [x] **ServConsole Integration**: Feed broker throughput, active subscriptions, and WASM performance stats directly to the central Serv dashboard.
 - [x] **Auto trace propagation**: Automatically pass trace context seamlessly into the WASM transform runtime environments.
 
+---
+
+## Phase 6: Enterprise Features & Advanced Queueing (Future)
+- [ ] **Dead Letter Queues (DLQ)**: Automatically route messages failing WASM transformations or client acknowledgments after max-retries to a dedicated `.dlq` topic.
+- [ ] **Delayed & Scheduled Messages**: Support publishing messages with a delayed delivery parameter (storing in a timed-wheel memory queue).
+- [ ] **Message Deduplication**: Deduplicate incoming publishes within a configured time-window based on unique message IDs.
+
+---
+
+## Phase 7: Serv-verse Infrastructure Integrations (Future)
+- [ ] **ServGate API Gateway Webhook Triggers**: Support registering webhooks in `ServGate` that publish directly to `ServQueue` topics.
+- [ ] **ServConsole Unified Control Plane**: Expose complete topic administration, WAL inspection, and WASM performance debug panels directly in the central dashboard.
+- [ ] **Dynamic WASM hot-swapping**: Support uploading new WASM transform modules via the console without dropping active subscriber TCP STOMP connections.
+
+
 
