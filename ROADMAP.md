@@ -19,19 +19,19 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 - [x] **Security Authentication**: Implement basic/token-based auth for HTTP APIs and username/passcodes in STOMP headers (`login`/`passcode` fields).
 - [x] **OpenTelemetry Metrics & Tracing**: Instrument the engine using standard OTel APIs, tracking broker throughput, message latencies, WASM transform execution times, and trace spans.
 - [x] **Module Caching**: Maintain compiled modules in-memory in `wazero` to eliminate instantiation latency.
-- [ ] **Direct Memory Passing**: Transition stdin/stdout pipes to guest-allocated shared memory buffers to reduce virtualization and allocation overhead.
+- [x] **Direct Memory Passing**: Transition stdin/stdout pipes to guest-allocated shared memory buffers to reduce virtualization and allocation overhead.
 
 ---
 
 ## Phase 3: Cluster Consensus & Distributed Replication
-- [ ] **Raft-backed Clustering**: Implement Hashicorp Raft to replicate topic definitions and registered transforms across a 3-node cluster.
+- [x] **Raft-backed Clustering**: Implement Hashicorp Raft to replicate topic definitions and registered transforms across a 3-node cluster.
 - [ ] **Partitioned Queues**: Support message partitioning based on routing keys.
 - [ ] **High Availability**: Dynamic subscriber re-routing when a broker node drops.
 
 ---
 
 ## Phase 4: ServStore Tiered Storage (Infinite Backlog Retention)
-- [ ] **Write-Ahead Log (WAL)**: Record hot incoming messages to a local disk WAL.
+- [x] **Write-Ahead Log (WAL)**: Record hot incoming messages to a local disk WAL.
 - [ ] **Cold Data Offloading**: Automatically roll WAL segments into structured segment files and upload them to `ServStore` / S3.
 - [ ] **Log Replay**: Enable client replay requests (e.g., `replay?since=timestamp`), pulling cold segments back from S3.
 
