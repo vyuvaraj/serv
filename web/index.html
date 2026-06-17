@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServConsole — Unified Servverse Management Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <!-- Aurora Background Effect -->
+  <div class="aurora-bg"></div>
+
+  <div class="app-container">
+    <!-- Navigation Sidebar/Header -->
+    <header class="navbar">
+      <div class="logo-area">
+        <div class="logo-icon">▲</div>
+        <div class="logo-text">
+          <h1>ServConsole</h1>
+          <span>Unified Servverse Engine</span>
+        </div>
+      </div>
+
+      <nav class="nav-tabs">
+        <button class="tab-btn active" data-tab="gateways">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V8h14v10zM7 10h2v2H7zm0 4h2v2H7zm4-4h2v2h-2zm0 4h2v2h-2zm4-4h2v2h-2zm0 4h2v2h-2z"/></svg>
+          Gateways (ServGate)
+        </button>
+        <button class="tab-btn" data-tab="queues">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M19 15v4H5v-4h14m1-2H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM19 5v4H5V5h14m1-2H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1z"/></svg>
+          Queues (ServQueue)
+        </button>
+        <button class="tab-btn" data-tab="storage">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+          Storage (ServStore)
+        </button>
+        <button class="tab-btn" data-tab="traces">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          Telemetry & Traces
+        </button>
+      </nav>
+
+      <div class="system-status">
+        <div class="status-indicator online" id="global-status-dot"></div>
+        <span id="global-status-text">Ecosystem Online</span>
+      </div>
+    </header>
+
+    <!-- Main Content Panel -->
+    <main class="main-panel">
+      <!-- Status Cards Summary Grid -->
+      <section class="summary-cards">
+        <div class="card glass-card" id="gate-summary-card">
+          <div class="card-header">
+            <h3>ServGate</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="gate-latency">— ms</div>
+          <div class="card-desc">API Proxy Gateway on :8080</div>
+        </div>
+        <div class="card glass-card" id="queue-summary-card">
+          <div class="card-header">
+            <h3>ServQueue</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="queue-messages">0 msg</div>
+          <div class="card-desc">Broker on :8082</div>
+        </div>
+        <div class="card glass-card" id="store-summary-card">
+          <div class="card-header">
+            <h3>ServStore</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="store-buckets">0 bkts</div>
+          <div class="card-desc">Consensus Storage on :8081</div>
+        </div>
+      </section>
+
+      <!-- TAB: GATEWAYS -->
+      <div class="tab-pane active" id="tab-gateways">
+        <div class="pane-grid">
+          <!-- Left: Route Management -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Configured Routes</h2>
+              <button class="btn btn-primary" id="btn-add-route">+ Add Route</button>
+            </div>
+            <div class="table-container">
+              <table id="routes-table">
+                <thead>
+                  <tr>
+                    <th>Prefix</th>
+                    <th>Target Path</th>
+                    <th>Rate Limit</th>
+                    <th>AI Security</th>
+                    <th>Semantic Cache</th>
+                    <th>PII Redact</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically by app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: WASM Middleware Hot-Swap -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>WASM Hot-Swap</h2>
+            </div>
+            <p class="section-desc">Instantly compile and load new WASM middleware to modify headers/payloads in real-time.</p>
+            <form id="wasm-upload-form" class="upload-box">
+              <label for="wasm-file-input" class="file-label">
+                <div class="upload-icon">✦</div>
+                <span>Choose WASM middleware file</span>
+                <span class="subtext">or drag and drop here</span>
+              </label>
+              <input type="file" id="wasm-file-input" accept=".wasm" style="display: none;">
+              <div class="form-group">
+                <input type="text" id="wasm-name-input" placeholder="Middleware name (e.g. auth-scrub)" required>
+              </div>
+              <button type="submit" class="btn btn-success w-100">Upload & Hot-Swap</button>
+            </form>
+            <div id="wasm-status-message" class="status-message"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: QUEUES -->
+      <div class="tab-pane" id="tab-queues">
+        <div class="pane-grid">
+          <!-- Left: Active Queues/Topics -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Broker Topics & Active Queues</h2>
+            </div>
+            <div class="table-container">
+              <table id="queues-table">
+                <thead>
+                  <tr>
+                    <th>Topic / Queue Name</th>
+                    <th>Registered Transforms</th>
+                    <th>Messages In/Out</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card-header mt-4">
+              <h2>Register Transform Filter</h2>
+            </div>
+            <form id="queue-transform-form" class="inline-form">
+              <input type="text" id="transform-topic" placeholder="Topic name (e.g. orders)" required>
+              <input type="file" id="transform-file" accept=".wasm" required>
+              <button type="submit" class="btn btn-primary">Attach WASM Filter</button>
+            </form>
+            <div id="queue-transform-status"></div>
+          </div>
+
+          <!-- Right: Test publisher -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Publish Test Message</h2>
+            </div>
+            <form id="publish-message-form">
+              <div class="form-group">
+                <label for="pub-topic">Topic Name</label>
+                <input type="text" id="pub-topic" placeholder="e.g. orders" required>
+              </div>
+              <div class="form-group">
+                <label for="pub-payload">JSON Payload</label>
+                <textarea id="pub-payload" rows="6" placeholder='{"id": 42, "item": "gadget"}' required></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Send STOMP Message</button>
+            </form>
+            <div id="publish-status" class="status-message"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: STORAGE -->
+      <div class="tab-pane" id="tab-storage">
+        <div class="pane-grid">
+          <!-- Left: Bucket Browser & Consistent Hash Ring -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Consistent Hash Ring & Node Placement</h2>
+            </div>
+            <div class="ring-visualizer-container">
+              <canvas id="ring-canvas" width="300" height="300"></canvas>
+              <div class="ring-legend">
+                <h3>Nodes in Ring</h3>
+                <ul id="ring-nodes-list">
+                  <!-- Node list loaded dynamically -->
+                </ul>
+              </div>
+            </div>
+
+            <div class="card-header mt-4">
+              <h2>Bucket Browser</h2>
+              <button class="btn btn-primary" id="btn-create-bucket">+ Create Bucket</button>
+            </div>
+            <div class="bucket-browser-grid">
+              <div class="bucket-list" id="buckets-container">
+                <!-- Loaded dynamically -->
+              </div>
+              <div class="bucket-objects-list">
+                <h3>Objects in Bucket: <span id="current-bucket-name">None</span></h3>
+                <div class="table-container">
+                  <table id="objects-table">
+                    <thead>
+                      <tr>
+                        <th>Key / Filename</th>
+                        <th>Size</th>
+                        <th>Last Modified</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td colspan="3" class="text-center text-muted">Select a bucket to view objects</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Placement Checker -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Object Node Router</h2>
+            </div>
+            <p class="section-desc">Simulate a client request to see exactly which node in the hash ring owns the data.</p>
+            <div class="form-group">
+              <label for="placement-bucket">Bucket Name</label>
+              <input type="text" id="placement-bucket" placeholder="e.g. static-assets">
+            </div>
+            <div class="form-group">
+              <label for="placement-key">Object Key / File</label>
+              <input type="text" id="placement-key" placeholder="e.g. logos/logo.png">
+            </div>
+            <button id="btn-check-placement" class="btn btn-primary w-100">Trace Ring Node Placement</button>
+            <div id="placement-result" class="placement-result-box mt-3" style="display: none;">
+              <div class="result-label">Target Node:</div>
+              <div class="result-value" id="placement-node-id">-</div>
+              <div class="result-label mt-2">Node Address:</div>
+              <div class="result-value" id="placement-node-addr">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: TELEMETRY -->
+      <div class="tab-pane" id="tab-traces">
+        <div class="pane-grid vertical-stack">
+          <!-- Top: OpenTelemetry Traces Visualizer -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>OpenTelemetry Distributed Tracing Flow</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-traces">Refresh Traces</button>
+            </div>
+            <div class="trace-spans-container" id="traces-timeline">
+              <!-- Waterfall trace visualizer goes here -->
+            </div>
+          </div>
+
+          <!-- Bottom: Live Logs Console -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Ecosystem Live Console Logs</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-clear-logs">Clear Screen</button>
+            </div>
+            <div class="console-logs-box" id="console-logs-screen">
+              <div class="log-line system">[SYSTEM] ServConsole connected. Listening for events...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add Route Modal -->
+  <div class="modal-backdrop" id="add-route-modal">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Add API Proxy Route</h3>
+        <button class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <form id="add-route-form">
+        <div class="form-group">
+          <label for="route-prefix">Path Prefix</label>
+          <input type="text" id="route-prefix" placeholder="e.g. /api/v1/orders" required>
+        </div>
+        <div class="form-group">
+          <label for="route-target">Target URL</label>
+          <input type="text" id="route-target" placeholder="e.g. http://localhost:8081" required>
+        </div>
+        <div class="form-group">
+          <label for="route-rpm">Rate Limit (Requests/Min)</label>
+          <input type="number" id="route-rpm" placeholder="60">
+        </div>
+        <div class="form-row">
+          <div class="form-check">
+            <input type="checkbox" id="route-ai-guard">
+            <label for="route-ai-guard">Prompt Guard (AI Safety)</label>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" id="route-ai-cache">
+            <label for="route-ai-cache">Semantic Caching</label>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" id="route-ai-pii">
+            <label for="route-ai-pii">PII Redactor</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">Register Route</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

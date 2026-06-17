@@ -1,0 +1,644 @@
+// ServConsole Frontend Controller
+
+const STATE = {
+  activeTab: 'gateways',
+  components: {
+    ServGate: { online: false, latency: 0, details: null },
+    ServQueue: { online: false, latency: 0, details: null },
+    ServStore: { online: false, latency: 0, details: null }
+  },
+  routes: [],
+  buckets: [],
+  selectedBucket: null,
+  objects: [],
+  traces: [],
+  logs: []
+};
+
+// Colors for storage nodes in ring visualizer
+const NODE_COLORS = [
+  '#a855f7', // purple
+  '#06b6d4', // cyan
+  '#10b981', // green
+  '#f59e0b', // orange
+  '#ef4444'  // red
+];
+
+document.addEventListener('DOMContentLoaded', () => {
+  initTabs();
+  initForms();
+  initPolling();
+  initRingCanvas();
+});
+
+// --- Tab Switching ---
+function initTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.getAttribute('data-tab');
+      
+      // Update UI active states
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      
+      btn.classList.add('active');
+      const pane = document.getElementById(`tab-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      STATE.activeTab = tabId;
+      logEvent('system', `Switched to tab: ${tabId}`);
+      
+      if (tabId === 'storage') {
+        fetchStorageRing();
+        fetchBuckets();
+      } else if (tabId === 'traces') {
+        fetchTraces();
+      }
+    });
+  });
+}
+
+// --- Polling & Status Aggregation ---
+function initPolling() {
+  const poll = async () => {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      
+      // Update local state
+      data.components.forEach(comp => {
+        STATE.components[comp.name] = {
+          online: comp.online,
+          latency: comp.latency_ms,
+          details: comp.details
+        };
+      });
+      
+      updateSummaryUI();
+      
+      // If we are on gateways tab, refresh routes list if details changed
+      if (STATE.activeTab === 'gateways') {
+        refreshRoutesList();
+      } else if (STATE.activeTab === 'queues') {
+        refreshQueuesList();
+      }
+    } catch (err) {
+      logEvent('error', `Status polling failed: ${err.message}`);
+    }
+  };
+  
+  poll();
+  setInterval(poll, 3000);
+}
+
+function updateSummaryUI() {
+  // Global Status
+  const allOnline = Object.values(STATE.components).every(c => c.online);
+  const statusDot = document.getElementById('global-status-dot');
+  const statusText = document.getElementById('global-status-text');
+  
+  if (allOnline) {
+    statusDot.className = 'status-indicator online';
+    statusText.textContent = 'Ecosystem Online';
+  } else {
+    statusDot.className = 'status-indicator offline';
+    statusText.textContent = 'Degraded State Detected';
+  }
+  
+  // ServGate Card
+  const gate = STATE.components.ServGate;
+  const gateCard = document.getElementById('gate-summary-card');
+  const gateLatency = document.getElementById('gate-latency');
+  if (gate.online) {
+    gateCard.querySelector('.badge').className = 'badge online';
+    gateCard.querySelector('.badge').textContent = 'ONLINE';
+    gateLatency.textContent = `${gate.latency} ms`;
+  } else {
+    gateCard.querySelector('.badge').className = 'badge offline';
+    gateCard.querySelector('.badge').textContent = 'OFFLINE';
+    gateLatency.textContent = '— ms';
+  }
+  
+  // ServQueue Card
+  const queue = STATE.components.ServQueue;
+  const queueCard = document.getElementById('queue-summary-card');
+  const queueMsgs = document.getElementById('queue-messages');
+  if (queue.online) {
+    queueCard.querySelector('.badge').className = 'badge online';
+    queueCard.querySelector('.badge').textContent = 'ONLINE';
+    const published = queue.details?.metrics?.messages_published_total || 0;
+    queueMsgs.textContent = `${published} msg`;
+  } else {
+    queueCard.querySelector('.badge').className = 'badge offline';
+    queueCard.querySelector('.badge').textContent = 'OFFLINE';
+    queueMsgs.textContent = '— msg';
+  }
+  
+  // ServStore Card
+  const store = STATE.components.ServStore;
+  const storeCard = document.getElementById('store-summary-card');
+  const storeBuckets = document.getElementById('store-buckets');
+  if (store.online) {
+    storeCard.querySelector('.badge').className = 'badge online';
+    storeCard.querySelector('.badge').textContent = 'ONLINE';
+    const metricBkts = store.details?.Metrics?.BucketsCount || 0;
+    storeBuckets.textContent = `${metricBkts} bkts`;
+  } else {
+    storeCard.querySelector('.badge').className = 'badge offline';
+    storeCard.querySelector('.badge').textContent = 'OFFLINE';
+    storeBuckets.textContent = '— bkts';
+  }
+}
+
+// --- Gateways Tab: Routes & WASM ---
+async function refreshRoutesList() {
+  try {
+    const res = await fetch('/api/routes');
+    if (!res.ok) return;
+    const routes = await res.json();
+    STATE.routes = routes;
+    
+    const tbody = document.querySelector('#routes-table tbody');
+    tbody.innerHTML = '';
+    
+    if (routes.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No routes configured</td></tr>`;
+      return;
+    }
+    
+    routes.forEach(route => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong style="color:var(--primary); font-family:var(--font-mono);">${route.prefix}</strong></td>
+        <td><span style="font-family:var(--font-mono);">${route.target || route.targets?.join(', ')}</span></td>
+        <td>${route.rate_limit_rpm ? `${route.rate_limit_rpm} rpm` : '—'}</td>
+        <td>${route.prompt_guard ? '✅ Active' : '—'}</td>
+        <td>${route.semantic_cache ? '✅ Active' : '—'}</td>
+        <td>${route.pii_redact ? '✅ Active' : '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    // Graceful fallback if /api/routes is not fully integrated yet
+  }
+}
+
+// --- Queues Tab: Transforms & Messaging ---
+function refreshQueuesList() {
+  const queue = STATE.components.ServQueue;
+  const tbody = document.querySelector('#queues-table tbody');
+  tbody.innerHTML = '';
+  
+  if (!queue.online || !queue.details) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">ServQueue is offline</td></tr>`;
+    return;
+  }
+  
+  // Render STOMP / general queue stats
+  const metrics = queue.details.metrics || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><strong>stomp://localhost:61613</strong> (Default STOMP)</td>
+    <td>WASM Engine Loaded</td>
+    <td>
+      In: ${metrics.messages_published_total || 0} <br>
+      WASM Execs: ${metrics.wasm_executions_total || 0}
+    </td>
+    <td>
+      <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('default')">Reset Filters</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+}
+
+// --- Storage Tab: Consistent Ring, Buckets, Objects ---
+async function fetchStorageRing() {
+  try {
+    const res = await fetch('/api/proxy/store/console/cluster/ring');
+    if (!res.ok) return;
+    const ringData = await res.json();
+    
+    // Draw the ring
+    drawHashRing(ringData);
+    
+    // Render Node List legend
+    const list = document.getElementById('ring-nodes-list');
+    list.innerHTML = '';
+    
+    const nodes = ringData.Nodes || [];
+    if (nodes.length === 0) {
+      list.innerHTML = `<li class="text-muted">No nodes active in storage cluster</li>`;
+      return;
+    }
+    
+    nodes.forEach((node, index) => {
+      const color = NODE_COLORS[index % NODE_COLORS.length];
+      const li = document.createElement('li');
+      li.className = 'ring-node-item';
+      li.innerHTML = `
+        <span class="node-color-dot" style="background-color: ${color}"></span>
+        <span>Node: <strong>${node}</strong></span>
+      `;
+      list.appendChild(li);
+    });
+  } catch (err) {
+    logEvent('error', `Failed to load consistent ring: ${err.message}`);
+  }
+}
+
+async function fetchBuckets() {
+  try {
+    // S3 client bucket listing fallback
+    const res = await fetch('/api/proxy/store/console/metrics');
+    if (!res.ok) return;
+    const metrics = await res.json();
+    
+    // In our simplified mock or local store, let's render buckets
+    const containers = document.getElementById('buckets-container');
+    containers.innerHTML = '';
+    
+    const bucketsCount = metrics.BucketsCount || 0;
+    if (bucketsCount === 0) {
+      containers.innerHTML = `<span class="text-muted p-2">No buckets</span>`;
+      return;
+    }
+    
+    // If there are buckets, fetch/render names
+    // For local convenience, let's load dummy buckets based on count or mock
+    const dummyBuckets = ['media-assets', 'logs', 'user-documents'].slice(0, bucketsCount);
+    if (dummyBuckets.length === 0) dummyBuckets.push('default-bucket');
+    
+    dummyBuckets.forEach(b => {
+      const div = document.createElement('div');
+      div.className = `bucket-item ${STATE.selectedBucket === b ? 'active' : ''}`;
+      div.innerHTML = `📁 ${b}`;
+      div.addEventListener('click', () => selectBucket(b));
+      containers.appendChild(div);
+    });
+  } catch (err) {
+    logEvent('error', `Failed to load buckets: ${err.message}`);
+  }
+}
+
+function selectBucket(name) {
+  STATE.selectedBucket = name;
+  document.getElementById('current-bucket-name').textContent = name;
+  document.querySelectorAll('.bucket-item').forEach(el => {
+    el.classList.toggle('active', el.textContent.includes(name));
+  });
+  fetchObjects(name);
+}
+
+async function fetchObjects(bucket) {
+  const tbody = document.querySelector('#objects-table tbody');
+  tbody.innerHTML = `<tr><td colspan="3" class="text-center">Loading objects...</td></tr>`;
+  
+  try {
+    // Simulate S3 object listing via proxy
+    const dummyObjects = [
+      { key: 'images/hero.png', size: '2.4 MB', modified: '2026-06-17 12:04' },
+      { key: 'docs/guide.pdf', size: '420 KB', modified: '2026-06-17 14:15' },
+      { key: 'backup.zip', size: '84.2 MB', modified: '2026-06-17 15:02' }
+    ];
+    
+    tbody.innerHTML = '';
+    dummyObjects.forEach(obj => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono);">${obj.key}</td>
+        <td>${obj.size}</td>
+        <td>${obj.modified}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Failed to load objects</td></tr>`;
+  }
+}
+
+// --- Traces Tab: OpenTelemetry waterfall ---
+async function fetchTraces() {
+  const container = document.getElementById('traces-timeline');
+  container.innerHTML = `<p class="text-center">Fetching OpenTelemetry trace spans...</p>`;
+  
+  try {
+    const res = await fetch('/api/proxy/store/console/traces');
+    if (!res.ok) {
+      container.innerHTML = `<p class="text-center text-muted">OTel endpoints not responding</p>`;
+      return;
+    }
+    const spans = await res.json();
+    STATE.traces = spans || [];
+    
+    renderTracesTimeline();
+  } catch (err) {
+    container.innerHTML = `<p class="text-center text-danger">Error: ${err.message}</p>`;
+  }
+}
+
+function renderTracesTimeline() {
+  const container = document.getElementById('traces-timeline');
+  container.innerHTML = '';
+  
+  if (STATE.traces.length === 0) {
+    container.innerHTML = `<p class="text-center text-muted">No recent trace spans captured</p>`;
+    return;
+  }
+  
+  // Calculate relative widths based on latency
+  let maxDur = 1;
+  STATE.traces.forEach(s => {
+    if (s.DurationNs > maxDur) maxDur = s.DurationNs;
+  });
+  
+  STATE.traces.forEach(span => {
+    const row = document.createElement('div');
+    row.className = 'trace-span-row';
+    
+    const durMs = (span.DurationNs / 1000000).toFixed(2);
+    const widthPct = Math.max(2, (span.DurationNs / maxDur) * 100);
+    const startStr = new Date(span.StartTime).toLocaleTimeString();
+    
+    row.innerHTML = `
+      <div class="span-header">
+        <div>
+          <span class="span-name">${span.Name}</span>
+          <span class="span-service">${span.ServiceName || 'servstore'}</span>
+        </div>
+        <div style="font-family:var(--font-mono); font-size:0.75rem;">
+          ${durMs} ms <span style="color:var(--text-muted)">@ ${startStr}</span>
+        </div>
+      </div>
+      <div class="span-bar-wrapper">
+        <div class="span-bar" style="width: ${widthPct}%"></div>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+
+// --- Consistent Hash Ring Drawing ---
+function drawHashRing(ringData) {
+  const canvas = document.getElementById('ring-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  const width = canvas.width;
+  const height = canvas.height;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = width / 2 - 30;
+  
+  ctx.clearRect(0, 0, width, height);
+  
+  // Draw circular track
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  
+  const nodes = ringData.Nodes || [];
+  const tokens = ringData.Tokens || []; // token keys
+  const tokenToNode = ringData.TokenToNode || {};
+  
+  if (nodes.length === 0) {
+    // Draw empty ring text
+    ctx.font = '14px Outfit';
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.textAlign = 'center';
+    ctx.fillText('No active storage cluster', centerX, centerY);
+    return;
+  }
+  
+  // Distribute nodes visually on the ring
+  nodes.forEach((node, index) => {
+    const angle = (index / nodes.length) * 2 * Math.PI - Math.PI / 2;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+    
+    const color = NODE_COLORS[index % NODE_COLORS.length];
+    
+    // Draw glowing node dot
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
+    ctx.fill();
+    ctx.shadowBlur = 0; // reset
+    
+    // Draw node name label
+    ctx.font = 'bold 10px Outfit';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(node.split(':')[0], x, y - 16);
+  });
+}
+
+function initRingCanvas() {
+  // Mock ring visualizer if cluster is down
+  drawHashRing({
+    Nodes: ['node1:8081', 'node2:8081', 'node3:8081']
+  });
+}
+
+// --- Interactive Forms & Submissions ---
+function initForms() {
+  // Modal toggle
+  const modal = document.getElementById('add-route-modal');
+  document.getElementById('btn-add-route').addEventListener('click', () => {
+    modal.classList.add('active');
+  });
+  document.getElementById('modal-close-btn').addEventListener('click', () => {
+    modal.classList.remove('active');
+  });
+  
+  // Register API Route
+  document.getElementById('add-route-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const prefix = document.getElementById('route-prefix').value;
+    const target = document.getElementById('route-target').value;
+    const rpm = parseInt(document.getElementById('route-rpm').value) || 0;
+    const prompt_guard = document.getElementById('route-ai-guard').checked;
+    const semantic_cache = document.getElementById('route-ai-cache').checked;
+    const pii_redact = document.getElementById('route-ai-pii').checked;
+    
+    try {
+      const res = await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prefix, target, rate_limit_rpm: rpm, prompt_guard, semantic_cache, pii_redact
+        })
+      });
+      
+      if (res.ok) {
+        logEvent('gateway', `Added API Route: ${prefix} -> ${target}`);
+        modal.classList.remove('active');
+        e.target.reset();
+        refreshRoutesList();
+      } else {
+        alert('Failed to register route');
+      }
+    } catch (err) {
+      logEvent('error', `Route creation error: ${err.message}`);
+    }
+  });
+
+  // Hot-swap WASM Middleware
+  document.getElementById('wasm-upload-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fileInput = document.getElementById('wasm-file-input');
+    const nameInput = document.getElementById('wasm-name-input');
+    const statusMsg = document.getElementById('wasm-status-message');
+    
+    if (fileInput.files.length === 0) {
+      statusMsg.className = 'status-message error';
+      statusMsg.textContent = 'Please select a WASM file first';
+      return;
+    }
+    
+    const file = fileInput.files[0];
+    const name = nameInput.value.trim();
+    
+    try {
+      statusMsg.className = 'status-message';
+      statusMsg.textContent = 'Uploading and compiling WASM...';
+      
+      const fileBytes = await file.arrayBuffer();
+      const res = await fetch(`/api/proxy/gate/api/admin/middleware/${name}`, {
+        method: 'POST',
+        body: fileBytes
+      });
+      
+      if (res.ok) {
+        statusMsg.className = 'status-message success';
+        statusMsg.textContent = `✓ Middleware "${name}" successfully registered & hot-swapped!`;
+        logEvent('gateway', `WASM middleware "${name}" hot-swapped successfully.`);
+        nameInput.value = '';
+        fileInput.value = '';
+      } else {
+        const text = await res.text();
+        statusMsg.className = 'status-message error';
+        statusMsg.textContent = `Error: ${text}`;
+        logEvent('error', `WASM compilation failed: ${text}`);
+      }
+    } catch (err) {
+      statusMsg.className = 'status-message error';
+      statusMsg.textContent = `Network Error: ${err.message}`;
+    }
+  });
+
+  // Attach Queue transform
+  document.getElementById('queue-transform-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const topic = document.getElementById('transform-topic').value.trim();
+    const fileInput = document.getElementById('transform-file');
+    const status = document.getElementById('queue-transform-status');
+    
+    if (fileInput.files.length === 0) return;
+    
+    try {
+      status.className = 'status-message';
+      status.textContent = 'Registering WASM transform filter...';
+      
+      const fileBytes = await fileInput.files[0].arrayBuffer();
+      const res = await fetch(`/api/proxy/queue/api/topics/${topic}/transform`, {
+        method: 'POST',
+        body: fileBytes
+      });
+      
+      if (res.ok) {
+        status.className = 'status-message success';
+        status.textContent = `✓ Transform filter registered for topic: ${topic}`;
+        logEvent('queue', `WASM transform attached to queue: ${topic}`);
+      } else {
+        const errText = await res.text();
+        status.className = 'status-message error';
+        status.textContent = `Error: ${errText}`;
+      }
+    } catch (err) {
+      status.className = 'status-message error';
+      status.textContent = `Error: ${err.message}`;
+    }
+  });
+
+  // Publish STOMP Message
+  document.getElementById('publish-message-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const topic = document.getElementById('pub-topic').value;
+    const payload = document.getElementById('pub-payload').value;
+    const status = document.getElementById('publish-status');
+    
+    try {
+      const res = await fetch('/api/proxy/queue/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, payload })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        status.className = 'status-message success';
+        status.textContent = `✓ Delivered: ${data.delivered_payload}`;
+        logEvent('queue', `STOMP message published to topic [${topic}]: ${payload}`);
+      } else {
+        const errText = await res.text();
+        status.className = 'status-message error';
+        status.textContent = `Failed: ${errText}`;
+      }
+    } catch (err) {
+      status.className = 'status-message error';
+      status.textContent = `Error: ${err.message}`;
+    }
+  });
+
+  // Hash Ring Placement Trace Checker
+  document.getElementById('btn-check-placement').addEventListener('click', async () => {
+    const bucket = document.getElementById('placement-bucket').value.trim();
+    const key = document.getElementById('placement-key').value.trim();
+    const resultBox = document.getElementById('placement-result');
+    
+    if (!bucket || !key) {
+      alert('Please fill out both bucket and key');
+      return;
+    }
+    
+    try {
+      const res = await fetch(`/api/proxy/store/console/cluster/placement?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`);
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('placement-node-id').textContent = data.node_id;
+        document.getElementById('placement-node-addr').textContent = data.address;
+        resultBox.style.display = 'block';
+        logEvent('store', `Traced key [${bucket}/${key}] -> Node: ${data.node_id}`);
+      } else {
+        alert('Placement check failed');
+      }
+    } catch (err) {
+      alert('Network Error during placement check');
+    }
+  });
+  
+  // Telemetry triggers
+  document.getElementById('btn-refresh-traces').addEventListener('click', fetchTraces);
+  document.getElementById('btn-clear-logs').addEventListener('click', () => {
+    document.getElementById('console-logs-screen').innerHTML = '';
+  });
+}
+
+// --- Console Log Event helper ---
+function logEvent(service, message) {
+  const consoleScreen = document.getElementById('console-logs-screen');
+  if (!consoleScreen) return;
+  
+  const line = document.createElement('div');
+  line.className = `log-line ${service}`;
+  
+  const time = new Date().toLocaleTimeString();
+  line.innerHTML = `[${time}] <span class="tag">[${service.toUpperCase()}]</span> ${message}`;
+  
+  consoleScreen.appendChild(line);
+  consoleScreen.scrollTop = consoleScreen.scrollHeight;
+}
