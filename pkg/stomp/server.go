@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -13,19 +14,40 @@ import (
 )
 
 type Server struct {
-	addr   string
-	engine *broker.BrokerEngine
+	addr      string
+	engine    *broker.BrokerEngine
+	username  string
+	passcode  string
+	tlsCert   string
+	tlsKey    string
 }
 
-func NewServer(addr string, engine *broker.BrokerEngine) *Server {
+func NewServer(addr string, engine *broker.BrokerEngine, username, passcode, tlsCert, tlsKey string) *Server {
 	return &Server{
-		addr:   addr,
-		engine: engine,
+		addr:     addr,
+		engine:   engine,
+		username: username,
+		passcode: passcode,
+		tlsCert:  tlsCert,
+		tlsKey:   tlsKey,
 	}
 }
 
 func (s *Server) Start() error {
-	listener, err := net.Listen("tcp", s.addr)
+	var listener net.Listener
+	var err error
+
+	if s.tlsCert != "" && s.tlsKey != "" {
+		cert, certErr := tls.LoadX509KeyPair(s.tlsCert, s.tlsKey)
+		if certErr != nil {
+			return fmt.Errorf("tls: failed to load certificates: %w", certErr)
+		}
+		cfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+		listener, err = tls.Listen("tcp", s.addr, cfg)
+	} else {
+		listener, err = net.Listen("tcp", s.addr)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -111,23 +133,55 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
+	authenticated := false
+
+	// If no username/passcode is required, default to authenticated
+	if s.username == "" && s.passcode == "" {
+		authenticated = true
+	}
+
 	for {
 		frame, err := readFrame(reader)
 		if err != nil {
 			return
 		}
 
-		switch frame.Command {
-		case "CONNECT":
+		if frame.Command == "CONNECT" {
+			login := frame.Headers["login"]
+			passcode := frame.Headers["passcode"]
+
+			if !authenticated && (login != s.username || passcode != s.passcode) {
+				_ = writeFrame(writer, "ERROR", map[string]string{"message": "Authentication failed"}, "Invalid credentials")
+				writer.Flush()
+				return
+			}
+
+			authenticated = true
 			writeFrame(writer, "CONNECTED", map[string]string{"version": "1.2"}, "")
 			writer.Flush()
+			continue
+		}
 
+		if !authenticated {
+			_ = writeFrame(writer, "ERROR", map[string]string{"message": "Not authenticated"}, "Send CONNECT frame first")
+			writer.Flush()
+			return
+		}
+
+		switch frame.Command {
 		case "SEND":
 			destination := frame.Headers["destination"]
 			if destination == "" {
 				continue
 			}
-			_, _ = s.engine.Publish(context.Background(), destination, frame.Body)
+
+			// Capture traceparent header for context propagation
+			ctx := context.Background()
+			if tp, exists := frame.Headers["traceparent"]; exists {
+				ctx = context.WithValue(ctx, "traceparent", tp)
+			}
+
+			_, _ = s.engine.Publish(ctx, destination, frame.Body)
 
 		case "SUBSCRIBE":
 			destination := frame.Headers["destination"]

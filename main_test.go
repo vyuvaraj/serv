@@ -27,12 +27,12 @@ func TestServQueueWasmTransformIntegration(t *testing.T) {
 	// 1. Initialize broker engine
 	engine := broker.NewBrokerEngine()
 
-	// 2. Start STOMP server
-	stompServer := stomp.NewServer("127.0.0.1:61614", engine)
+	// 2. Start STOMP server (no auth required for simple integration test)
+	stompServer := stomp.NewServer("127.0.0.1:61614", engine, "", "", "", "")
 	go stompServer.Start()
 
-	// 3. Start Web server
-	webServer := web.NewServer("127.0.0.1:8083", engine)
+	// 3. Start Web server (no auth required here)
+	webServer := web.NewServer("127.0.0.1:8083", engine, "", "", "")
 	go webServer.Start()
 
 	// Wait for servers to spin up
@@ -68,14 +68,23 @@ func TestServQueueWasmTransformIntegration(t *testing.T) {
 
 func TestHTTPPublish(t *testing.T) {
 	engine := broker.NewBrokerEngine()
-	webServer := web.NewServer("127.0.0.1:8084", engine)
+	// Test with active authentication token
+	token := "test-token"
+	webServer := web.NewServer("127.0.0.1:8084", engine, token, "", "")
 	go webServer.Start()
 	time.Sleep(200 * time.Millisecond)
 
 	subChan := engine.Subscribe("test-http")
 
 	reqBody := []byte(`{"topic":"test-http","payload":"http-message"}`)
-	resp, err := http.Post("http://127.0.0.1:8084/api/publish", "application/json", bytes.NewReader(reqBody))
+	req, err := http.NewRequest("POST", "http://127.0.0.1:8084/api/publish", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Failed to post: %v", err)
 	}
@@ -94,8 +103,14 @@ func TestHTTPPublish(t *testing.T) {
 		t.Fatal("Timeout waiting for HTTP published message")
 	}
 
-	// Verify metrics endpoint
-	statsResp, err := http.Get("http://127.0.0.1:8084/api/stats")
+	// Verify metrics endpoint with auth
+	reqStats, err := http.NewRequest("GET", "http://127.0.0.1:8084/api/stats", nil)
+	if err != nil {
+		t.Fatalf("Failed to create stats request: %v", err)
+	}
+	reqStats.Header.Set("Authorization", "Bearer "+token)
+
+	statsResp, err := http.DefaultClient.Do(reqStats)
 	if err != nil {
 		t.Fatalf("Failed to fetch stats: %v", err)
 	}

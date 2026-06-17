@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,24 +11,56 @@ import (
 )
 
 type Server struct {
-	addr   string
-	engine *broker.BrokerEngine
+	addr      string
+	engine    *broker.BrokerEngine
+	authToken string
+	tlsCert   string
+	tlsKey    string
 }
 
-func NewServer(addr string, engine *broker.BrokerEngine) *Server {
+func NewServer(addr string, engine *broker.BrokerEngine, authToken, tlsCert, tlsKey string) *Server {
 	return &Server{
-		addr:   addr,
-		engine: engine,
+		addr:      addr,
+		engine:    engine,
+		authToken: authToken,
+		tlsCert:   tlsCert,
+		tlsKey:    tlsKey,
 	}
 }
 
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/topics/", s.handleRegisterTransform)
-	mux.HandleFunc("/api/publish", s.handlePublish)
-	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/topics/", s.authorize(s.handleRegisterTransform))
+	mux.HandleFunc("/api/publish", s.authorize(s.handlePublish))
+	mux.HandleFunc("/api/stats", s.authorize(s.handleStats))
 
+	if s.tlsCert != "" && s.tlsKey != "" {
+		return http.ListenAndServeTLS(s.addr, s.tlsCert, s.tlsKey, mux)
+	}
 	return http.ListenAndServe(s.addr, mux)
+}
+
+func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.authToken == "" {
+			next(w, r)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Unauthorized: Missing authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token != s.authToken {
+			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 func (s *Server) handleRegisterTransform(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +114,13 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.engine.Publish(r.Context(), req.Topic, req.Payload)
+	// Propagate traceparent header if received
+	ctx := r.Context()
+	if tp := r.Header.Get("traceparent"); tp != "" {
+		ctx = context.WithValue(ctx, "traceparent", tp)
+	}
+
+	res, err := s.engine.Publish(ctx, req.Topic, req.Payload)
 	if err != nil {
 		http.Error(w, "Transform error: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"servqueue/pkg/broker"
 	"servqueue/pkg/otel"
@@ -15,8 +16,17 @@ func main() {
 
 	engine := broker.NewBrokerEngine()
 
-	stompServer := stomp.NewServer(":61613", engine)
-	webServer := web.NewServer(":8082", engine)
+	// Read credentials and TLS certificate config from environment or default
+	stompUser := "admin"
+	stompPass := "secret"
+	apiToken := "secret-token"
+
+	// TLS config from environment
+	tlsCert := os.Getenv("TLS_CERT_FILE")
+	tlsKey := os.Getenv("TLS_KEY_FILE")
+	
+	stompServer := stomp.NewServer(":61613", engine, stompUser, stompPass, tlsCert, tlsKey)
+	webServer := web.NewServer(":8082", engine, apiToken, tlsCert, tlsKey)
 
 	log.Println("Starting ServQueue STOMP server on tcp://:61613...")
 	go func() {
