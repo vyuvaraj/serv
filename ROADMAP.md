@@ -11,13 +11,14 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 - [x] **WASM Sandbox Integration**: Wazero-based runner that passes messages through compiled `.wasm` modules.
 
 
+
 ---
 
 ## Phase 2: Production Observability, Security & Performance
 - [ ] **TLS Support**: Enable native TLS encryption for both the TCP STOMP server and the HTTP Management interface.
-- [ ] **Security Authentication**: Implement basic/token-based auth for HTTP APIs and username/passcodes in STOMP headers (`login`/`passcode` fields).
-- [ ] **OpenTelemetry Metrics & Tracing**: Instrument the engine using standard OTel APIs, tracking broker throughput, message latencies, WASM transform execution times, and trace spans.
-- [ ] **Module Caching**: Maintain compiled modules in-memory in `wazero` to eliminate instantiation latency.
+- [x] **Security Authentication**: Implement basic/token-based auth for HTTP APIs and username/passcodes in STOMP headers (`login`/`passcode` fields).
+- [x] **OpenTelemetry Metrics & Tracing**: Instrument the engine using standard OTel APIs, tracking broker throughput, message latencies, WASM transform execution times, and trace spans.
+- [x] **Module Caching**: Maintain compiled modules in-memory in `wazero` to eliminate instantiation latency.
 - [ ] **Direct Memory Passing**: Transition stdin/stdout pipes to guest-allocated shared memory buffers to reduce virtualization and allocation overhead.
 
 ---
@@ -37,7 +38,8 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 ---
 
 ## Phase 5: Deep Ecosystem Integration
-- [ ] **Serv-lang Dedicated Protocol Driver**: Expand `runtime/broker.go` with a dedicated `servqueue://` driver that supports natively uploading WASM binaries, custom authentication schemas, and advanced queue options directly from `.srv` code.
+- [x] **Serv-lang Dedicated Protocol Driver**: Expand `runtime/broker.go` with a dedicated `servqueue://` driver that supports natively uploading WASM binaries, custom authentication schemas, and advanced queue options directly from `.srv` code.
 - [ ] **ServConsole Integration**: Feed broker throughput, active subscriptions, and WASM performance stats directly to the central Serv dashboard.
 - [ ] **Auto trace propagation**: Automatically pass trace context seamlessly into the WASM transform runtime environments.
+
 
