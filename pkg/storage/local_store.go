@@ -1470,6 +1470,57 @@ func (s *LocalStore) DeleteUserPolicy(ctx context.Context, username string) erro
 	return nil
 }
 
+func (s *LocalStore) PutSchema(ctx context.Context, service string, schema []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := []byte("s:schema:" + service)
+	return s.pebbleDB.Set(key, schema, pebble.Sync)
+}
+
+func (s *LocalStore) GetSchema(ctx context.Context, service string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	key := []byte("s:schema:" + service)
+	data, closer, err := s.pebbleDB.Get(key)
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return nil, os.ErrNotExist
+		}
+		return nil, err
+	}
+	defer closer.Close()
+	
+	val := make([]byte, len(data))
+	copy(val, data)
+	return val, nil
+}
+
+func (s *LocalStore) ListSchemas(ctx context.Context) (map[string][]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	schemas := make(map[string][]byte)
+	prefix := []byte("s:schema:")
+	iter, err := s.pebbleDB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	for iter.First(); iter.Valid() && strings.HasPrefix(string(iter.Key()), "s:schema:"); iter.Next() {
+		key := string(iter.Key())
+		service := strings.TrimPrefix(key, "s:schema:")
+		val := make([]byte, len(iter.Value()))
+		copy(val, iter.Value())
+		schemas[service] = val
+	}
+	return schemas, nil
+}
+
 func (s *LocalStore) ListLocalKeys(ctx context.Context) ([]LocalKey, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

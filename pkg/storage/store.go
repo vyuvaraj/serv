@@ -85,6 +85,10 @@ type StorageEngine interface {
 	GetUserPolicy(ctx context.Context, username string) ([]byte, error)
 	DeleteUserPolicy(ctx context.Context, username string) error
 
+	PutSchema(ctx context.Context, service string, schema []byte) error
+	GetSchema(ctx context.Context, service string) ([]byte, error)
+	ListSchemas(ctx context.Context) (map[string][]byte, error)
+
 	ListLocalKeys(ctx context.Context) ([]LocalKey, error)
 	SemanticSearch(ctx context.Context, bucket, query string, limit int) ([]*ObjectVersion, error)
 

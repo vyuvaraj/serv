@@ -407,6 +407,64 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if path == "/console/schema" {
+		switch r.Method {
+		case http.MethodPost:
+			service := r.URL.Query().Get("service")
+			if service == "" {
+				http.Error(w, `{"error":"Missing service parameter"}`, http.StatusBadRequest)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Bad Request", http.StatusBadRequest)
+				return
+			}
+			if err := wc.store.PutSchema(r.Context(), service, body); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"success"}`))
+			return
+		case http.MethodGet:
+			service := r.URL.Query().Get("service")
+			if service != "" {
+				data, err := wc.store.GetSchema(r.Context(), service)
+				if err != nil {
+					if os.IsNotExist(err) {
+						http.Error(w, `{"error":"Schema not found"}`, http.StatusNotFound)
+						return
+					}
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(data)
+				return
+			}
+			schemas, err := wc.store.ListSchemas(r.Context())
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			res := make(map[string]interface{})
+			for k, v := range schemas {
+				var jsonVal interface{}
+				if err := json.Unmarshal(v, &jsonVal); err == nil {
+					res[k] = jsonVal
+				} else {
+					res[k] = string(v)
+				}
+			}
+			json.NewEncoder(w).Encode(res)
+			return
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}
 
 	if strings.HasPrefix(path, "/console/users/") && strings.HasSuffix(path, "/policy") {
 		parts := strings.Split(path, "/")
