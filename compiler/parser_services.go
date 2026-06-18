@@ -43,6 +43,13 @@ func (p *Parser) parseStoreStatement() Statement {
 	return stmt
 }
 
+func (p *Parser) parseSearchStatement() Statement {
+	stmt := &SearchStmt{Token: p.curToken}
+	p.nextToken()
+	stmt.Value = p.parseExpression(LOWEST)
+	return stmt
+}
+
 
 
 
@@ -124,7 +131,7 @@ func (p *Parser) parseRouteStatement() Statement {
 		stmt.Middlewares = []string{}
 		for p.peekToken.Type != TOKEN_RBRACKET && p.peekToken.Type != TOKEN_EOF {
 			p.nextToken()
-			if p.curToken.Type == TOKEN_IDENT {
+			if p.curToken.Type == TOKEN_IDENT || isKeywordToken(p.curToken.Type) {
 				stmt.Middlewares = append(stmt.Middlewares, p.curToken.Literal)
 			}
 			if p.peekToken.Type == TOKEN_COMMA {
@@ -483,7 +490,10 @@ func (p *Parser) parseDeclareStatement() Statement {
 func (p *Parser) parseMiddlewareDeclaration() Statement {
 	stmt := &MiddlewareDecl{Token: p.curToken}
 
-	if !p.expectPeek(TOKEN_IDENT) {
+	// Allow keywords (auth, mail, search, etc.) as middleware names
+	p.nextToken()
+	if p.curToken.Type != TOKEN_IDENT && !isKeywordToken(p.curToken.Type) {
+		p.errors = append(p.errors, fmt.Sprintf("expected middleware name, got %s", p.curToken.Type))
 		return nil
 	}
 	stmt.Name = p.curToken.Literal

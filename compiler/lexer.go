@@ -15,6 +15,7 @@ const (
 	// Keywords
 	TOKEN_AUTH       TokenType = "AUTH"
 	TOKEN_MAIL       TokenType = "MAIL"
+	TOKEN_SEARCH     TokenType = "SEARCH"
 	TOKEN_BROKER     TokenType = "BROKER"
 	TOKEN_AI         TokenType = "AI"
 	TOKEN_SERVER     TokenType = "SERVER"
@@ -508,6 +509,7 @@ func isDigit(ch byte) bool {
 var keywords = map[string]TokenType{
 	"auth":      TOKEN_AUTH,
 	"mail":      TOKEN_MAIL,
+	"search":    TOKEN_SEARCH,
 	"broker":    TOKEN_BROKER,
 	"ai":       TOKEN_AI,
 	"server":   TOKEN_SERVER,
@@ -574,4 +576,15 @@ func lookupIdent(ident string) TokenType {
 		return tok
 	}
 	return TOKEN_IDENT
+}
+
+// isKeywordToken returns true if the token type is a language keyword.
+// Used to allow keywords as identifiers in contexts like middleware names.
+func isKeywordToken(t TokenType) bool {
+	for _, kw := range keywords {
+		if kw == t {
+			return true
+		}
+	}
+	return false
 }
