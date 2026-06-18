@@ -294,6 +294,80 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.incConn(selectedTarget)
 	defer h.decConn(selectedTarget)
 
+	// Webhook bridge check
+	if strings.HasPrefix(selectedTarget, "servqueue://") {
+		topic := strings.TrimPrefix(selectedTarget, "servqueue://")
+		// Read body
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			otel.EndSpan(span, err, map[string]interface{}{})
+			http.Error(w, "Bad Request: failed to read body", http.StatusBadRequest)
+			return
+		}
+		r.Body.Close()
+
+		// Resolve queueUrl
+		queueUrl := "http://localhost:8082"
+		if rawDisc := os.Getenv("SERVVERSE_DISCOVERY"); rawDisc != "" {
+			var manifest struct {
+				Queue string `json:"queue"`
+			}
+			if json.Unmarshal([]byte(rawDisc), &manifest) == nil && manifest.Queue != "" {
+				queueUrl = manifest.Queue
+			}
+		}
+
+		// Send request to ServQueue API
+		publishUrl := fmt.Sprintf("%s/api/publish", strings.TrimSuffix(queueUrl, "/"))
+		payloadMap := map[string]string{
+			"topic":   topic,
+			"payload": string(bodyBytes),
+		}
+		jsonPayload, _ := json.Marshal(payloadMap)
+
+		req, err := http.NewRequestWithContext(r.Context(), "POST", publishUrl, bytes.NewReader(jsonPayload))
+		if err != nil {
+			otel.EndSpan(span, err, map[string]interface{}{})
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer secret-token") // default authorization
+
+		// Propagate traceparent if active
+		if traceparent != "" {
+			req.Header.Set("traceparent", traceparent)
+		}
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			otel.EndSpan(span, err, map[string]interface{}{})
+			http.Error(w, "Service Unavailable: failed to bridge to queue", http.StatusServiceUnavailable)
+			return
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 400 {
+			otel.EndSpan(span, fmt.Errorf("queue publish returned %d", resp.StatusCode), map[string]interface{}{})
+			http.Error(w, fmt.Sprintf("Queue Error: %s", string(respBody)), resp.StatusCode)
+			return
+		}
+
+		// Return success to the HTTP caller
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"Event bridged to topic: ` + topic + `"}`))
+
+		otel.EndSpan(span, nil, map[string]interface{}{
+			"http.route":   matchedRoute.Prefix,
+			"proxy.target": selectedTarget,
+			"bridge.topic": topic,
+		})
+		return
+	}
+
 	targetURL, err := url.Parse(selectedTarget)
 	if err != nil {
 		otel.EndSpan(span, err, map[string]interface{}{})

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -534,5 +536,81 @@ func TestWebSocketProxying(t *testing.T) {
 	n, _ = clientConn.Read(buf)
 	if string(buf[:n]) != "hello websocket" {
 		t.Errorf("Expected echo message 'hello websocket', got %q", string(buf[:n]))
+	}
+}
+
+func TestServGateWebhookBridge(t *testing.T) {
+	// 1. Setup mock ServQueue server
+	receivedPayload := ""
+	receivedTopic := ""
+	mockQueue := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/api/publish" {
+			var body struct {
+				Topic   string `json:"topic"`
+				Payload string `json:"payload"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				receivedTopic = body.Topic
+				receivedPayload = body.Payload
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"success"}`))
+			return
+		}
+		http.Error(w, "Not Found", http.StatusNotFound)
+	}))
+	defer mockQueue.Close()
+
+	// Configure environment variables so Gateway resolves the mock queue server address
+	os.Setenv("SERVVERSE_DISCOVERY", fmt.Sprintf(`{"queue":"%s"}`, mockQueue.URL))
+	defer os.Unsetenv("SERVVERSE_DISCOVERY")
+
+	// 2. Setup gateway handler with servqueue:// target
+	routes := []proxy.Route{
+		{
+			Prefix: "/webhook/orders",
+			Target: "servqueue://orders",
+		},
+	}
+
+	wasmManager, err := wasm.GetMiddlewareManager(context.Background())
+	if err != nil {
+		t.Fatalf("WASM setup failed: %v", err)
+	}
+
+	gatewayHandler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gatewayServer := httptest.NewServer(gatewayHandler)
+	defer gatewayServer.Close()
+
+	// 3. POST request to gateway webhook route
+	client := &http.Client{Timeout: 2 * time.Second}
+	postData := `{"item":"gadget","qty":2}`
+	resp, err := client.Post(gatewayServer.URL+"/webhook/orders", "application/json", strings.NewReader(postData))
+	if err != nil {
+		t.Fatalf("Failed to execute request to gateway: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 OK, got %d", resp.StatusCode)
+	}
+
+	var res struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if res.Status != "success" || !strings.Contains(res.Message, "orders") {
+		t.Errorf("Unexpected response: %+v", res)
+	}
+
+	if receivedTopic != "orders" {
+		t.Errorf("Expected bridged topic to be 'orders', got %q", receivedTopic)
+	}
+	if receivedPayload != postData {
+		t.Errorf("Expected bridged payload to be %q, got %q", postData, receivedPayload)
 	}
 }
