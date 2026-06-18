@@ -52,9 +52,9 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 ---
 
 ## Phase 7: Serv-verse Infrastructure Integrations
-- [ ] **ServGate API Gateway Webhook Triggers**: Support registering webhooks in `ServGate` that publish directly to `ServQueue` topics on incoming HTTP events.
+- [x] **ServGate API Gateway Webhook Triggers**: Support registering webhooks in `ServGate` that publish directly to `ServQueue` topics on incoming HTTP events.
 - [ ] **ServConsole Unified Control Plane**: Expose complete topic administration, WAL inspection, and WASM performance debug panels directly in the central dashboard.
-- [ ] **Dynamic WASM hot-swap without dropping connections**: Support uploading new WASM transform modules via the console without dropping active subscriber TCP STOMP connections.
+- [x] **Dynamic WASM hot-swap without dropping connections**: Support uploading new WASM transform modules via the console without dropping active subscriber TCP STOMP connections.
 
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
