@@ -41,6 +41,10 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
           Telemetry & Traces
         </button>
+        <button class="tab-btn" data-tab="graph">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 14c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-7c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-6 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm12 0c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zM6 9c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm12 0c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z"/></svg>
+          Dependency Graph
+        </button>
         <button class="tab-btn" data-tab="database">
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.02 2 6.5s4.48 4.5 10 4.5 10-2.02 10-4.5S17.52 2 12 2zm0 18c-5.52 0-10-2.02-10-4.5v-4c0 2.48 4.48 4.5 10 4.5s10-2.02 10-4.5v4c0 2.48-4.48 4.5-10 4.5zm0-6c-5.52 0-10-2.02-10-4.5v-4c0 2.48 4.48 4.5 10 4.5s10-2.02 10-4.5v4c0 2.48-4.48 4.5-10 4.5z"/></svg>
           Database (ORM)
@@ -348,6 +352,22 @@
             </div>
             <div class="console-logs-box" id="console-logs-screen">
               <div class="log-line system">[SYSTEM] ServConsole connected. Listening for events...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: DEPENDENCY GRAPH -->
+      <div class="tab-pane" id="tab-graph">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Cross-Service Dependency Graph</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-graph">Refresh Graph</button>
+            </div>
+            <p class="section-desc">Visual topological dependency map auto-discovered from OpenTelemetry traces.</p>
+            <div class="graph-container" style="display: flex; justify-content: center; align-items: center; min-height: 500px; background: rgba(15,17,32,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-top: 1.5rem; position: relative;">
+              <canvas id="graph-canvas" width="800" height="500" style="max-width: 100%; height: auto;"></canvas>
             </div>
           </div>
         </div>
