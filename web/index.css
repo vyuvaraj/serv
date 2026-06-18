@@ -978,3 +978,44 @@ tr:hover td {
   color: var(--text-secondary);
 }
 
+/* ─── SQL Query Workbench ─────────────────────────────────────────────────── */
+
+.workbench-form-grid select,
+.workbench-form-grid input,
+.workbench-form-grid textarea {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.workbench-form-grid select:focus,
+.workbench-form-grid input:focus,
+.workbench-form-grid textarea:focus {
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+#wb-results-table th {
+  background: rgba(15, 17, 32, 0.85);
+  color: #fff;
+  font-weight: 600;
+  padding: 0.75rem 1rem;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+#wb-results-table td {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#wb-results-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+  color: #fff;
+}
+

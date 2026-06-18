@@ -1113,4 +1113,180 @@ document.addEventListener('DOMContentLoaded', () => {
   if (refreshDbBtn) {
     refreshDbBtn.addEventListener('click', fetchDatabaseSchemas);
   }
+
+  initQueryWorkbench();
 });
+
+// ─── SQL Query Workbench ───────────────────────────────────────────────────
+
+function initQueryWorkbench() {
+  const driverSelect = document.getElementById('wb-driver-select');
+  const connStrInput = document.getElementById('wb-conn-str');
+  const connHint = document.getElementById('wb-conn-hint');
+  const queryText = document.getElementById('wb-query-text');
+  const runQueryBtn = document.getElementById('btn-run-query');
+
+  if (!driverSelect || !connStrInput || !queryText || !runQueryBtn) return;
+
+  const dsnDefaults = {
+    sqlite: {
+      dsn: './dev.db',
+      hint: 'Filepath for SQLite database (e.g. ./dev.db or C:/path/to/db.db)',
+      query: 'SELECT name FROM sqlite_master WHERE type="table" AND name NOT LIKE "sqlite_%";'
+    },
+    postgres: {
+      dsn: 'postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable',
+      hint: 'PostgreSQL connection URL DSN.',
+      query: 'SELECT table_name, table_schema FROM information_schema.tables WHERE table_schema = \'public\';'
+    },
+    mysql: {
+      dsn: 'root:secret@tcp(localhost:3306)/mysql',
+      hint: 'MySQL/MariaDB connection DSN (username:password@tcp(host:port)/dbname).',
+      query: 'SHOW TABLES;'
+    },
+    oracle: {
+      dsn: 'oracle://user:pass@localhost:1521/xe',
+      hint: 'Oracle connection string DSN.',
+      query: 'SELECT table_name FROM user_tables;'
+    }
+  };
+
+  // Set initial default query
+  queryText.value = dsnDefaults.sqlite.query;
+
+  driverSelect.addEventListener('change', () => {
+    const driver = driverSelect.value;
+    const config = dsnDefaults[driver];
+    if (config) {
+      connStrInput.value = config.dsn;
+      connHint.textContent = config.hint;
+      queryText.value = config.query;
+    }
+  });
+
+  runQueryBtn.addEventListener('click', runSqlQuery);
+
+  // Ctrl+Enter shortcut in textarea
+  queryText.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      runSqlQuery();
+    }
+  });
+}
+
+async function runSqlQuery() {
+  const driverSelect = document.getElementById('wb-driver-select');
+  const connStrInput = document.getElementById('wb-conn-str');
+  const queryText = document.getElementById('wb-query-text');
+  const runQueryBtn = document.getElementById('btn-run-query');
+  const resultsContainer = document.getElementById('wb-results-container');
+  const errorAlert = document.getElementById('wb-error-alert');
+  const successAlert = document.getElementById('wb-success-alert');
+  const tableWrapper = document.getElementById('wb-table-wrapper');
+  const resultsTable = document.getElementById('wb-results-table');
+  const resultsStats = document.getElementById('wb-results-stats');
+
+  if (!driverSelect || !connStrInput || !queryText || !runQueryBtn) return;
+
+  const driver = driverSelect.value;
+  const connStr = connStrInput.value.trim();
+  const query = queryText.value.trim();
+
+  if (!connStr) {
+    alert('Please enter a connection string / DSN.');
+    return;
+  }
+  if (!query) {
+    alert('Please enter an SQL query to execute.');
+    return;
+  }
+
+  // Reset display
+  resultsContainer.style.display = 'block';
+  errorAlert.style.display = 'none';
+  successAlert.style.display = 'none';
+  tableWrapper.style.display = 'none';
+  resultsStats.textContent = 'Executing...';
+  runQueryBtn.disabled = true;
+  runQueryBtn.textContent = 'Running...';
+
+  try {
+    const res = await fetch('/api/db/query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ driver, connStr, query })
+    });
+
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+
+    if (!res.ok) {
+      const errMsg = await res.text();
+      throw new Error(errMsg || `HTTP Error ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (!data.success) {
+      errorAlert.style.display = 'block';
+      errorAlert.textContent = data.error || 'Unknown query execution error.';
+      resultsStats.textContent = 'Failed';
+      return;
+    }
+
+    resultsStats.textContent = `Executed in ${data.executionTimeMs}ms`;
+
+    if (data.isSelect) {
+      successAlert.style.display = 'block';
+      successAlert.textContent = `Success: Query returned ${data.rows ? data.rows.length : 0} rows.`;
+      
+      // Render Table
+      tableWrapper.style.display = 'block';
+      
+      // Headers
+      const thead = resultsTable.querySelector('thead');
+      thead.innerHTML = '';
+      const trHead = document.createElement('tr');
+      data.columns.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+
+      // Rows
+      const tbody = resultsTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      if (!data.rows || data.rows.length === 0) {
+        const trEmpty = document.createElement('tr');
+        trEmpty.innerHTML = `<td colspan="${data.columns.length}" class="text-center text-muted" style="padding: 2rem;">No rows returned.</td>`;
+        tbody.appendChild(trEmpty);
+      } else {
+        data.rows.forEach(row => {
+          const tr = document.createElement('tr');
+          row.forEach(cell => {
+            const td = document.createElement('td');
+            td.textContent = cell !== null ? String(cell) : 'NULL';
+            if (cell === null) td.style.fontStyle = 'italic';
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+      }
+    } else {
+      successAlert.style.display = 'block';
+      successAlert.textContent = `Success: Query executed. Rows Affected: ${data.rowsAffected !== undefined ? data.rowsAffected : 0}. Last Insert ID: ${data.lastInsertId !== undefined ? data.lastInsertId : '—'}.`;
+    }
+  } catch (err) {
+    errorAlert.style.display = 'block';
+    errorAlert.textContent = err.message;
+    resultsStats.textContent = 'Error';
+  } finally {
+    runQueryBtn.disabled = false;
+    runQueryBtn.textContent = 'Run Query';
+  }
+}

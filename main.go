@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -16,6 +17,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "github.com/glebarez/go-sqlite"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+	_ "github.com/sijms/go-ora/v2"
 )
 
 var (
@@ -186,6 +192,7 @@ func main() {
 	mux.HandleFunc("/api/cluster/rebalance", authorizeConsole(handleRebalance))
 	mux.HandleFunc("/api/discovery", handleDiscovery)
 	mux.HandleFunc("/api/audit-logs", authorizeConsole(handleGetAuditLogs))
+	mux.HandleFunc("/api/db/query", authorizeConsole(handleDbQuery))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -915,4 +922,169 @@ func getProxyActionName(prefix string, path string) string {
 	default:
 		return "Proxy Request"
 	}
+}
+
+func handleDbQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Driver  string `json:"driver"`
+		ConnStr string `json:"connStr"`
+		Query   string `json:"query"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	driver := strings.ToLower(req.Driver)
+	connStr := req.ConnStr
+	query := req.Query
+
+	if driver == "" || connStr == "" || query == "" {
+		http.Error(w, "Missing driver, connStr, or query", http.StatusBadRequest)
+		return
+	}
+
+	// Validate driver
+	switch driver {
+	case "sqlite", "sqlite3":
+		driver = "sqlite"
+		// convert sqlite:// prefix if present
+		if strings.HasPrefix(connStr, "sqlite://") {
+			connStr = strings.TrimPrefix(connStr, "sqlite://")
+		}
+	case "postgres", "postgresql":
+		driver = "postgres"
+	case "mysql":
+		driver = "mysql"
+	case "oracle":
+		driver = "oracle"
+	default:
+		http.Error(w, "Unsupported driver: "+req.Driver, http.StatusBadRequest)
+		return
+	}
+
+	// Connect to database
+	db, err := sql.Open(driver, connStr)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": false,
+			"error":   "Failed to open connection: " + err.Error(),
+		})
+		return
+	}
+	defer db.Close()
+
+	// Test connection
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(10 * time.Second)
+
+	startTime := time.Now()
+
+	// Detect if it is a SELECT-like query or an Exec query
+	isSelect := false
+	trimmedQuery := strings.TrimSpace(strings.ToUpper(query))
+	if strings.HasPrefix(trimmedQuery, "SELECT") ||
+		strings.HasPrefix(trimmedQuery, "SHOW") ||
+		strings.HasPrefix(trimmedQuery, "PRAGMA") ||
+		strings.HasPrefix(trimmedQuery, "DESCRIBE") ||
+		strings.HasPrefix(trimmedQuery, "DESC") ||
+		strings.HasPrefix(trimmedQuery, "EXPLAIN") {
+		isSelect = true
+	}
+
+	if isSelect {
+		rows, err := db.Query(query)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+		defer rows.Close()
+
+		cols, err := rows.Columns()
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "Failed to get columns: " + err.Error(),
+			})
+			return
+		}
+
+		results := [][]any{}
+		for rows.Next() {
+			rowValues := make([]any, len(cols))
+			rowPointers := make([]any, len(cols))
+			for i := range rowValues {
+				rowPointers[i] = &rowValues[i]
+			}
+
+			if err := rows.Scan(rowPointers...); err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{
+					"success": false,
+					"error":   "Row scanning failed: " + err.Error(),
+				})
+				return
+			}
+
+			// Clean up raw scanned types (e.g. []byte to string for display)
+			cleanedRow := make([]any, len(cols))
+			for i, v := range rowValues {
+				if b, ok := v.([]byte); ok {
+					cleanedRow[i] = string(b)
+				} else {
+					cleanedRow[i] = v
+				}
+			}
+			results = append(results, cleanedRow)
+		}
+
+		duration := time.Since(startTime).Milliseconds()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":         true,
+			"isSelect":        true,
+			"columns":         cols,
+			"rows":            results,
+			"executionTimeMs": duration,
+		})
+	} else {
+		res, err := db.Exec(query)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   err.Error(),
+			})
+			return
+		}
+
+		rowsAffected, _ := res.RowsAffected()
+		lastInsertId, _ := res.LastInsertId()
+		duration := time.Since(startTime).Milliseconds()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":         true,
+			"isSelect":        false,
+			"rowsAffected":    rowsAffected,
+			"lastInsertId":    lastInsertId,
+			"executionTimeMs": duration,
+		})
+	}
+
+	user := r.Header.Get("X-Console-User")
+	addAuditLog(user, fmt.Sprintf("SQL Query (%s): %.60s", driver, query), r.Method, r.URL.Path, http.StatusOK)
 }
