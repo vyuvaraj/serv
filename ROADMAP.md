@@ -57,7 +57,7 @@ This document outlines the planned evolutionary stages of **ServGate** to evolve
 
 ## Phase 7: Advanced Policies & AI Capabilities
 - [x] **AI-Native Gateway Features**: Built-in semantic caching, prompt guard, and PII redaction middlewares.
-- [ ] **Policy as Code**: Support compiling human-readable access policies directly to executable WASM policies.
-- [ ] **ServGate → ServQueue Webhook Bridge**: Register routes that publish directly to ServQueue topics on incoming HTTP events. Connects gateway and broker tiers.
+- [x] **Policy as Code**: Support compiling human-readable access policies directly to executable WASM policies.
+- [x] **ServGate → ServQueue Webhook Bridge**: Register routes that publish directly to ServQueue topics on incoming HTTP events. Connects gateway and broker tiers.
 
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
