@@ -21,6 +21,7 @@ type Server struct {
 	authToken string
 	tlsCert   string
 	tlsKey    string
+	httpSrv   *http.Server
 }
 
 func NewServer(addr string, engine *broker.BrokerEngine, authToken, tlsCert, tlsKey string) *Server {
@@ -35,15 +36,35 @@ func NewServer(addr string, engine *broker.BrokerEngine, authToken, tlsCert, tls
 
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
 	mux.HandleFunc("/api/topics/", s.authorize(s.handleTopics))
 	mux.HandleFunc("/api/publish", s.authorize(s.handlePublish))
 	mux.HandleFunc("/api/stats", s.authorize(s.handleStats))
 	mux.HandleFunc("/api/replay", s.authorize(s.handleReplay))
 
-	if s.tlsCert != "" && s.tlsKey != "" {
-		return http.ListenAndServeTLS(s.addr, s.tlsCert, s.tlsKey, mux)
+	s.httpSrv = &http.Server{
+		Addr:    s.addr,
+		Handler: mux,
 	}
-	return http.ListenAndServe(s.addr, mux)
+
+	if s.tlsCert != "" && s.tlsKey != "" {
+		return s.httpSrv.ListenAndServeTLS(s.tlsCert, s.tlsKey)
+	}
+	return s.httpSrv.ListenAndServe()
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpSrv != nil {
+		return s.httpSrv.Shutdown(ctx)
+	}
+	return nil
 }
 
 func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {

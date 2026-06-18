@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"servqueue/pkg/broker"
 	"servqueue/pkg/otel"
@@ -31,12 +36,34 @@ func main() {
 	log.Println("Starting ServQueue STOMP server on tcp://:61613...")
 	go func() {
 		if err := stompServer.Start(); err != nil {
-			log.Fatalf("STOMP server error: %v", err)
+			log.Printf("STOMP server error: %v", err)
 		}
 	}()
 
 	log.Println("Starting ServQueue HTTP management server on http://:8082...")
-	if err := webServer.Start(); err != nil {
-		log.Fatalf("HTTP server error: %v", err)
+	go func() {
+		if err := webServer.Start(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Capture shutdown signals
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	<-stopChan
+	log.Println("ServQueue: Shutting down gracefully...")
+
+	// 1. Shutdown HTTP Server
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := webServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("ServQueue: HTTP server forced to shutdown: %v", err)
 	}
+
+	// 2. Stop STOMP Server
+	log.Println("ServQueue: Stopping STOMP server...")
+	stompServer.Stop()
+
+	log.Println("ServQueue: Shutdown complete")
 }

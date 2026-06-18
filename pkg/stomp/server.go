@@ -26,6 +26,7 @@ type Server struct {
 	passcode  string
 	tlsCert   string
 	tlsKey    string
+	listener  net.Listener
 }
 
 func NewServer(addr string, engine *broker.BrokerEngine, username, passcode, tlsCert, tlsKey string) *Server {
@@ -57,13 +58,20 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
+	s.listener = listener
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := s.listener.Accept()
 		if err != nil {
-			continue
+			return nil
 		}
 		go s.handleConnection(conn)
+	}
+}
+
+func (s *Server) Stop() {
+	if s.listener != nil {
+		s.listener.Close()
 	}
 }
 
