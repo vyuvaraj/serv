@@ -62,12 +62,12 @@ This document outlines the planned evolutionary stages of **ServQueue** to evolv
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 8.1 | **Standardized `/healthz` and `/readyz` endpoints** | Small | Health and readiness probes for k8s liveness checks and ServConsole status aggregation. | [ ] |
-| 8.2 | **Graceful shutdown on SIGTERM** | Small | Drain in-flight STOMP messages, flush WAL, and close connections cleanly before exit. Required for rolling updates. | [ ] |
-| 8.3 | **Standardized error response contract** | Small | All HTTP API errors return `{"error": "msg", "code": "ERR_CODE", "trace_id": "..."}` — consistent across ecosystem. | [ ] |
-| 8.4 | **API versioning (`/api/v1/`)** | Small | Version the management API before breaking changes accumulate. | [ ] |
+| 8.1 | **Standardized `/healthz` and `/readyz` endpoints** | Small | Health and readiness probes for k8s liveness checks and ServConsole status aggregation. | [x] |
+| 8.2 | **Graceful shutdown on SIGTERM** | Small | Drain in-flight STOMP messages, flush WAL, and close connections cleanly before exit. Required for rolling updates. | [x] |
+| 8.3 | **Standardized error response contract** | Small | All HTTP API errors return `{"error": "msg", "code": "ERR_CODE", "trace_id": "..."}` — consistent across ecosystem. | [x] |
+| 8.4 | **API versioning (`/api/v1/`)** | Small | Version the management API before breaking changes accumulate. | [x] |
 | 8.5 | **Rate limiting on publish endpoint** | Small | Protect `POST /api/publish` against flooding — currently unthrottled. | [ ] |
-| 8.6 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [ ] |
+| 8.6 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [x] |
 | 8.7 | **WebSocket push for real-time metrics** | Medium | Push live throughput, subscriber counts, and WASM execution stats to ServConsole via WebSocket. | [ ] |
 | 8.8 | **Consumer group support** | Large | Multiple subscribers in a consumer group with partition assignment — enables horizontal scaling of message consumers. | [ ] |
 | 8.9 | **Message priority levels** | Medium | Support priority tiers on publish so high-priority messages are delivered ahead of low-priority ones. | [ ] |

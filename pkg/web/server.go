@@ -45,9 +45,13 @@ func (s *Server) Start() error {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 	mux.HandleFunc("/api/topics/", s.authorize(s.handleTopics))
+	mux.HandleFunc("/api/v1/topics/", s.authorize(s.handleTopics))
 	mux.HandleFunc("/api/publish", s.authorize(s.handlePublish))
+	mux.HandleFunc("/api/v1/publish", s.authorize(s.handlePublish))
 	mux.HandleFunc("/api/stats", s.authorize(s.handleStats))
+	mux.HandleFunc("/api/v1/stats", s.authorize(s.handleStats))
 	mux.HandleFunc("/api/replay", s.authorize(s.handleReplay))
+	mux.HandleFunc("/api/v1/replay", s.authorize(s.handleReplay))
 
 	s.httpSrv = &http.Server{
 		Addr:    s.addr,
@@ -76,7 +80,7 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "Unauthorized: Missing authorization header", http.StatusUnauthorized)
+			WriteJSONError(w, r, "Unauthorized: Missing authorization header", "ERR_MISSING_AUTH_HEADER", http.StatusUnauthorized)
 			return
 		}
 
@@ -92,7 +96,7 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if !authenticated {
-			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
+			WriteJSONError(w, r, "Unauthorized: Invalid token", "ERR_INVALID_TOKEN", http.StatusUnauthorized)
 			return
 		}
 
@@ -102,12 +106,17 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleTopics(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) < 4 {
-		http.Error(w, "Invalid path. Use /api/topics/{topic}/transform or /api/topics/{topic}/dlq", http.StatusBadRequest)
+	var topic, action string
+	if len(parts) >= 5 && parts[1] == "v1" {
+		topic = parts[3]
+		action = parts[4]
+	} else if len(parts) >= 4 {
+		topic = parts[2]
+		action = parts[3]
+	} else {
+		WriteJSONError(w, r, "Invalid path. Use /api/v1/topics/{topic}/transform or /api/v1/topics/{topic}/dlq", "ERR_INVALID_PATH", http.StatusBadRequest)
 		return
 	}
-	topic := parts[2]
-	action := parts[3]
 
 	switch action {
 	case "transform":
@@ -115,19 +124,19 @@ func (s *Server) handleTopics(w http.ResponseWriter, r *http.Request) {
 	case "dlq":
 		s.handleRegisterDLQ(w, r, topic)
 	default:
-		http.Error(w, "Not found", http.StatusNotFound)
+		WriteJSONError(w, r, "Not found", "ERR_NOT_FOUND", http.StatusNotFound)
 	}
 }
 
 func (s *Server) handleRegisterTransform(w http.ResponseWriter, r *http.Request, topic string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return
 	}
 
 	wasmBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body: "+err.Error(), http.StatusInternalServerError)
+		WriteJSONError(w, r, "Failed to read body: "+err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
 	}
 
@@ -140,7 +149,7 @@ func (s *Server) handleRegisterTransform(w http.ResponseWriter, r *http.Request,
 
 	err = s.engine.RegisterTransform(r.Context(), topic, wasmBytes)
 	if err != nil {
-		http.Error(w, "Failed to compile WASM: "+err.Error(), http.StatusBadRequest)
+		WriteJSONError(w, r, "Failed to compile WASM: "+err.Error(), "ERR_WASM_COMPILATION_FAILED", http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -149,7 +158,7 @@ func (s *Server) handleRegisterTransform(w http.ResponseWriter, r *http.Request,
 
 func (s *Server) handleRegisterDLQ(w http.ResponseWriter, r *http.Request, topic string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -158,12 +167,12 @@ func (s *Server) handleRegisterDLQ(w http.ResponseWriter, r *http.Request, topic
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request: JSON body required", http.StatusBadRequest)
+		WriteJSONError(w, r, "Bad request: JSON body required", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
 		return
 	}
 
 	if req.DLQTopic == "" {
-		http.Error(w, "Missing dlq_topic", http.StatusBadRequest)
+		WriteJSONError(w, r, "Missing dlq_topic", "ERR_MISSING_DLQ_TOPIC", http.StatusBadRequest)
 		return
 	}
 
@@ -174,7 +183,7 @@ func (s *Server) handleRegisterDLQ(w http.ResponseWriter, r *http.Request, topic
 
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -185,7 +194,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+		WriteJSONError(w, r, "Bad request", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
 		return
 	}
 
@@ -202,7 +211,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 
 	res, err := s.engine.Publish(ctx, req.Topic, req.Payload)
 	if err != nil {
-		http.Error(w, "Transform error: "+err.Error(), http.StatusInternalServerError)
+		WriteJSONError(w, r, "Transform error: "+err.Error(), "ERR_WASM_TRANSFORM_FAILED", http.StatusInternalServerError)
 		return
 	}
 
@@ -226,7 +235,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	topic := r.URL.Query().Get("topic")
 	if topic == "" {
-		http.Error(w, "Missing topic parameter", http.StatusBadRequest)
+		WriteJSONError(w, r, "Missing topic parameter", "ERR_MISSING_TOPIC_PARAMETER", http.StatusBadRequest)
 		return
 	}
 
