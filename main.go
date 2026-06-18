@@ -201,6 +201,13 @@ func main() {
 	case "audit":
 		runAudit()
 
+	case "monitor":
+		target := "8080"
+		if len(os.Args) >= 3 {
+			target = os.Args[2]
+		}
+		runMonitor(target)
+
 	default:
 		printUsage()
 	}
@@ -223,5 +230,6 @@ func printUsage() {
 	fmt.Println("  serv debug <file.srv>                       Debug a Serv file (requires dlv: go install github.com/go-delve/delve/cmd/dlv@latest)")
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
 	fmt.Println("  serv deploy --target <target> [file.srv]   Generate deploy config (fly, railway, render, k8s, docker)")
+	fmt.Println("  serv monitor [port-or-url]                 Terminal htop-style live dashboard for a running service")
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
 }

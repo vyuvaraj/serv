@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -378,7 +379,7 @@ func StartServer() interface{} {
 			}
 		}
 
-		handler, params, limiter := matchRoute(r.Method, r.URL.Path)
+		handler, params, limiter, pattern := matchRoute(r.Method, r.URL.Path)
 
 		if handler == nil {
 			http.NotFound(w, r)
@@ -441,13 +442,13 @@ func StartServer() interface{} {
 		SetActiveTrace(trace)
 
 		start := time.Now()
-		MetricInc("http_server_requests_total")
+		MetricInc("http_server_requests_total", "method", r.Method, "route", pattern)
 
 		res := handler(req)
 		ClearActiveTrace()
 
 		duration := time.Since(start).Seconds()
-		MetricGauge("http_server_request_duration_seconds", duration)
+		MetricGauge("http_server_request_duration_seconds", duration, "method", r.Method, "route", pattern)
 
 		statusCode := 200
 		w.Header().Set("Content-Type", "application/json")
@@ -628,6 +629,15 @@ func announceRoutesToServGate() {
 
 func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
+
+	// Standard Go Runtime Metrics
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	fmt.Fprintf(w, "go_goroutines %d\n", runtime.NumGoroutine())
+	fmt.Fprintf(w, "go_mem_sys_bytes %d\n", m.Sys)
+	fmt.Fprintf(w, "go_mem_alloc_bytes %d\n", m.Alloc)
+	fmt.Fprintf(w, "go_mem_heap_alloc_bytes %d\n", m.HeapAlloc)
+	fmt.Fprintf(w, "go_uptime_seconds %f\n", time.Since(startTime).Seconds())
 
 	metricsMu.RLock()
 	for k, v := range metricsCounters {

@@ -131,6 +131,7 @@ type trieNode struct {
 	isParam   bool
 	paramName string
 	limiter   *routeRateLimiter
+	fullPath  string
 }
 
 func newTrieNode() *trieNode {
@@ -172,14 +173,15 @@ func insertRoute(method, path string, limiter *routeRateLimiter, handler func(Re
 	}
 	curr.handler = handler
 	curr.limiter = limiter
+	curr.fullPath = path
 }
 
-func matchRoute(method, path string) (func(Request) interface{}, map[string]string, *routeRateLimiter) {
+func matchRoute(method, path string) (func(Request) interface{}, map[string]string, *routeRateLimiter, string) {
 	routeTrieMu.RLock()
 	root, ok := routeTrie[method]
 	routeTrieMu.RUnlock()
 	if !ok {
-		return nil, nil, nil
+		return nil, nil, nil, ""
 	}
 
 	parts := strings.Split(strings.Trim(path, "/"), "/")
@@ -196,10 +198,10 @@ func matchRoute(method, path string) (func(Request) interface{}, map[string]stri
 			params[child.paramName] = part
 			curr = child
 		} else {
-			return nil, nil, nil
+			return nil, nil, nil, ""
 		}
 	}
-	return curr.handler, params, curr.limiter
+	return curr.handler, params, curr.limiter, curr.fullPath
 }
 
 var (
