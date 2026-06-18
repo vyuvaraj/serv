@@ -218,3 +218,33 @@ func TestWasmHotSwapDeferredClose(t *testing.T) {
 		t.Fatalf("Failed to publish after hot-swap: %v", err)
 	}
 }
+
+func TestDelayedMessageDelivery(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "delayed-test"
+	subChan := engine.Subscribe(topic)
+
+	ctx := context.WithValue(context.Background(), "delay-ms", "200")
+	_, err := engine.Publish(ctx, topic, "delayed-payload")
+	if err != nil {
+		t.Fatalf("Failed to publish delayed message: %v", err)
+	}
+
+	select {
+	case received := <-subChan:
+		t.Fatalf("Message delivered prematurely: %q", received)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	select {
+	case received := <-subChan:
+		if received != "delayed-payload" {
+			t.Errorf("Expected 'delayed-payload', got %q", received)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("Timeout waiting for delayed message delivery")
+	}
+}

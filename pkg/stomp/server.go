@@ -213,6 +213,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 			} else if idVal, exists := frame.Headers["id"]; exists {
 				ctx = context.WithValue(ctx, "message-id", idVal)
 			}
+			if delayVal, exists := frame.Headers["delay-ms"]; exists {
+				ctx = context.WithValue(ctx, "delay-ms", delayVal)
+			}
 
 			_, _ = s.engine.Publish(ctx, destination, frame.Body)
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -304,6 +305,15 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 
 	if e.wal != nil {
 		_ = e.wal.Append(topic, payload)
+	}
+
+	if delayVal, ok := ctx.Value("delay-ms").(string); ok && delayVal != "" {
+		if delayMs, err := strconv.Atoi(delayVal); err == nil && delayMs > 0 {
+			time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
+				_, _ = e.publishLocal(context.Background(), topic, payload)
+			})
+			return payload, nil
+		}
 	}
 
 	var parentTrace string
