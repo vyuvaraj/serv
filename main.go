@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -14,8 +15,10 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/glebarez/go-sqlite"
@@ -185,6 +188,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Health probes
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
+
 	// 1. ServConsole Status Aggregator & Routes API
 	mux.HandleFunc("/api/status", authorizeConsole(handleStatus))
 	mux.HandleFunc("/api/routes", authorizeConsole(handleRoutes))
@@ -215,8 +228,30 @@ func main() {
 	log.Printf("Proxying Storage to %s", *storeUrl)
 	log.Printf("Proxying Queues to %s", *queueUrl)
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("Console: Shutting down gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Console: Server forced to shutdown: %v", err)
+	} else {
+		log.Println("Console: Server exited cleanly")
 	}
 }
 

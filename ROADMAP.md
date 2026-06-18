@@ -40,5 +40,61 @@ This document outlines the design phases, completed modules, and upcoming featur
 * [ ] **ServGate Multi-Replica Config Sync**: Write route configurations to a ServStore-backed distributed bucket (`serv-config`) instead of local JSON file.
 * [ ] **Cross-Service Dependency Graph**: Visual interactive map showing which Serv services depend on which infrastructure components (queues, buckets, routes).
 
+---
+
+### Phase 6: Operational Hardening & Real-Time Experience (Proposed — Q3 2026)
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 6.1 | **WebSocket push for real-time dashboards** | Medium | Replace polling with WebSocket/SSE push for live trace ingestion, queue message flow, and route hit counters. | [ ] |
+| 6.2 | **Standardized `/healthz` and `/readyz` endpoints** | Small | Expose health probes for k8s and Docker Compose healthcheck integration. | [ ] |
+| 6.3 | **Graceful shutdown on SIGTERM** | Small | Drain active WebSocket connections and flush state cleanly on shutdown. | [ ] |
+| 6.4 | **Unified health aggregation dashboard** | Medium | Poll `/healthz` on all connected services and display a single "ecosystem health" traffic-light panel. | [ ] |
+| 6.5 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing. | [ ] |
+| 6.6 | **RBAC on console access** | Medium | Restrict which dashboard panels/actions are available based on user role (viewer vs operator vs admin). | [ ] |
+| 6.7 | **Dark/light theme toggle** | Small | Currently glassmorphic dark only — add light mode for accessibility and preference. | [ ] |
+| 6.8 | **Cross-service request replay** | Large | Select an OTel trace, click "Replay" to re-issue the original request through ServGate — useful for debugging. | [ ] |
+
+---
+
+### Phase 7: Next-Level Observability Platform (Proposed — Q4 2026+)
+
+These items take ServConsole from a dashboard into a **full observability and operations platform** — competing with Grafana, Datadog, and Portainer while being purpose-built for the Servverse.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 7.1 | **Alerting engine & notification channels** | Large | Define alert rules (latency > 500ms, error rate > 5%, disk > 90%) with notification to Slack, email, PagerDuty, or webhook. Snooze/ack workflow. | [ ] |
+| 7.2 | **Incident timeline auto-generation** | Large | When an alert fires, automatically build a timeline: what changed (deploys, config), what metrics spiked, which traces errored. One-page incident summary. | [ ] |
+| 7.3 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to automatically build a service dependency graph. Show which services call which, latency between them, and error rates on edges. | [ ] |
+| 7.4 | **Log aggregation & search** | Large | Collect structured JSON logs from all services (via stdout scraping or push API). Full-text search, filter by service/level/trace_id, and live tail. | [ ] |
+| 7.5 | **Custom dashboard builder** | Large | Drag-and-drop dashboard editor: pick metrics, choose visualization (line chart, bar, gauge, table), set time range. Save and share custom dashboards per team. | [ ] |
+| 7.6 | **Deployment tracking & rollback** | Medium | Track deployments (version, timestamp, who deployed). Overlay on metrics charts. One-click rollback to previous version via re-deploy trigger. | [ ] |
+| 7.7 | **SLO/SLI tracking & error budgets** | Medium | Define SLOs (99.9% availability, P99 < 200ms). Track remaining error budget. Alert when budget is being consumed too fast. | [ ] |
+| 7.8 | **Embedded terminal (service exec)** | Medium | SSH/exec into a running container from the console. View live logs, run diagnostics, inspect environment — without leaving the browser. | [ ] |
+| 7.9 | **Multi-environment management** | Medium | Switch between dev/staging/production environments in the console. Compare metrics across environments. Promote configs from staging to prod. | [ ] |
+| 7.10 | **Plugin architecture** | Large | Define a plugin interface for community-contributed console panels. Load plugins as WASM modules that render into iframe sandboxes. Extensible without forking. | [ ] |
+| 7.11 | **Mobile-responsive layout** | Medium | Responsive design for tablet/phone. Critical status and alerts viewable on mobile during on-call. | [ ] |
+| 7.12 | **Runbook automation** | Large | Attach runbook steps to alerts. When an alert fires, suggest or auto-execute remediation steps (restart service, scale up, clear cache). Guided incident response. | [ ] |
+| 7.13 | **Cost estimation panel** | Medium | Estimate infrastructure cost based on resource usage (compute hours, storage GB, network egress). Compare actual vs budget. Useful for teams managing cloud spend. | [ ] |
+
+---
+
+### Phase 8: Differentiating Factors — What No Other Dashboard Offers (Strategic)
+
+These create a **moat** around ServConsole — capabilities that Grafana, Datadog, Portainer, and cloud-native dashboards cannot replicate without fundamental architecture changes.
+
+| # | Item | Effort | Description | Why Nobody Else Can Do This |
+|---|------|--------|-------------|----------------------------|
+| 8.1 | **Ecosystem-native zero-config observability** | Already Done | All Servverse services (Gate, Queue, Store) are pre-integrated. No exporters to configure, no scrape targets to define, no dashboards to import. Plug in the service → metrics appear. | Purpose-built for the Servverse. Grafana needs: Prometheus + exporters + dashboards + alerting configured separately for every service. |
+| 8.2 | **WASM hot-swap from the dashboard** | Already Done | Upload and deploy WASM middleware to ServGate or WASM transforms to ServQueue directly from the console UI. Click to deploy compute logic — no CLI, no CI pipeline needed. | Direct programmatic control over running middleware. Grafana/Datadog are read-only dashboards. ServConsole is a control plane. |
+| 8.3 | **Consistent hash ring visualization** | Already Done | Live SVG visualization of the ServStore hash ring — see which nodes own which data, trace key placement, and trigger rebalancing interactively. No other dashboard does this. | Purpose-built for distributed storage internals. Generic dashboards don't understand consistent hashing. |
+| 8.4 | **Cross-service trace waterfall (native)** | Already Done | Visualize OTel traces that flow: HTTP request → ServGate → ServQueue transform → ServStore write — in a single waterfall. All services emit compatible spans automatically. | All services share the same trace format and propagation. Grafana Tempo can do this but requires manual instrumentation of every service. |
+| 8.5 | **AI agent traffic observatory** | Large | Visualize MCP tool calls flowing through ServGate: which AI agents are calling which tools, token usage per agent, cost tracking, and prompt guard violation rates. Purpose-built for AI-era traffic. | No existing dashboard product understands MCP protocol traffic or LLM token economics. This would be first-to-market. |
+| 8.6 | **Compiler-linked ORM schema viewer** | Medium | Display the exact database schema generated by `serv-lang`'s ORM. Changes in `.srv` source → schema diff visible in console immediately. Not reverse-engineered from the database — derived from the compiler output. | Schema comes FROM the compiler, not from database introspection. Impossible without compiler integration. |
+| 8.7 | **One-click infrastructure provisioning** | Large | From the console, click "Add ServQueue topic" or "Create ServStore bucket" — it executes the API call across services. The dashboard IS the infrastructure management plane. | Controls all Servverse services through their APIs. Generic dashboards are view-only; ServConsole is bidirectional. |
+| 8.8 | **Service dependency graph from live traces** | Medium | Auto-discover service topology by analyzing OTel trace spans. No manual service registry or config — the graph builds itself from observed traffic. Update in real-time as new services come online. | All services use shared trace format. The graph is inferred, not configured. Competitors need service mesh sidecar injection. |
+| 8.9 | **Embedded WASM transform debugger** | Large | Step through WASM transform execution in the browser — set breakpoints, inspect intermediate message state, replay transforms with modified inputs. Debug queue transforms without leaving the console. | WASM + wazero = inspectable execution. No other dashboard can debug middleware at the instruction level. |
+| 8.10 | **Single binary, zero-dependency deployment** | Already Done | The entire console (Go backend + embedded web assets) is one binary. No Docker, no nginx, no Node.js, no database for the dashboard itself. Copy + run. | Grafana requires: PostgreSQL/SQLite + provisioning YAML + plugin installs. Datadog is SaaS-only. ServConsole = one file. |
+
 > See [UNIFIED_ROADMAP.md](../../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
