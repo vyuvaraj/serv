@@ -97,6 +97,8 @@ func runTests(srvFile string, withCoverage bool, filter string) {
 
 	cmd := exec.Command(goPath, testArgs...)
 	cmd.Dir = buildDir
+	cmd.Env = filterEnv(os.Environ(), "GOWORK")
+	cmd.Env = append(cmd.Env, "GOWORK=off")
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Printf("Failed to create stdout pipe: %v\n", err)
@@ -155,6 +157,13 @@ func runTests(srvFile string, withCoverage bool, filter string) {
 
 	if testErr != nil {
 		fmt.Printf("Tests failed: %v\n", testErr)
+		if data, err := os.ReadFile(testFile); err == nil {
+			fmt.Println("--- Generated serv_test.go ---")
+			lines := strings.Split(string(data), "\n")
+			for idx, line := range lines {
+				fmt.Printf("%d: %s\n", idx+1, line)
+			}
+		}
 		os.Exit(1)
 	}
 }

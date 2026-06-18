@@ -110,7 +110,8 @@ func buildServNoExit(srvFile, outputBinary, target string) (string, error) {
 
 	cmd := exec.Command(goPath, "build", "-o", relOutPath, ".")
 	cmd.Dir = buildDir
-	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Env = filterEnv(os.Environ(), "GOWORK")
+	cmd.Env = append(cmd.Env, "GOWORK=off")
 	if target == "wasm" {
 		cmd.Env = append(cmd.Env, "GOOS=wasip1", "GOARCH=wasm")
 	}
@@ -118,6 +119,24 @@ func buildServNoExit(srvFile, outputBinary, target string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		// If go build fails because go.mod needs updating, run go mod tidy and retry
+		if strings.Contains(stderr.String(), "go mod tidy") {
+			if tidyErr := runGoModTidy(buildDir); tidyErr == nil {
+				// Retry the build
+				stderr.Reset()
+				retryCmd := exec.Command(goPath, "build", "-o", relOutPath, ".")
+				retryCmd.Dir = buildDir
+				retryCmd.Env = filterEnv(os.Environ(), "GOWORK")
+				retryCmd.Env = append(retryCmd.Env, "GOWORK=off")
+				if target == "wasm" {
+					retryCmd.Env = append(retryCmd.Env, "GOOS=wasip1", "GOARCH=wasm")
+				}
+				retryCmd.Stderr = &stderr
+				if retryErr := retryCmd.Run(); retryErr == nil {
+					return filepath.Join(filepath.Dir(absPath), outputBinary), nil
+				}
+			}
+		}
 		return "", fmt.Errorf("%v: %s", err, stderr.String())
 	}
 
@@ -379,13 +398,26 @@ func runGoModTidy(buildDir string) error {
 	}
 	cmd := exec.Command(goPath, "mod", "tidy")
 	cmd.Dir = buildDir
-	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Env = filterEnv(os.Environ(), "GOWORK")
+	cmd.Env = append(cmd.Env, "GOWORK=off")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go mod tidy failed: %v, stderr: %s", err, stderr.String())
 	}
 	return nil
+}
+
+// filterEnv returns a copy of env with all entries matching the given key prefix removed.
+func filterEnv(env []string, key string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(strings.ToUpper(e), strings.ToUpper(prefix)) {
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 // findServRoot locates the Serv installation directory (where runtime/ and go.mod live).
