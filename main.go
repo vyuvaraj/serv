@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"servgate/pkg/otel"
@@ -87,6 +89,14 @@ func main() {
 
 	// Admin API endpoint to dynamically register WASM middlewares on the fly
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+	})
 	mux.Handle("/", handler)
 	mux.HandleFunc("/api/admin/middleware/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -184,14 +194,31 @@ func main() {
 		Handler: mux,
 	}
 
-	if cfg.TlsCert != "" && cfg.TlsKey != "" {
-		if err := server.ListenAndServeTLS(cfg.TlsCert, cfg.TlsKey); err != nil {
-			log.Fatalf("Gateway: HTTP server error: %v", err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if cfg.TlsCert != "" && cfg.TlsKey != "" {
+			if err := server.ListenAndServeTLS(cfg.TlsCert, cfg.TlsKey); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Gateway: HTTP server error: %v", err)
+			}
+		} else {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Gateway: HTTP server error: %v", err)
+			}
 		}
+	}()
+
+	<-ctx.Done()
+	log.Println("Gateway: Shutting down gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Gateway: Server forced to shutdown: %v", err)
 	} else {
-		if err := server.ListenAndServe(); err != nil {
-			log.Fatalf("Gateway: HTTP server error: %v", err)
-		}
+		log.Println("Gateway: Server exited cleanly")
 	}
 }
 
