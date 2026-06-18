@@ -614,3 +614,111 @@ func TestServGateWebhookBridge(t *testing.T) {
 		t.Errorf("Expected bridged payload to be %q, got %q", postData, receivedPayload)
 	}
 }
+
+func TestPolicyCompilationAndEnforcement(t *testing.T) {
+	tmpPolicyFile, err := os.CreateTemp("", "test_policy_*.policy")
+	if err != nil {
+		t.Fatalf("Failed to create temp policy file: %v", err)
+	}
+	defer os.Remove(tmpPolicyFile.Name())
+
+	policyContent := `
+allow GET /api/public
+allow POST /api/secure if header.Authorization == admin-token
+deny * *
+`
+	if _, err := tmpPolicyFile.WriteString(policyContent); err != nil {
+		t.Fatalf("Failed to write policy file: %v", err)
+	}
+	tmpPolicyFile.Close()
+
+	tmpWasmFile, err := os.CreateTemp("", "test_policy_*.wasm")
+	if err != nil {
+		t.Fatalf("Failed to create temp wasm file: %v", err)
+	}
+	tmpWasmFile.Close()
+	defer os.Remove(tmpWasmFile.Name())
+
+	// Compile policy to WASM
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+	os.Args = []string{"servgate", "policy", "compile", tmpPolicyFile.Name(), "-o", tmpWasmFile.Name()}
+	runPolicyCommand()
+
+	// Verify compiled WASM file exists
+	if fi, err := os.Stat(tmpWasmFile.Name()); err != nil || fi.Size() == 0 {
+		t.Fatalf("Compiled policy WASM file is missing or empty: %v", err)
+	}
+
+	// Register the compiled policy as wasm middleware
+	wasmBytes, err := os.ReadFile(tmpWasmFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read compiled WASM: %v", err)
+	}
+
+	ctx := context.Background()
+	wasmManager, err := wasm.GetMiddlewareManager(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get WASM manager: %v", err)
+	}
+
+	mwName := "auth-policy" // Contains 'policy' so it triggers JSON metadata input in proxy handler
+	if err := wasmManager.Register(ctx, mwName, wasmBytes); err != nil {
+		t.Fatalf("Failed to register WASM middleware: %v", err)
+	}
+
+	// Setup Gateway routing
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("backend success"))
+	}))
+	defer backend.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:     "/api",
+			Target:     backend.URL,
+			Middleware: mwName,
+		},
+	}
+
+	gatewayHandler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gatewayServer := httptest.NewServer(gatewayHandler)
+	defer gatewayServer.Close()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// 1. GET /api/public should be ALLOWED
+	req1, _ := http.NewRequest("GET", gatewayServer.URL+"/api/public", nil)
+	resp1, err := client.Do(req1)
+	if err != nil {
+		t.Fatalf("Request 1 failed: %v", err)
+	}
+	defer resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 for allowed GET, got %d", resp1.StatusCode)
+	}
+
+	// 2. POST /api/secure with correct header should be ALLOWED
+	req2, _ := http.NewRequest("POST", gatewayServer.URL+"/api/secure", nil)
+	req2.Header.Set("Authorization", "admin-token")
+	resp2, err := client.Do(req2)
+	if err != nil {
+		t.Fatalf("Request 2 failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 for allowed POST, got %d", resp2.StatusCode)
+	}
+
+	// 3. POST /api/secure with missing/incorrect header should be DENIED (403 Forbidden)
+	req3, _ := http.NewRequest("POST", gatewayServer.URL+"/api/secure", nil)
+	resp3, err := client.Do(req3)
+	if err != nil {
+		t.Fatalf("Request 3 failed: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected status 403 for denied POST, got %d", resp3.StatusCode)
+	}
+}

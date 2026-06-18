@@ -272,11 +272,31 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// WASM Request Middleware execution if registered
 	if matchedRoute.Middleware != "" {
-		bodyBytes, _ := io.ReadAll(r.Body)
-		r.Body.Close()
+		var inputBytes []byte
+		isPolicy := strings.Contains(strings.ToLower(matchedRoute.Middleware), "policy")
+
+		if isPolicy {
+			// Construct metadata JSON
+			hdrs := make(map[string]string)
+			for k, v := range r.Header {
+				if len(v) > 0 {
+					hdrs[strings.ToLower(k)] = v[0]
+				}
+			}
+			meta := map[string]interface{}{
+				"method":  r.Method,
+				"path":    r.URL.Path,
+				"headers": hdrs,
+			}
+			inputBytes, _ = json.Marshal(meta)
+		} else {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			r.Body.Close()
+			inputBytes = bodyBytes
+		}
 
 		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Middleware %s", matchedRoute.Middleware), traceparent)
-		outputBytes, err := h.wasm.Run(r.Context(), matchedRoute.Middleware, bodyBytes)
+		outputBytes, err := h.wasm.Run(r.Context(), matchedRoute.Middleware, inputBytes)
 		otel.EndSpan(wasmSpan, err, map[string]interface{}{})
 
 		if err != nil {
@@ -285,8 +305,18 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		r.Body = io.NopCloser(bytes.NewReader(outputBytes))
-		r.ContentLength = int64(len(outputBytes))
+		if isPolicy {
+			decision := strings.TrimSpace(string(outputBytes))
+			if decision == "deny" {
+				otel.EndSpan(span, fmt.Errorf("Forbidden: Access Denied by Policy"), map[string]interface{}{})
+				http.Error(w, "Forbidden: Access Denied by Policy", http.StatusForbidden)
+				return
+			}
+			// If allowed, proceed with original request body (untouched)
+		} else {
+			r.Body = io.NopCloser(bytes.NewReader(outputBytes))
+			r.ContentLength = int64(len(outputBytes))
+		}
 	}
 
 	// Load Balancing Target Selection

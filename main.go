@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,6 +27,10 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "install" {
 		runInstallCommand()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "policy" {
+		runPolicyCommand()
 		return
 	}
 
@@ -282,4 +287,125 @@ func runInstallCommand() {
 	}
 
 	fmt.Printf("✓ Middleware '%s' successfully installed to %s\n", name, destPath)
+}
+
+func runPolicyCommand() {
+	if len(os.Args) < 5 || os.Args[2] != "compile" {
+		log.Fatal("Usage: servgate policy compile <file.policy> -o <file.wasm>")
+	}
+	policyFile := os.Args[3]
+	outputWasm := os.Args[5]
+
+	content, err := os.ReadFile(policyFile)
+	if err != nil {
+		log.Fatalf("Failed to read policy file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var rulesCode strings.Builder
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+
+		action := parts[0] // "allow" or "deny"
+		method := parts[1] // "GET", "POST", "*"
+		path := parts[2]   // "/api/data", "*"
+
+		var cond string
+		if len(parts) >= 6 && parts[3] == "if" && strings.HasPrefix(parts[4], "header.") && parts[5] == "==" {
+			hdrName := strings.ToLower(strings.TrimPrefix(parts[4], "header."))
+			val := strings.Join(parts[6:], " ")
+			val = strings.Trim(val, "\"")
+			cond = fmt.Sprintf(" && req.Headers[%q] == %q", hdrName, val)
+		}
+
+		methodCond := fmt.Sprintf("req.Method == %q", method)
+		if method == "*" {
+			methodCond = "true"
+		}
+
+		pathCond := fmt.Sprintf("req.Path == %q", path)
+		if path == "*" {
+			pathCond = "true"
+		}
+
+		rulesCode.WriteString(fmt.Sprintf(`	if %s && %s%s {
+		fmt.Print(%q)
+		return
+	}
+`, methodCond, pathCond, cond, action))
+	}
+
+	goSource := fmt.Sprintf(`package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+)
+
+type Request struct {
+	Method  string            ` + "`" + `json:"method"` + "`" + `
+	Path    string            ` + "`" + `json:"path"` + "`" + `
+	Headers map[string]string ` + "`" + `json:"headers"` + "`" + `
+}
+
+func main() {
+	body, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Print("deny")
+		return
+	}
+
+	var req Request
+	if err := json.Unmarshal(body, &req); err != nil {
+		fmt.Print("deny")
+		return
+	}
+
+%s
+	// Default fallback
+	fmt.Print("deny")
+}
+`, rulesCode.String())
+
+	tmpDir, err := os.MkdirTemp("", "policy_build")
+	if err != nil {
+		log.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	srcPath := filepath.Join(tmpDir, "main.go")
+	if err := os.WriteFile(srcPath, []byte(goSource), 0644); err != nil {
+		log.Fatalf("Failed to write source: %v", err)
+	}
+
+	// Initialize a dummy go.mod in the temp directory to compile outside a workspace
+	initCmd := exec.Command("go", "mod", "init", "policy")
+	initCmd.Dir = tmpDir
+	initCmd.Env = append(os.Environ(), "GOWORK=off")
+	if err := initCmd.Run(); err != nil {
+		log.Fatalf("Failed to initialize temporary go module: %v", err)
+	}
+
+	cmd := exec.Command("go", "build", "-o", outputWasm, ".")
+	cmd.Dir = tmpDir
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "GOWORK=off")
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to compile policy to WASM: %v\nStderr: %s", err, stderr.String())
+	}
+
+	fmt.Printf("✓ Successfully compiled policy to %s\n", outputWasm)
 }
