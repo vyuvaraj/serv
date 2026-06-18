@@ -190,3 +190,31 @@ func TestMessageDeduplication(t *testing.T) {
 		t.Fatal("Timeout waiting for third message")
 	}
 }
+
+func TestWasmHotSwapDeferredClose(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "hot-swap-test"
+
+	// Minimal no-op compiled WASM module
+	noopWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	
+	err := engine.RegisterTransform(context.Background(), topic, noopWasm)
+	if err != nil {
+		t.Fatalf("Failed to register first transform: %v", err)
+	}
+
+	// Trigger hot-swap while keeping reference to the old one
+	err = engine.RegisterTransform(context.Background(), topic, noopWasm)
+	if err != nil {
+		t.Fatalf("Failed to hot-swap second transform: %v", err)
+	}
+
+	// Verify it does not crash or panic when executing basic publications
+	_, err = engine.Publish(context.Background(), topic, "message")
+	if err != nil {
+		t.Fatalf("Failed to publish after hot-swap: %v", err)
+	}
+}

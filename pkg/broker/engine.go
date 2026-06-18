@@ -210,7 +210,10 @@ func (e *BrokerEngine) RegisterTransform(ctx context.Context, topic string, wasm
 	}
 
 	if old, exists := e.transforms[topic]; exists {
-		_ = old.Close(ctx)
+		go func(c wazero.CompiledModule) {
+			time.Sleep(5 * time.Second)
+			_ = c.Close(context.Background())
+		}(old)
 	}
 
 	e.transforms[topic] = compiled
