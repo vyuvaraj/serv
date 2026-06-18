@@ -4,6 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type goDocFunc struct {
@@ -409,6 +413,12 @@ func publishPackage(pkgDir string) {
 		os.Exit(1)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	if jwtSecret := os.Getenv("SERV_JWT_SECRET"); jwtSecret != "" {
+		token, err := generateJWT("serv-client", []byte(jwtSecret))
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -424,4 +434,24 @@ func publishPackage(pkgDir string) {
 	}
 
 	fmt.Printf("✓ Package '%s' successfully published!\n", filepath.Base(absPkgDir))
+}
+
+func generateJWT(username string, secret []byte) (string, error) {
+	header := `{"alg":"HS256","typ":"JWT"}`
+	headerB64 := base64UrlEncode([]byte(header))
+
+	claims := fmt.Sprintf(`{"username":%q,"exp":%d}`, username, time.Now().Add(24*time.Hour).Unix())
+	claimsB64 := base64UrlEncode([]byte(claims))
+
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(headerB64 + "." + claimsB64))
+	sig := mac.Sum(nil)
+	sigB64 := base64UrlEncode(sig)
+
+	return headerB64 + "." + claimsB64 + "." + sigB64, nil
+}
+
+func base64UrlEncode(data []byte) string {
+	s := base64.URLEncoding.EncodeToString(data)
+	return strings.TrimSuffix(s, "=")
 }

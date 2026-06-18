@@ -198,4 +198,70 @@ These items complete the compiler→ecosystem loop defined in Phase 10.9 and ext
 | 12.6 | **`serv-ai` adapter** | Large | ✅ Done — `ai "openai://gpt-4"`, `ai "anthropic://claude-3"`, `ai "ollama://localhost"` connection strings. Exposes `ai.complete()` and `ai.embed()` APIs. Pairs with ServStore semantic search. |
 | 12.7 | **`serv monitor`** | Medium | ✅ Done — Terminal htop-style runtime inspector. Shows live request rate, latency percentiles, goroutine count, and route-level breakdown. Fills gap before ServMetrics exists. |
 
+---
+
+## Phase 13: Adapter Expansion & Developer Experience (Proposed — Q3 2026)
+
+To align with the "Adapters First, Platform Second" strategy and widen the addressable developer audience, the following items extend the runtime adapter layer and improve onboarding:
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 13.1 | **`auth` keyword & adapter** | Medium | `auth "keycloak://host/realm"`, `auth "auth0://domain"`, `auth "oidc://issuer"` connection strings. Middleware auto-validates tokens via configured provider. | [ ] |
+| 13.2 | **`search` keyword & adapter** | Medium | `search "meilisearch://host:7700/index"`, `search "elastic://host:9200/index"` with `search.query()` and `search.index()` APIs. | [ ] |
+| 13.3 | **`mail` keyword & adapter** | Small | `mail "smtp://host:587"`, `mail "ses://us-east-1"`, `mail "sendgrid://key"` with `mail.send()` API. | [ ] |
+| 13.4 | **MySQL database adapter** | Small | Add MySQL driver to `runtime/db.go` via `database "mysql://..."` connection string. | [ ] |
+| 13.5 | **Turso/libSQL database adapter** | Small | `database "turso://db.turso.io"` — emerging edge database, high adoption signal. | [ ] |
+| 13.6 | **Redis Streams broker adapter** | Small | `broker "redis-stream://host:6379"` — common lightweight event streaming alternative. | [ ] |
+| 13.7 | **`store` keyword (multi-backend)** | Medium | `store "s3://bucket"`, `store "gcs://bucket"`, `store "r2://bucket"`, `store "local://./uploads"` with unified `store.put()` / `store.get()` API. | [ ] |
+| 13.8 | **Canonical `serv.toml` example** | Small | Add a well-documented example `serv.toml` to the repo root showing multi-file projects, env profiles, and dependency locks. | [ ] |
+| 13.9 | **VS Code Extension marketplace publish** | Small | Register publisher, package, and publish to Visual Studio Marketplace. Highest ROI discoverability item. | [ ] |
+| 13.10 | **Graceful shutdown in runtime** | Small | `signal.NotifyContext` pattern in generated `main.go` — drain connections, flush spans, close DB pools on SIGTERM. | [x] |
+| 13.11 | **Standardized error response contract** | Small | All generated HTTP handlers return `{"error": "msg", "code": "ERR_CODE", "trace_id": "..."}` on failure. | [ ] |
+| 13.12 | **API versioning helpers** | Small | `route "GET" "/v1/users"` grouping via `version "v1" { ... }` block syntax or stdlib helper. | [ ] |
+
+---
+
+## Phase 14: Next-Level Language Evolution (Proposed — Q4 2026+)
+
+These items take Serv from a capable service language to a **category-defining** platform language. Each unlocks a new class of use case or developer segment.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 14.1 | **Compile-time dependency injection** | Large | Declare service dependencies as interfaces, auto-wire implementations via `serv.toml` bindings. Enables testable architectures without runtime reflection. | [ ] |
+| 14.2 | **Hot-reload without restart (`serv run --hot`)** | Large | On `.srv` file save, recompile and swap the running binary via SO/DLL injection or process replacement with socket handoff. Zero-downtime local development. | [ ] |
+| 14.3 | **OpenAPI spec auto-generation** | Medium | `serv docs generate` emits a complete OpenAPI 3.1 spec from route declarations, request/response types, and middleware annotations. | [ ] |
+| 14.4 | **Client SDK code generation** | Large | `serv generate client --lang typescript` / `--lang python` / `--lang go` emits typed API client libraries from route declarations. No OpenAPI intermediary needed. | [ ] |
+| 14.5 | **Incremental compilation** | Large | Cache AST and codegen artifacts per-file. Only recompile changed files and their dependents. Critical for large multi-file projects (>50 files). | [ ] |
+| 14.6 | **Effect system (side-effect tracking)** | Large | Annotate functions as `pure`, `io`, or `async`. Compiler enforces that `pure` functions cannot call `io` functions. Enables safe parallelization and easier testing. | [ ] |
+| 14.7 | **`pipe` operator** | Small | `data |> transform() |> validate() |> save()` — sugar for function chaining. High readability for data transformation pipelines. | [ ] |
+| 14.8 | **Pattern matching on types** | Medium | `match value { case s: string => ..., case n: int => ..., case User { name } => ... }` — destructuring match with type narrowing. | [ ] |
+| 14.9 | **Compile-time macros** | Large | `@derive(Serialize, Validate)` annotations that generate boilerplate at compile time — similar to Rust derive or Java annotation processors. | [ ] |
+| 14.10 | **REPL with hot service context** | Medium | `serv repl --attach localhost:8080` connects to a running service and evaluates expressions against live state — inspect DB, cache, and variables interactively. | [ ] |
+| 14.11 | **Language-level circuit breaker** | Small | `resilient fn callPayment() retries 3 timeout 5s circuit_breaker { ... }` — declarative resiliency annotations on function signatures, compiled to runtime wrappers. | [ ] |
+| 14.12 | **Streaming response support** | Medium | `route "GET" "/events" (req) stream { yield { data: "ping" }; every 1s { yield heartbeat() } }` — SSE/chunked streaming as a first-class route type. | [ ] |
+| 14.13 | **GraphQL endpoint declaration** | Large | `graphql "/api" { type Query { users: [User] } resolver users() { ... } }` — native GraphQL schema + resolver syntax compiled to a performant Go handler. | [ ] |
+| 14.14 | **Cross-compilation targets** | Medium | `serv build --os linux --arch arm64` — cross-compile from any host to any Go-supported target. Enables edge/IoT deployment from a single dev machine. | [ ] |
+| 14.15 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Moves beyond diagnostics into active refactoring assistance. | [ ] |
+
+---
+
+## Phase 15: Differentiating Factors — What No Other Language Offers (Strategic)
+
+These are features that create a **moat** around Serv — capabilities that competing languages and frameworks fundamentally cannot replicate without rebuilding from scratch. Each exploits Serv's unique position as a compiled DSL with full control over code generation.
+
+| # | Item | Effort | Description | Why Nobody Else Can Do This |
+|---|------|--------|-------------|----------------------------|
+| 15.1 | **AI-assisted code generation at compile time** | Large | The compiler calls an LLM during compilation to auto-generate boilerplate: `route "GET" "/users" (req) @ai.implement { // describe intent }`. Generates handler body from natural language docstring at build time (not runtime). | Serv controls the codegen pipeline — general-purpose compilers can't insert AI steps. |
+| 15.2 | **Compile-time contract verification** | Large | The compiler statically verifies that every route handler matches its declared request/response schema. A type mismatch between the route annotation and the return value is a compile error — like TypeScript for APIs but enforced at binary generation. | Only possible in a DSL with route + type info available during compilation. |
+| 15.3 | **Automatic chaos testing injection** | Medium | `serv test --chaos` adds random latency, failures, and network errors into `db.query()`, `http.get()`, and `broker.publish()` calls during test execution — without modifying source code. Compiler knows all infra call sites. | Compiler has full knowledge of every infra callsite. General-purpose languages need external proxies. |
+| 15.4 | **Zero-config distributed tracing (no SDK)** | Small | Every `route`, `subscribe`, `spawn`, and `every` block automatically gets OTel spans with correct parent-child relationships. No import, no SDK initialization, no manual context passing — the compiler inserts it. | Only achievable when the compiler owns the concurrency and I/O primitives. Go/Java/Python need manual instrumentation. |
+| 15.5 | **Infra-aware dead code elimination** | Medium | If no `database` declaration exists, all `db.*` runtime code is excluded from the binary. If no `broker` is declared, pub/sub code is gone. Binary size matches actual usage — not maximum feature set. | Compiler knows the full dependency graph of language primitives → runtime modules. |
+| 15.6 | **Deployment manifest inference** | Medium | `serv deploy --target k8s` reads the `.srv` source: sees `database`, emits a PersistentVolumeClaim; sees `cache`, emits a Redis sidecar; sees `every`, emits a CronJob. Infrastructure requirements inferred from source code — no manual YAML. | Source code IS the infra specification. No other language can infer infra from syntax. |
+| 15.7 | **Live type narrowing from database schema** | Large | `database "postgres://..."` at compile time connects to the live database, reads the schema, and provides typed completion for `db.query()` results. `let user = db.query("SELECT * FROM users WHERE id = ?", id)` — `user.email` is auto-typed as `string?` from the schema. | The compiler is the database client. General-purpose languages need separate ORM codegen steps. |
+| 15.8 | **Cross-service type safety** | Large | When Service A defines `route "POST" "/orders" (req: OrderRequest)` and Service B calls `http.post("serv://service-a/orders", payload)`, the compiler verifies `payload` matches `OrderRequest` at compile time — across repositories using published `.srv.d` declarations. | Cross-service contracts checked at compile time. Impossible in HTTP-based systems without shared type registries. |
+| 15.9 | **Automatic API versioning from git history** | Medium | `serv docs diff v1.2.0..v1.3.0` compares route declarations between git tags and generates a changelog of API breaking changes, new endpoints, and deprecated routes. Compile-time breaking change detection. | Compiler understands route semantics — diff tools only see text. |
+| 15.10 | **MCP-native services (AI agent endpoints)** | Medium | The `tool` keyword compiles to both an HTTP endpoint AND an MCP stdio server. A single `.srv` file produces services consumable by both humans (REST) and AI agents (MCP protocol) — dual-interface from one declaration. | MCP is built into the language. Other frameworks bolt it on as middleware. |
+| 15.11 | **Compile-time resource estimation** | Medium | After compilation, emit a resource profile: "This service requires ~50MB RAM at idle, handles ~10K req/s on 2 cores, needs 1 DB connection pool (max 20)". Derived from static analysis of routes, spawn counts, and infra declarations. Useful for k8s resource requests. | The compiler has complete visibility into what the service does. Runtime profiling is the only alternative elsewhere. |
+| 15.12 | **Language-level feature flags** | Small | `@feature("new-checkout") route "POST" "/checkout/v2" (req) { ... }` — the compiler emits both the new and old handler, with a runtime feature-flag check. `serv deploy --enable new-checkout` activates it. No external feature flag service needed. | Feature boundaries visible at compile time. Other systems need runtime-only flag evaluation. |
+
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.

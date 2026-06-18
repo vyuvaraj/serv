@@ -79,9 +79,12 @@ Tracking remaining work to make Serv production-ready and competitive.
 | ✅ | Documentation site | Auto-generated docs from `.srv` source | Medium |
 | ✅ | CI/CD templates | GitHub Actions, GitLab CI configs | Low |
 | ⬜ | Docker base image | `FROM serv:latest` for easy containerization | Low |
-| ⬜ | Homebrew/Scoop | `brew install serv` / `scoop install serv` | Medium |
+| ✅ | Homebrew/Scoop | `brew install serv` / `scoop install serv` | Medium |
 | ✅ | Standard library | Importable `.srv` modules (auth, validation, pagination) | Medium |
-| ⬜ | VS Code Marketplace | Publish extension publicly | Medium |
+| ⬜ | VS Code Marketplace | Publish extension publicly (prepped, pending account) | Medium |
+| ✅ | Deploy targets | `serv deploy --target fly/railway/render/docker` | Medium |
+| ✅ | AI integration | `ai "openai://..."` keyword with complete/chat/embed | High |
+| ✅ | GitHub Release v0.1.0 | Cross-platform binaries for Windows/Linux/macOS | High |
 
 ---
 

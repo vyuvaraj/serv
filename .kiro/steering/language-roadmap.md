@@ -110,6 +110,10 @@ Improved type tracking through the compiler:
 - Struct field types tracked via `structFields` map
 - Typed arithmetic/comparison emits native Go ops (no runtime dispatch)
 - Function return type propagation to callers
+- Mixed typed/untyped operations cast the untyped side and emit native ops
+- For-loop iterator type inference from typed slice element types
+- Native `len()` emission for known slice/string types
+- Build speed: skip `go mod tidy` on repeat builds (~40% faster)
 
 ```srv
 fn add(a: int, b: int) -> int {
