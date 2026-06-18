@@ -184,7 +184,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !authenticated {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
 			return
 		}
 	}
@@ -203,14 +203,14 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.routesMu.RUnlock()
 
 	if !found {
-		http.Error(w, "Bad gateway: route match not found", http.StatusBadGateway)
+		WriteJSONError(w, r, "Bad gateway: route match not found", "ERR_ROUTE_NOT_FOUND", http.StatusBadGateway)
 		return
 	}
 
 	// Rate Limiting Check
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if h.isRateLimited(clientIP, matchedRoute.Prefix, matchedRoute.RateLimitRPM) {
-		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+		WriteJSONError(w, r, "Too Many Requests", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
 		return
 	}
 
@@ -236,7 +236,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if matchedRoute.PromptGuard && prompt != "" {
 			if IsPromptInjection(prompt) {
 				otel.EndSpan(span, fmt.Errorf("AI Prompt Guard: Injection attempt blocked"), map[string]interface{}{})
-				http.Error(w, "AI Prompt Guard: Validation failed due to safety policy violation", http.StatusBadRequest)
+				WriteJSONError(w, r, "AI Prompt Guard: Validation failed due to safety policy violation", "ERR_PROMPT_INJECTION_DETECTED", http.StatusBadRequest)
 				return
 			}
 		}
@@ -301,7 +301,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			otel.EndSpan(span, err, map[string]interface{}{})
-			http.Error(w, "Internal Server Error: WASM Middleware execution failed", http.StatusInternalServerError)
+			WriteJSONError(w, r, "Internal Server Error: WASM Middleware execution failed", "ERR_WASM_MIDDLEWARE_FAILED", http.StatusInternalServerError)
 			return
 		}
 
@@ -309,7 +309,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			decision := strings.TrimSpace(string(outputBytes))
 			if decision == "deny" {
 				otel.EndSpan(span, fmt.Errorf("Forbidden: Access Denied by Policy"), map[string]interface{}{})
-				http.Error(w, "Forbidden: Access Denied by Policy", http.StatusForbidden)
+				WriteJSONError(w, r, "Forbidden: Access Denied by Policy", "ERR_ACCESS_DENIED", http.StatusForbidden)
 				return
 			}
 			// If allowed, proceed with original request body (untouched)
@@ -331,7 +331,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
 			otel.EndSpan(span, err, map[string]interface{}{})
-			http.Error(w, "Bad Request: failed to read body", http.StatusBadRequest)
+			WriteJSONError(w, r, "Bad Request: failed to read body", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
 			return
 		}
 		r.Body.Close()
@@ -358,7 +358,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		req, err := http.NewRequestWithContext(r.Context(), "POST", publishUrl, bytes.NewReader(jsonPayload))
 		if err != nil {
 			otel.EndSpan(span, err, map[string]interface{}{})
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			WriteJSONError(w, r, "Internal Server Error", "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -373,7 +373,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp, err := client.Do(req)
 		if err != nil {
 			otel.EndSpan(span, err, map[string]interface{}{})
-			http.Error(w, "Service Unavailable: failed to bridge to queue", http.StatusServiceUnavailable)
+			WriteJSONError(w, r, "Service Unavailable: failed to bridge to queue", "ERR_QUEUE_BRIDGE_FAILED", http.StatusServiceUnavailable)
 			return
 		}
 		defer resp.Body.Close()
@@ -381,7 +381,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respBody, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode >= 400 {
 			otel.EndSpan(span, fmt.Errorf("queue publish returned %d", resp.StatusCode), map[string]interface{}{})
-			http.Error(w, fmt.Sprintf("Queue Error: %s", string(respBody)), resp.StatusCode)
+			WriteJSONError(w, r, fmt.Sprintf("Queue Error: %s", string(respBody)), "ERR_QUEUE_RESPONSE_ERROR", resp.StatusCode)
 			return
 		}
 
@@ -401,7 +401,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	targetURL, err := url.Parse(selectedTarget)
 	if err != nil {
 		otel.EndSpan(span, err, map[string]interface{}{})
-		http.Error(w, "Bad Gateway Target", http.StatusBadGateway)
+		WriteJSONError(w, r, "Bad Gateway Target", "ERR_BAD_GATEWAY_TARGET", http.StatusBadGateway)
 		return
 	}
 
@@ -566,12 +566,12 @@ func (h *GatewayHandler) decConn(target string) {
 func (h *GatewayHandler) proxyWebSocket(w http.ResponseWriter, r *http.Request, targetURL *url.URL) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "Websocket hijacking not supported", http.StatusInternalServerError)
+		WriteJSONError(w, r, "Websocket hijacking not supported", "ERR_WS_HIJACK_NOT_SUPPORTED", http.StatusInternalServerError)
 		return
 	}
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
-		http.Error(w, "Failed to hijack connection: "+err.Error(), http.StatusInternalServerError)
+		WriteJSONError(w, r, "Failed to hijack connection: "+err.Error(), "ERR_WS_HIJACK_FAILED", http.StatusInternalServerError)
 		return
 	}
 	defer clientConn.Close()

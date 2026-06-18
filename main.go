@@ -98,47 +98,51 @@ func main() {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 	mux.Handle("/", handler)
-	mux.HandleFunc("/api/admin/middleware/", func(w http.ResponseWriter, r *http.Request) {
+	handleMiddleware := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			proxy.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 			return
 		}
 		
 		// Auth check for admin registration
 		if cfg.AuthToken != "" {
 			if r.Header.Get("Authorization") != "Bearer "+cfg.AuthToken {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
 				return
 			}
 		}
 
 		parts := strings.Split(r.URL.Path, "/")
-		if len(parts) < 5 {
-			http.Error(w, "Invalid path. Use /api/admin/middleware/{name}", http.StatusBadRequest)
+		var name string
+		if len(parts) >= 6 && parts[2] == "v1" {
+			name = parts[5]
+		} else if len(parts) >= 5 {
+			name = parts[4]
+		} else {
+			proxy.WriteJSONError(w, r, "Invalid path. Use /api/v1/admin/middleware/{name}", "ERR_INVALID_PATH", http.StatusBadRequest)
 			return
 		}
-		name := parts[4]
 
 		wasmBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			proxy.WriteJSONError(w, r, "Internal Server Error", "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 			return
 		}
 
 		err = wasmManager.Register(r.Context(), name, wasmBytes)
 		if err != nil {
-			http.Error(w, "Failed to compile WASM: "+err.Error(), http.StatusBadRequest)
+			proxy.WriteJSONError(w, r, "Failed to compile WASM: "+err.Error(), "ERR_WASM_COMPILATION_FAILED", http.StatusBadRequest)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("WASM Middleware " + name + " compiled and registered"))
-	})
+	}
 
-	mux.HandleFunc("/api/routes", func(w http.ResponseWriter, r *http.Request) {
+	handleRoutes := func(w http.ResponseWriter, r *http.Request) {
 		if cfg.AuthToken != "" {
 			if r.Header.Get("Authorization") != "Bearer "+cfg.AuthToken {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
 				return
 			}
 		}
@@ -146,7 +150,7 @@ func main() {
 		if r.Method == http.MethodPost {
 			var newRoute proxy.Route
 			if err := json.NewDecoder(r.Body).Decode(&newRoute); err != nil {
-				http.Error(w, "Invalid route payload", http.StatusBadRequest)
+				proxy.WriteJSONError(w, r, "Invalid route payload", "ERR_INVALID_ROUTE_PAYLOAD", http.StatusBadRequest)
 				return
 			}
 			
@@ -155,7 +159,7 @@ func main() {
 				if os.IsNotExist(err) {
 					currentCfg = cfg
 				} else {
-					http.Error(w, "Failed to load config: "+err.Error(), http.StatusInternalServerError)
+					proxy.WriteJSONError(w, r, "Failed to load config: "+err.Error(), "ERR_CONFIG_LOAD_FAILED", http.StatusInternalServerError)
 					return
 				}
 			}
@@ -173,7 +177,7 @@ func main() {
 			}
 			
 			if err := prov.Save(currentCfg); err != nil {
-				http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+				proxy.WriteJSONError(w, r, "Failed to save config: "+err.Error(), "ERR_CONFIG_SAVE_FAILED", http.StatusInternalServerError)
 				return
 			}
 			
@@ -186,7 +190,12 @@ func main() {
 		
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(handler.GetRoutes())
-	})
+	}
+
+	mux.HandleFunc("/api/admin/middleware/", handleMiddleware)
+	mux.HandleFunc("/api/v1/admin/middleware/", handleMiddleware)
+	mux.HandleFunc("/api/routes", handleRoutes)
+	mux.HandleFunc("/api/v1/routes", handleRoutes)
 
 	log.Printf("Starting ServGate reverse proxy on %s...", cfg.Addr)
 	server := &http.Server{
