@@ -49,7 +49,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 
-		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json")
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json")
 		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
 			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
 		}
@@ -200,6 +200,14 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.StorePut", nil
 			case "get":
 				return "runtime.StoreGet", nil
+			}
+		}
+		if objStr == "search" {
+			switch e.Field {
+			case "query":
+				return "runtime.SearchQuery", nil
+			case "index":
+				return "runtime.SearchIndex", nil
 			}
 		}
 		if objStr == "wasm" {
@@ -763,6 +771,12 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "", err
 			}
 			pairs = append(pairs, fmt.Sprintf("%q: %s", k, vStr))
+		}
+		if len(pairs) == 0 {
+			if !e.ConcurrentMap {
+				return "map[string]interface{}{}", nil
+			}
+			return "runtime.NewSafeMap()", nil
 		}
 		if !e.ConcurrentMap {
 			return fmt.Sprintf("map[string]interface{}{\n\t\t%s,\n\t}", strings.Join(pairs, ",\n\t\t")), nil

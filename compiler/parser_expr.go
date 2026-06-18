@@ -501,6 +501,10 @@ func (p *Parser) parseStoreIdentifier() Expression {
 	return &Identifier{Token: p.curToken, Value: "store"}
 }
 
+func (p *Parser) parseSearchIdentifier() Expression {
+	return &Identifier{Token: p.curToken, Value: "search"}
+}
+
 
 
 // parseWorkflowIdentifier allows the `workflow` keyword to be used in

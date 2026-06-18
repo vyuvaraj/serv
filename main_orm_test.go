@@ -126,3 +126,60 @@ test "database orm basic execution test" {
 	_ = os.Remove("orm_test.db")
 }
 
+func TestMySQLDatabaseSchemeParser(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_mysql_*.srv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	srvContent := `
+database "mysql://root:secret@localhost:3306/testdb"
+
+test "mysql syntax test" {
+	assert 1 == 1
+}
+`
+	if _, err := tmpFile.WriteString(srvContent); err != nil {
+		t.Fatalf("failed to write srv file: %v", err)
+	}
+	tmpFile.Close()
+
+	runTests(tmpFile.Name(), false, "")
+}
+
+func TestSearchKeywordAndAdapter(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_search_*.srv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	srvContent := `
+search "meilisearch://localhost:7700"
+
+import { query, index } from "stdlib/search.srv"
+
+test "search adapter integration test" {
+	let doc1 = {"id": "1", "title": "Servverse architecture guide", "category": "tech"}
+	let doc2 = {"id": "2", "title": "Introduction to microservices", "category": "dev"}
+	
+	let ok1 = index("1", doc1)
+	let ok2 = index("2", doc2)
+	assert ok1 == true
+	assert ok2 == true
+	
+	let results = query("Servverse", {})
+	assert results.length() == 1
+	assert results[0].id == "1"
+	assert results[0].category == "tech"
+}
+`
+	if _, err := tmpFile.WriteString(srvContent); err != nil {
+		t.Fatalf("failed to write srv file: %v", err)
+	}
+	tmpFile.Close()
+
+	runTests(tmpFile.Name(), false, "")
+}
+

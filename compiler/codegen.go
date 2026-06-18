@@ -435,6 +435,8 @@ return c.genAiStmt(s)
 		return c.genMailStmt(s)
 	case *StoreStmt:
 		return c.genStoreStmt(s)
+	case *SearchStmt:
+		return c.genSearchStmt(s)
 	case *AuthStmt:
 		return c.genAuthStmt(s)
 	case *ServerStmt:

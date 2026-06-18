@@ -177,6 +177,16 @@ func (s *StoreStmt) statementNode()       {}
 func (s *StoreStmt) TokenLiteral() string { return s.Token.Literal }
 func (s *StoreStmt) String() string       { return "store " + s.Value.String() + "\n" }
 
+// Search Statement
+type SearchStmt struct {
+	Token Token
+	Value Expression
+}
+
+func (s *SearchStmt) statementNode()       {}
+func (s *SearchStmt) TokenLiteral() string { return s.Token.Literal }
+func (s *SearchStmt) String() string       { return "search " + s.Value.String() + "\n" }
+
 
 
 

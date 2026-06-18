@@ -218,6 +218,8 @@ To align with the "Adapters First, Platform Second" strategy and widen the addre
 | 13.10 | **Graceful shutdown in runtime** | Small | `signal.NotifyContext` pattern in generated `main.go` — drain connections, flush spans, close DB pools on SIGTERM. | [x] |
 | 13.11 | **Standardized error response contract** | Small | All generated HTTP handlers return `{"error": "msg", "code": "ERR_CODE", "trace_id": "..."}` on failure. | [x] |
 | 13.12 | **API versioning helpers** | Small | `route "GET" "/v1/users"` grouping via `version "v1" { ... }` block syntax or stdlib helper. | [ ] |
+| 13.13 | **Full OIDC discovery & JWKS validation** | Medium | For `auth "oidc://issuer"`, auto-fetch `/.well-known/openid-configuration`, cache JWKS public keys, validate RS256/ES256 signatures, and support key rotation. Currently only validates issuer claim. | [ ] |
+| 13.14 | **Auth role/scope guards** | Small | `route "GET" "/admin" (req) use [auth.role("admin")]` — compile-time syntax for role-based route access using JWT claims. | [ ] |
 
 ---
 

@@ -80,6 +80,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(TOKEN_AI, p.parseAiIdentifier)
 	p.registerPrefix(TOKEN_MAIL, p.parseMailIdentifier)
 	p.registerPrefix(TOKEN_STORE, p.parseStoreIdentifier)
+	p.registerPrefix(TOKEN_SEARCH, p.parseSearchIdentifier)
 	p.registerPrefix(TOKEN_WORKFLOW, p.parseWorkflowIdentifier)
 	p.registerPrefix(TOKEN_ASSERT, p.parseAssertExpression)
 	p.registerPrefix(TOKEN_TRUE, p.parseBooleanLiteral)
@@ -212,6 +213,11 @@ func (p *Parser) parseStatement() Statement {
 			return p.parseExpressionStatement()
 		}
 		return p.parseStoreStatement()
+	case TOKEN_SEARCH:
+		if p.peekToken.Type == TOKEN_DOT {
+			return p.parseExpressionStatement()
+		}
+		return p.parseSearchStatement()
 	case TOKEN_AUTH:
 		return p.parseAuthStatement()
 	case TOKEN_DATABASE:

@@ -379,6 +379,15 @@ func (c *Codegen) genStoreStmt(s *StoreStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\truntime.InitStore(fmt.Sprint(%s))\n}\n\n", val), nil
 }
 
+func (c *Codegen) genSearchStmt(s *SearchStmt) (string, error) {
+	val, err := c.genExpression(s.Value)
+	if err != nil {
+		return "", err
+	}
+	c.imports[`"fmt"`] = true
+	return fmt.Sprintf("func init() {\n\truntime.InitSearch(fmt.Sprint(%s))\n}\n\n", val), nil
+}
+
 
 
 

@@ -10,6 +10,7 @@ require (
 	github.com/aws/smithy-go v1.27.1
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/glebarez/go-sqlite v1.22.0
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/go-stomp/stomp/v3 v3.1.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.12.3
@@ -24,6 +25,7 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.13 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.29 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.29 // indirect

@@ -21,6 +21,9 @@ import (
 	// PostgreSQL Driver
 	_ "github.com/lib/pq"
 
+	// MySQL Driver
+	_ "github.com/go-sql-driver/mysql"
+
 	// Oracle Driver (Pure Go)
 	_ "github.com/sijms/go-ora/v2"
 
@@ -226,6 +229,26 @@ func InitDB(connStr string) {
 		}
 		configureDBPool(dbInstance)
 		LogInfo("Connected to Oracle database successfully")
+	} else if strings.HasPrefix(connStr, "mysql://") {
+		var err error
+		dsn := strings.TrimPrefix(connStr, "mysql://")
+		if strings.Contains(dsn, "@") {
+			parts := strings.SplitN(dsn, "@", 2)
+			creds := parts[0]
+			hostDb := parts[1]
+			if strings.Contains(hostDb, "/") {
+				hostDbParts := strings.SplitN(hostDb, "/", 2)
+				host := hostDbParts[0]
+				dbName := hostDbParts[1]
+				dsn = fmt.Sprintf("%s@tcp(%s)/%s", creds, host, dbName)
+			}
+		}
+		dbInstance, err = sql.Open("mysql", dsn)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to open MySQL database: %s", err.Error()))
+		}
+		configureDBPool(dbInstance)
+		LogInfo("Connected to MySQL database successfully")
 	} else if strings.HasPrefix(connStr, "mongodb://") {
 		clientOptions := options.Client().ApplyURI(connStr)
 		var err error
