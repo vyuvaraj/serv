@@ -46,6 +46,8 @@ func (s *Server) Start() error {
 	})
 	mux.HandleFunc("/api/topics/", s.authorize(s.handleTopics))
 	mux.HandleFunc("/api/v1/topics/", s.authorize(s.handleTopics))
+	mux.HandleFunc("/api/topics", s.authorize(s.handleListTopics))
+	mux.HandleFunc("/api/v1/topics", s.authorize(s.handleListTopics))
 	mux.HandleFunc("/api/publish", s.authorize(s.handlePublish))
 	mux.HandleFunc("/api/v1/publish", s.authorize(s.handlePublish))
 	mux.HandleFunc("/api/stats", s.authorize(s.handleStats))
@@ -102,6 +104,22 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r)
 	}
+}
+
+func (s *Server) handleListTopics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+	topics := s.engine.ListTopics()
+	if topics == nil {
+		topics = []broker.TopicInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"topics": topics,
+		"count":  len(topics),
+	})
 }
 
 func (s *Server) handleTopics(w http.ResponseWriter, r *http.Request) {

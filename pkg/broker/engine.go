@@ -86,6 +86,56 @@ func (e *BrokerEngine) ConfigureOffloader(endpoint, bucket, token string) {
 	e.offloader = storage.NewOffloader(endpoint, bucket, token)
 }
 
+// TopicInfo describes the state of a single topic for admin inspection.
+type TopicInfo struct {
+	Name         string `json:"name"`
+	Subscribers  int    `json:"subscribers"`
+	Partitions   int    `json:"partitions"`
+	HasTransform bool   `json:"has_transform"`
+	DLQTopic     string `json:"dlq_topic,omitempty"`
+}
+
+// ListTopics returns metadata about all known topics.
+func (e *BrokerEngine) ListTopics() []TopicInfo {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	var topics []TopicInfo
+
+	for name, subs := range e.topics {
+		info := TopicInfo{
+			Name:        name,
+			Subscribers: len(subs),
+		}
+		if parts, ok := e.partitions[name]; ok {
+			info.Partitions = len(parts)
+		}
+		if _, ok := e.transforms[name]; ok {
+			info.HasTransform = true
+		}
+		if dlq, ok := e.dlqTopics[name]; ok {
+			info.DLQTopic = dlq
+		}
+		topics = append(topics, info)
+		seen[name] = true
+	}
+
+	// Include topics that only have transforms/DLQ but no subscribers
+	for name := range e.transforms {
+		if !seen[name] {
+			info := TopicInfo{Name: name, HasTransform: true}
+			if dlq, ok := e.dlqTopics[name]; ok {
+				info.DLQTopic = dlq
+			}
+			topics = append(topics, info)
+			seen[name] = true
+		}
+	}
+
+	return topics
+}
+
 func (e *BrokerEngine) SetRaftNode(node interface{}) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
