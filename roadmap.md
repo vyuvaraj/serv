@@ -106,6 +106,65 @@ Transition ServStore into a high-capacity, metadata-optimized cluster integrated
   - [ ] **Unified Management Console (ServConsole)**: Establish a single glassmorphic dashboard visualizing cluster metrics, OTel traces, rate limits, and replication state. *(ServConsole Phase 2/3 in progress.)*
   - [ ] **serv-lang Native Tooling**: Optimize client libraries and add compiler-level support for native S3 pipeline configuration.
 
+---
+
+## Phase 8: Operational Hardening & API Quality (Proposed — Q3 2026)
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 8.1 | **Standardized `/healthz` and `/readyz` endpoints** | Small | Health and readiness probes for k8s liveness/readiness checks and ServConsole aggregation. | [ ] |
+| 8.2 | **Graceful shutdown on SIGTERM** | Small | Drain in-flight S3 requests, flush Raft log, and close cluster connections cleanly before exit. | [ ] |
+| 8.3 | **Standardized error response contract** | Small | Return `{"error": "msg", "code": "ERR_CODE", "trace_id": "..."}` alongside S3 XML errors for non-S3 endpoints. | [ ] |
+| 8.4 | **API versioning on console/admin endpoints** | Small | Version the console/admin API (`/console/v1/...`) before breaking changes accumulate. | [ ] |
+| 8.5 | **WebSocket push for cluster events** | Medium | Push real-time rebalance progress, node join/leave events, and replication lag updates to ServConsole. | [ ] |
+| 8.6 | **Bucket event notifications** | Medium | Emit events (`s3:ObjectCreated`, `s3:ObjectRemoved`) to a configurable webhook or ServQueue topic — enables event-driven architectures. | [ ] |
+| 8.7 | **S3 Select (query-in-place)** | Large | Support SQL-like queries on CSV/JSON objects without downloading them — high-value enterprise feature. | [ ] |
+| 8.8 | **Batch delete API** | Small | `POST /?delete` with XML body for bulk object deletion — missing S3 compatibility gap. | [ ] |
+
+---
+
+## Phase 9: Next-Level Distributed Storage (Proposed — Q4 2026+)
+
+These items take ServStore from a production-ready S3-compatible engine to a **category-defining intelligent storage platform** — competing with MinIO, Ceph, and AWS S3 while offering unique AI-native capabilities.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 9.1 | **Multi-modal embedding engine** | Large | Auto-generate embeddings for images (CLIP), PDFs (text extraction + embedding), and audio (Whisper transcription + embedding) on ingest — not just text. Semantic search across any content type. | [ ] |
+| 9.2 | **Vector similarity + metadata hybrid queries** | Medium | Combine vector search with metadata filters: `GET /bucket?query=semantic&q=cloud+architecture&filter=author:alice&after=2025-01-01`. Structured + unstructured search in one call. | [ ] |
+| 9.3 | **Incremental backup & point-in-time recovery** | Large | Continuous WAL-based backup to a remote target. Restore any bucket to any second in time — not just versioned objects but the exact state of the namespace. | [ ] |
+| 9.4 | **Object-level access logging** | Medium | Per-object access audit trail: who read/wrote/deleted, when, from which IP, with which identity. Immutable append-only log stored in a system bucket. SOC2/HIPAA prerequisite. | [ ] |
+| 9.5 | **S3 event notifications (CloudEvents)** | Medium | Emit CloudEvents-spec events on object lifecycle (`s3:ObjectCreated`, `s3:ObjectRemoved`, `s3:Replication`) to webhooks, ServQueue topics, or NATS subjects. | [ ] |
+| 9.6 | **Geo-aware data placement** | Large | Tag nodes with region/zone labels. Bucket policies like `replicate: { primary: us-east-1, secondary: eu-west-1, tertiary: ap-south-1 }`. Reads routed to nearest replica. | [ ] |
+| 9.7 | **Object tagging** | Small | `PUT /bucket/key?tagging` with key-value tags. Query objects by tag: `GET /bucket?tag-filter=env:prod`. S3-compatible tagging API. | [ ] |
+| 9.8 | **Server-side copy** | Small | `PUT /dest-bucket/key` with `x-amz-copy-source` header — copy objects between buckets without downloading. Required S3 compatibility gap. | [ ] |
+| 9.9 | **Bucket metrics & quota** | Medium | Per-bucket storage quota enforcement. Dashboard metrics: total size, object count, request rate, bandwidth, and growth trend. Alerts when approaching quota. | [ ] |
+| 9.10 | **WASM trigger on object events** | Large | Declare WASM functions that execute automatically on `PutObject` or `DeleteObject` — like AWS Lambda@S3 triggers but inside the storage engine. Zero-latency event processing. | [ ] |
+| 9.11 | **S3 batch operations** | Large | `POST /batch` API for bulk copy, delete, tagging, and metadata updates across thousands of objects. Job-based with progress tracking. Enterprise-scale operations. | [ ] |
+| 9.12 | **Content-type aware compression** | Medium | Automatically compress text, JSON, and log objects with zstd on write; decompress transparently on read. Storage reduction with zero client changes. | [ ] |
+| 9.13 | **Multi-user web console** | Medium | Support multiple console users with independent sessions, per-user bucket visibility, and activity history. Currently single-user embedded UI. | [ ] |
+| 9.14 | **Federation (cross-cluster namespace)** | Large | Federate multiple ServStore clusters under a single namespace. Global bucket names resolve to the owning cluster transparently — like DNS for objects. | [ ] |
+
+---
+
+## Phase 10: Differentiating Factors — What No Other Storage Engine Offers (Strategic)
+
+These create a **moat** around ServStore — capabilities that MinIO, Ceph, AWS S3, and TurboBuffer cannot replicate without fundamental architecture changes.
+
+| # | Item | Effort | Description | Why Nobody Else Can Do This |
+|---|------|--------|-------------|----------------------------|
+| 10.1 | **Compute-near-data (WASM transforms on objects)** | Already Done | Execute sandboxed WASM functions server-side on stored objects — image resize, format conversion, data validation — without downloading. Lambda@S3 but inside the storage engine with zero cold start. | Pure-Go WASM runtime embedded in the storage process. AWS Lambda@S3 has 100ms+ cold start and requires separate infrastructure. MinIO doesn't execute user code. |
+| 10.2 | **Semantic search on stored objects** | Already Done | Query objects by meaning, not just by key/prefix. `GET /bucket?query=semantic&q=distributed+consensus`. Auto-indexes text on upload. AWS S3 Vectors launched this in 2025 — ServStore already has it. | Built-in embedding + similarity search. AWS S3 Vectors is a separate feature, MinIO has no semantic search at all. ServStore was ahead of AWS here. |
+| 10.3 | **Time travel queries** | Already Done | Retrieve any object's state at any historical timestamp — not just "version X" but "state at 2pm on Tuesday". Versioning is the mechanism; time travel is the interface. | First-class temporal API. S3 versioning requires listing all versions and filtering manually. ServStore resolves timestamps to versions automatically. |
+| 10.4 | **Transform pipeline DAG** | Already Done | Chain multiple WASM transforms: `upload.pdf → extract_text.wasm → embed.wasm → index`. Multi-stage serverless pipelines inside the storage engine. | No other storage engine supports chained compute pipelines. AWS needs Step Functions + Lambda + S3 event notifications — 3 separate services. |
+| 10.5 | **Content-addressed storage with reference-counted GC** | Already Done | CAS deduplication across objects. Store once, reference many. Automatic garbage collection when last reference is deleted. Git-like addressing for data. | Few storage engines do CAS with GC. MinIO does dedup via XL erasure but not content-addressable with references. |
+| 10.6 | **AI-native object ingest pipeline** | Already Done | Text objects are automatically embedded and indexed on `PutObject` — no separate ETL pipeline, no external vector DB. Upload → searchable in one API call. | Auto-embedding on ingest. Competing systems require a separate pipeline (upload to S3 → trigger Lambda → call embedding API → write to Pinecone). ServStore does it in-process. |
+| 10.7 | **Ecosystem-integrated event streaming** | Medium | Object lifecycle events (`PutObject`, `DeleteObject`) publish to ServQueue topics automatically. The storage engine IS the event source. No webhook relay, no S3 event notification config. | Native integration with ServQueue. AWS needs S3→SNS→SQS or S3→EventBridge. MinIO needs webhook config. ServStore publishes natively. |
+| 10.8 | **Single-binary with embedded web console** | Already Done | Storage server + web UI + CLI all in one binary. No Docker, no separate admin service, no nginx. Copy one file, run it, open a browser. | Pure Go embedding. MinIO separates console into a separate service. Ceph requires a dashboard package. |
+| 10.9 | **Hybrid vector+metadata queries** | Medium | `GET /bucket?query=semantic&q=architecture&filter=author:alice&after=2025-01-01` — combine semantic similarity with structured metadata filters in one query. AWS S3 Vectors + metadata filtering inspired, but unified. | Vector search + metadata filter in one engine. AWS S3 Vectors added this in GA (Dec 2025) — ServStore can match it natively. |
+| 10.10 | **Cold-tier with transparent rehydration** | Already Done | Archive cold CAS blocks to any S3-compatible backend (Glacier, Backblaze B2). `GetObject` transparently re-hydrates — the client doesn't know the object was archived. No lifecycle transition delays. | Transparent lazy-load from cold storage. AWS Glacier needs explicit restore with hours of delay. ServStore rehydrates on first access. |
+| 10.11 | **Language-native client (compiler-generated)** | Already Done | Serv-lang's `store "servstore://host/bucket"` compiles to a type-safe S3 client with auto-auth, connection pooling, and pipeline integration. No SDK import needed. | Compiler generates the client code. Every other storage system requires manually importing an SDK. |
+| 10.12 | **AI-native positioning: Search + Compute + Store unified** | Vision | Position ServStore as the first storage engine that unifies: (1) store objects, (2) search them semantically, (3) transform them with serverless compute — all in one binary, one API, one query language. | The convergence of S3 + vector DB + serverless functions in a single engine. Nobody else offers all three together. |
+
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
 

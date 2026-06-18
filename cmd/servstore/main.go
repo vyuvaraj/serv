@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"servstore/pkg/auth"
@@ -195,6 +197,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: console,
+	}
+
 	if tlsEnabled {
 		// Validate cert/key pair is loadable before binding the port
 		if _, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey); err != nil {
@@ -209,35 +216,66 @@ func main() {
 				tls.CurveP256,
 			},
 		}
-
-		srv := &http.Server{
-			Addr:      addr,
-			Handler:   console,
-			TLSConfig: tlsCfg,
-		}
-
-		slog.Info("TLS", "status", "enabled", "min_version", "TLS 1.3", "cert", *tlsCert)
-		slog.Info("Console and S3 services starting (HTTPS)",
-			"port", *port,
-			"console_url", fmt.Sprintf("https://localhost:%d", *port),
-			"s3_url", fmt.Sprintf("https://localhost:%d", *port),
-		)
-
-		if err := srv.ListenAndServeTLS(*tlsCert, *tlsKey); err != nil {
-			slog.Error("Server startup failed", "error", err)
-			os.Exit(1)
-		}
-	} else {
-		slog.Info("TLS", "status", "disabled", "note", "Pass --tls-cert and --tls-key to enable HTTPS/TLS 1.3")
-		slog.Info("Console and S3 services starting (HTTP)",
-			"port", *port,
-			"console_url", fmt.Sprintf("http://localhost:%d", *port),
-			"s3_url", fmt.Sprintf("http://localhost:%d", *port),
-		)
-
-		if err := http.ListenAndServe(addr, console); err != nil {
-			slog.Error("Server startup failed", "error", err)
-			os.Exit(1)
-		}
+		srv.TLSConfig = tlsCfg
 	}
+
+	// Capture shutdown signals
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		if tlsEnabled {
+			slog.Info("TLS", "status", "enabled", "min_version", "TLS 1.3", "cert", *tlsCert)
+			slog.Info("Console and S3 services starting (HTTPS)",
+				"port", *port,
+				"console_url", fmt.Sprintf("https://localhost:%d", *port),
+				"s3_url", fmt.Sprintf("https://localhost:%d", *port),
+			)
+			if err := srv.ListenAndServeTLS(*tlsCert, *tlsKey); err != nil && err != http.ErrServerClosed {
+				slog.Error("Server startup failed", "error", err)
+				os.Exit(1)
+			}
+		} else {
+			slog.Info("TLS", "status", "disabled", "note", "Pass --tls-cert and --tls-key to enable HTTPS/TLS 1.3")
+			slog.Info("Console and S3 services starting (HTTP)",
+				"port", *port,
+				"console_url", fmt.Sprintf("http://localhost:%d", *port),
+				"s3_url", fmt.Sprintf("http://localhost:%d", *port),
+			)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("Server startup failed", "error", err)
+				os.Exit(1)
+			}
+		}
+	}()
+
+	<-stopChan
+	slog.Info("ServStore: Shutting down gracefully...")
+
+	// 1. Shutdown HTTP server first
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("ServStore: HTTP server forced to shutdown", "error", err)
+	}
+
+	// 2. Shut down Raft Node
+	if raftNode != nil {
+		slog.Info("ServStore: Closing Raft node...")
+		raftNode.Close()
+	}
+
+	// 3. Shut down Cluster Membership
+	if clusterMgr != nil {
+		slog.Info("ServStore: Closing cluster membership manager...")
+		clusterMgr.Stop()
+	}
+
+	// 4. Close Storage Engine
+	slog.Info("ServStore: Closing storage engine...")
+	if err := store.Close(); err != nil {
+		slog.Error("ServStore: Failed to close storage engine cleanly", "error", err)
+	}
+
+	slog.Info("ServStore: Shutdown complete")
 }

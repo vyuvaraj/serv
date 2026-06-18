@@ -51,6 +51,11 @@ func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store 
 
 func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+	if path == "/healthz" || path == "/readyz" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"healthy"}`))
+		return
+	}
 	accept := r.Header.Get("Accept")
 
 	// 1. Handle auth endpoints
