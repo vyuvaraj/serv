@@ -4,6 +4,13 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 
 ---
 
+## Differentiating Factors (Why ServTrace vs. Jaeger/Tempo/Zipkin?)
+* **Compiler-Linked Stacktraces**: Natively maps trace spans to `.srv` source code file paths and line numbers instead of generated Go binaries.
+* **Zero-Agent Collection**: Directly ingests OTLP/HTTP payloads exported by `ServShared` out-of-the-box, removing the need for Jaeger sidecars or Otel collector daemons.
+* **Extremely Lightweight**: Single static Go binary utilizing a circular memory buffer, making it perfect for rapid local debugging.
+
+---
+
 ## Phase 1: OTLP Ingest & Tree Collector (Completed)
 - [x] **OTLP Ingestion endpoint**: Supports standard `/v1/traces` HTTP POST payload ingestion.
 - [x] **Hierarchical Trace Tree**: Reconstructs parent-child relationships and calculates duration metrics.
