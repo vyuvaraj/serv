@@ -18,6 +18,8 @@ import (
 	"servstore/pkg/metrics"
 	"servstore/pkg/otel"
 	"servstore/pkg/storage"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 //go:embed assets/*
@@ -51,9 +53,12 @@ func NewWebConsole(gateway http.Handler, authProvider *auth.AuthProvider, store 
 
 func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if path == "/healthz" || path == "/readyz" {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"healthy"}`))
+	if path == "/healthz" {
+		ServShared.HealthzHandler(w, r)
+		return
+	}
+	if path == "/readyz" {
+		ServShared.ReadyzHandler(w, r)
 		return
 	}
 
