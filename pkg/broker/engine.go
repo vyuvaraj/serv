@@ -38,6 +38,8 @@ type BrokerEngine struct {
 	mu             sync.RWMutex
 	topics         map[string][]chan string
 	partitions     map[string]map[int][]chan string // Topic -> PartitionID -> SubChannels
+	groupSubs      map[string]map[string][]chan string // Topic -> GroupName -> Subscriber channels
+	groupIndices   map[string]map[string]uint64        // Topic -> GroupName -> Round-robin counter
 	transforms     map[string]wazero.CompiledModule
 	dlqTopics      map[string]string                // Topic -> DLQ topic name
 	wasmManager    *WasmManager
@@ -63,14 +65,16 @@ func NewBrokerEngine() *BrokerEngine {
 	}
 
 	engine := &BrokerEngine{
-		topics:      make(map[string][]chan string),
-		partitions:  make(map[string]map[int][]chan string),
-		transforms:  make(map[string]wazero.CompiledModule),
-		dlqTopics:   make(map[string]string),
-		wasmManager: mgr,
-		wal:         wal,
-		dedup:       NewDeduplicator(5 * time.Minute),
-		delayedMsgs: make(map[string]DelayedMessage),
+		topics:       make(map[string][]chan string),
+		partitions:   make(map[string]map[int][]chan string),
+		groupSubs:    make(map[string]map[string][]chan string),
+		groupIndices: make(map[string]map[string]uint64),
+		transforms:   make(map[string]wazero.CompiledModule),
+		dlqTopics:    make(map[string]string),
+		wasmManager:  mgr,
+		wal:          wal,
+		dedup:        NewDeduplicator(5 * time.Minute),
+		delayedMsgs:  make(map[string]DelayedMessage),
 	}
 
 	if wal != nil {
@@ -210,6 +214,22 @@ func (e *BrokerEngine) Subscribe(topic string) chan string {
 	return ch
 }
 
+// SubscribeGroup registers a subscriber channel associated with a consumer group for a topic
+func (e *BrokerEngine) SubscribeGroup(topic string, groupName string) chan string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ch := make(chan string, 100)
+	if e.groupSubs[topic] == nil {
+		e.groupSubs[topic] = make(map[string][]chan string)
+	}
+	if e.groupIndices[topic] == nil {
+		e.groupIndices[topic] = make(map[string]uint64)
+	}
+	e.groupSubs[topic][groupName] = append(e.groupSubs[topic][groupName], ch)
+	return ch
+}
+
 // SubscribePartition registers a subscriber to a specific partition index of a topic
 func (e *BrokerEngine) SubscribePartition(topic string, partition int) chan string {
 	e.mu.Lock()
@@ -245,6 +265,22 @@ func (e *BrokerEngine) Unsubscribe(topic string, ch chan string) {
 			for i, sub := range chs {
 				if sub == ch {
 					e.partitions[topic][partId] = append(chs[:i], chs[i+1:]...)
+					close(ch)
+					return
+				}
+			}
+		}
+	}
+
+	groupsMap, hasGroup := e.groupSubs[topic]
+	if hasGroup {
+		for groupName, chs := range groupsMap {
+			for i, sub := range chs {
+				if sub == ch {
+					e.groupSubs[topic][groupName] = append(chs[:i], chs[i+1:]...)
+					if len(e.groupSubs[topic][groupName]) == 0 {
+						delete(e.groupSubs[topic], groupName)
+					}
 					close(ch)
 					return
 				}
@@ -440,6 +476,12 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 
 	e.mu.RLock()
 	subs, exists := e.topics[topic]
+	groupsMap := make(map[string][]chan string)
+	if e.groupSubs[topic] != nil {
+		for gName, gSubs := range e.groupSubs[topic] {
+			groupsMap[gName] = gSubs
+		}
+	}
 	e.mu.RUnlock()
 
 	if exists {
@@ -448,6 +490,25 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 			case sub <- processed:
 			default:
 			}
+		}
+	}
+
+	for gName, gSubs := range groupsMap {
+		if len(gSubs) == 0 {
+			continue
+		}
+		e.mu.Lock()
+		if e.groupIndices[topic] == nil {
+			e.groupIndices[topic] = make(map[string]uint64)
+		}
+		idx := e.groupIndices[topic][gName]
+		e.groupIndices[topic][gName] = idx + 1
+		e.mu.Unlock()
+
+		targetChan := gSubs[idx%uint64(len(gSubs))]
+		select {
+		case targetChan <- processed:
+		default:
 		}
 	}
 
@@ -499,6 +560,12 @@ func (e *BrokerEngine) publishLocal(ctx context.Context, topic string, payload s
 
 	e.mu.RLock()
 	subs, exists := e.topics[topic]
+	groupsMap := make(map[string][]chan string)
+	if e.groupSubs[topic] != nil {
+		for gName, gSubs := range e.groupSubs[topic] {
+			groupsMap[gName] = gSubs
+		}
+	}
 	e.mu.RUnlock()
 
 	if exists {
@@ -507,6 +574,25 @@ func (e *BrokerEngine) publishLocal(ctx context.Context, topic string, payload s
 			case sub <- processed:
 			default:
 			}
+		}
+	}
+
+	for gName, gSubs := range groupsMap {
+		if len(gSubs) == 0 {
+			continue
+		}
+		e.mu.Lock()
+		if e.groupIndices[topic] == nil {
+			e.groupIndices[topic] = make(map[string]uint64)
+		}
+		idx := e.groupIndices[topic][gName]
+		e.groupIndices[topic][gName] = idx + 1
+		e.mu.Unlock()
+
+		targetChan := gSubs[idx%uint64(len(gSubs))]
+		select {
+		case targetChan <- processed:
+		default:
 		}
 	}
 

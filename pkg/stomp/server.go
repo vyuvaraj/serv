@@ -141,10 +141,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
 
-	activeSubs := make(map[string]chan string)
+	type subInfo struct {
+		topic string
+		ch    chan string
+	}
+	activeSubs := make(map[string]subInfo)
 	defer func() {
-		for topic, ch := range activeSubs {
-			s.engine.Unsubscribe(topic, ch)
+		for _, sub := range activeSubs {
+			s.engine.Unsubscribe(sub.topic, sub.ch)
 		}
 	}()
 
@@ -222,12 +226,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 		case "SUBSCRIBE":
 			destination := frame.Headers["destination"]
 			subID := frame.Headers["id"]
+			group := frame.Headers["group"]
 			if destination == "" {
 				continue
 			}
 
-			ch := s.engine.Subscribe(destination)
-			activeSubs[destination] = ch
+			var ch chan string
+			if group != "" {
+				ch = s.engine.SubscribeGroup(destination, group)
+			} else {
+				ch = s.engine.Subscribe(destination)
+			}
+			activeSubs[subID] = subInfo{topic: destination, ch: ch}
 
 			go func(topic string, id string, subChan chan string) {
 				for msg := range subChan {

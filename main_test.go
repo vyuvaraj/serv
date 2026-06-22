@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"testing"
@@ -307,6 +308,84 @@ func TestStatsWALAndDelayedTracking(t *testing.T) {
 	delayed = engine.GetDelayedMessages()
 	if len(delayed) != 0 {
 		t.Errorf("Expected 0 delayed messages after delivery, got %d", len(delayed))
+	}
+}
+
+func TestConsumerGroups(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "group-test"
+
+	// 1. Register two subscribers in worker-group-1
+	g1Sub1 := engine.SubscribeGroup(topic, "worker-group-1")
+	g1Sub2 := engine.SubscribeGroup(topic, "worker-group-1")
+
+	// 2. Register one subscriber in worker-group-2
+	g2Sub1 := engine.SubscribeGroup(topic, "worker-group-2")
+
+	// 3. Register one standard non-grouped subscriber
+	stdSub := engine.Subscribe(topic)
+
+	defer func() {
+		engine.Unsubscribe(topic, g1Sub1)
+		engine.Unsubscribe(topic, g1Sub2)
+		engine.Unsubscribe(topic, g2Sub1)
+		engine.Unsubscribe(topic, stdSub)
+	}()
+
+	// Publish 4 messages
+	for i := 1; i <= 4; i++ {
+		_, err := engine.Publish(context.Background(), topic, fmt.Sprintf("msg-%d", i))
+		if err != nil {
+			t.Fatalf("Failed to publish: %v", err)
+		}
+	}
+
+	// 4. Verify standard subscriber receives all 4 messages
+	for i := 1; i <= 4; i++ {
+		select {
+		case msg := <-stdSub:
+			expected := fmt.Sprintf("msg-%d", i)
+			if msg != expected {
+				t.Errorf("[StdSub] Expected %s, got %s", expected, msg)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("[StdSub] Timeout waiting for message %d", i)
+		}
+	}
+
+	// 5. Verify worker-group-2 single subscriber receives all 4 messages
+	for i := 1; i <= 4; i++ {
+		select {
+		case msg := <-g2Sub1:
+			expected := fmt.Sprintf("msg-%d", i)
+			if msg != expected {
+				t.Errorf("[g2Sub1] Expected %s, got %s", expected, msg)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("[g2Sub1] Timeout waiting for message %d", i)
+		}
+	}
+
+	// 6. Verify worker-group-1 subscribers split the 4 messages round-robin (2 each)
+	g1Sub1Count := 0
+	g1Sub2Count := 0
+
+	for i := 0; i < 4; i++ {
+		select {
+		case <-g1Sub1:
+			g1Sub1Count++
+		case <-g1Sub2:
+			g1Sub2Count++
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("[worker-group-1] Timeout waiting for message %d", i+1)
+		}
+	}
+
+	if g1Sub1Count != 2 || g1Sub2Count != 2 {
+		t.Errorf("Expected balanced delivery (2 and 2), but got %d and %d", g1Sub1Count, g1Sub2Count)
 	}
 }
 
