@@ -4,6 +4,13 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 
 ---
 
+## Differentiating Factors (Why ServCloud vs. K8s/Heroku/Nomad?)
+* **Zero-Config Infrastructure**: No Dockerfiles or K8s manifests required. ServCloud compiles `.srv` files directly and infers infrastructure needs from the code.
+* **Auto-Routing Gateway Sync**: Deployed services register their routes instantly with `ServGate` reverse-proxies, updating route mapping dynamically.
+* **Built-in Telemetry**: Redirects standard output/error pipes to a memory ring buffer, enabling dashboard sync without external logging agents.
+
+---
+
 ## Phase 1: Local Orchestrator MVP (Completed)
 - [x] **Process Manager**: Spawns, monitors, and stops service processes dynamically.
 - [x] **Go-compiler fallback**: Fallback mock server generation if native compiler is not available on path.
