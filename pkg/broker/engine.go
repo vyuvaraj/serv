@@ -27,18 +27,28 @@ type BrokerMetrics struct {
 	WasmDurationNs      uint64
 }
 
+type DelayedMessage struct {
+	ID         string    `json:"id"`
+	Topic      string    `json:"topic"`
+	Payload    string    `json:"payload"`
+	TargetTime time.Time `json:"target_time"`
+}
+
 type BrokerEngine struct {
-	mu          sync.RWMutex
-	topics      map[string][]chan string
-	partitions  map[string]map[int][]chan string // Topic -> PartitionID -> SubChannels
-	transforms  map[string]wazero.CompiledModule
-	dlqTopics   map[string]string                // Topic -> DLQ topic name
-	wasmManager *WasmManager
-	Metrics     BrokerMetrics
-	wal         *storage.WAL
-	raftNode    interface{}
-	offloader   *storage.Offloader
-	dedup       *Deduplicator
+	mu             sync.RWMutex
+	topics         map[string][]chan string
+	partitions     map[string]map[int][]chan string // Topic -> PartitionID -> SubChannels
+	transforms     map[string]wazero.CompiledModule
+	dlqTopics      map[string]string                // Topic -> DLQ topic name
+	wasmManager    *WasmManager
+	Metrics        BrokerMetrics
+	wal            *storage.WAL
+	raftNode       interface{}
+	offloader      *storage.Offloader
+	dedup          *Deduplicator
+	delayedMu      sync.Mutex
+	delayedMsgs    map[string]DelayedMessage
+	delayedCounter uint64
 }
 
 func NewBrokerEngine() *BrokerEngine {
@@ -60,6 +70,7 @@ func NewBrokerEngine() *BrokerEngine {
 		wasmManager: mgr,
 		wal:         wal,
 		dedup:       NewDeduplicator(5 * time.Minute),
+		delayedMsgs: make(map[string]DelayedMessage),
 	}
 
 	if wal != nil {
@@ -359,7 +370,25 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 
 	if delayVal, ok := ctx.Value("delay-ms").(string); ok && delayVal != "" {
 		if delayMs, err := strconv.Atoi(delayVal); err == nil && delayMs > 0 {
+			msgID, _ := ctx.Value("message-id").(string)
+			if msgID == "" {
+				msgID = fmt.Sprintf("msg-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&e.delayedCounter, 1))
+			}
+			targetTime := time.Now().Add(time.Duration(delayMs) * time.Millisecond)
+
+			e.delayedMu.Lock()
+			e.delayedMsgs[msgID] = DelayedMessage{
+				ID:         msgID,
+				Topic:      topic,
+				Payload:    payload,
+				TargetTime: targetTime,
+			}
+			e.delayedMu.Unlock()
+
 			time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
+				e.delayedMu.Lock()
+				delete(e.delayedMsgs, msgID)
+				e.delayedMu.Unlock()
 				_, _ = e.publishLocal(context.Background(), topic, payload)
 			})
 			return payload, nil
@@ -483,4 +512,22 @@ func (e *BrokerEngine) publishLocal(ctx context.Context, topic string, payload s
 
 	otel.EndSpan(span, nil, map[string]interface{}{})
 	return processed, nil
+}
+
+func (e *BrokerEngine) GetWALEntries() ([]storage.LogEntry, error) {
+	if e.wal == nil {
+		return []storage.LogEntry{}, nil
+	}
+	return e.wal.Recover()
+}
+
+func (e *BrokerEngine) GetDelayedMessages() []DelayedMessage {
+	e.delayedMu.Lock()
+	defer e.delayedMu.Unlock()
+
+	msgs := make([]DelayedMessage, 0, len(e.delayedMsgs))
+	for _, m := range e.delayedMsgs {
+		msgs = append(msgs, m)
+	}
+	return msgs
 }

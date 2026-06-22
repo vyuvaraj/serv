@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"servqueue/pkg/broker"
+	"servqueue/pkg/storage"
 )
 
 type Server struct {
@@ -239,6 +240,16 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	
+	walEntries, _ := s.engine.GetWALEntries()
+	if walEntries == nil {
+		walEntries = []storage.LogEntry{}
+	}
+	delayedMsgs := s.engine.GetDelayedMessages()
+	if delayedMsgs == nil {
+		delayedMsgs = []broker.DelayedMessage{}
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "healthy",
 		"metrics": map[string]interface{}{
@@ -247,6 +258,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			"wasm_execution_errors":    s.engine.Metrics.WasmExecutionErrors,
 			"wasm_duration_ns":         s.engine.Metrics.WasmDurationNs,
 		},
+		"wal_entries":      walEntries,
+		"delayed_messages": delayedMsgs,
 	})
 }
 

@@ -248,3 +248,65 @@ func TestDelayedMessageDelivery(t *testing.T) {
 		t.Fatal("Timeout waiting for delayed message delivery")
 	}
 }
+
+func TestStatsWALAndDelayedTracking(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "stats-test"
+
+	// Publish normal message to write to WAL
+	_, err := engine.Publish(context.Background(), topic, "normal-payload")
+	if err != nil {
+		t.Fatalf("Failed to publish normal message: %v", err)
+	}
+
+	// Publish delayed message
+	ctx := context.WithValue(context.Background(), "delay-ms", "300")
+	ctx = context.WithValue(ctx, "message-id", "msg-delayed-1")
+	_, err = engine.Publish(ctx, topic, "delayed-payload")
+	if err != nil {
+		t.Fatalf("Failed to publish delayed message: %v", err)
+	}
+
+	// Verify WAL entry exists
+	entries, err := engine.GetWALEntries()
+	if err != nil {
+		t.Fatalf("Failed to get WAL entries: %v", err)
+	}
+	if len(entries) < 1 {
+		t.Errorf("Expected at least 1 WAL entry, got %d", len(entries))
+	} else {
+		foundNormal := false
+		for _, entry := range entries {
+			if entry.Payload == "normal-payload" {
+				foundNormal = true
+				break
+			}
+		}
+		if !foundNormal {
+			t.Errorf("Could not find 'normal-payload' in WAL entries")
+		}
+	}
+
+	// Verify delayed message exists
+	delayed := engine.GetDelayedMessages()
+	if len(delayed) != 1 {
+		t.Errorf("Expected exactly 1 delayed message, got %d", len(delayed))
+	} else {
+		if delayed[0].ID != "msg-delayed-1" || delayed[0].Payload != "delayed-payload" {
+			t.Errorf("Unexpected delayed message: %+v", delayed[0])
+		}
+	}
+
+	// Wait for delayed message delivery
+	time.Sleep(350 * time.Millisecond)
+
+	// Verify delayed message is cleared
+	delayed = engine.GetDelayedMessages()
+	if len(delayed) != 0 {
+		t.Errorf("Expected 0 delayed messages after delivery, got %d", len(delayed))
+	}
+}
+
