@@ -11,6 +11,7 @@ require (
 	github.com/hashicorp/raft v1.7.3
 	github.com/klauspost/reedsolomon v1.14.0
 	github.com/tetratelabs/wazero v1.12.0
+	github.com/vyuvaraj/ServShared v0.0.0-20260622105040-a5e471152273
 	github.com/yalue/onnxruntime_go v1.31.0
 	github.com/zeebo/blake3 v0.2.4
 	google.golang.org/grpc v1.81.1
@@ -76,7 +77,6 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/vyuvaraj/ServShared v0.0.0-20260622105040-a5e471152273 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
@@ -104,4 +104,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
