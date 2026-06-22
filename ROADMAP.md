@@ -1,5 +1,10 @@
 # ServTunnel Roadmap
 
+## Differentiating Factors (Why ServTunnel vs. Ngrok/Cloudflared?)
+* **Ecosystem Tracing**: Deep, zero-config integration with ServShared. Spans from incoming tunneled requests automatically connect to parent request traces and flow directly into ServConsole.
+* **REST-Accessible Inspector**: Unlike proprietary dashboards, the built-in request inspector has a fully scriptable REST API for CI/CD test automation.
+* **Zero Vendor Lock-in**: Self-host the relay server in one command (`servtunnel server`) with no licensing overhead.
+
 ## Current Status: v0.1.0 — MVP
 
 ### ✅ Completed (v0.1.0)
