@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.24
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.0
+	github.com/vyuvaraj/ServShared v0.0.0-20260622110625-0403a0126514
 )
 
 require (
@@ -25,5 +26,4 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3 // indirect
 	github.com/aws/smithy-go v1.27.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
-	github.com/vyuvaraj/ServShared v0.0.0-20260622110625-0403a0126514 // indirect
 )
