@@ -722,3 +722,81 @@ deny * *
 		t.Errorf("Expected status 403 for denied POST, got %d", resp3.StatusCode)
 	}
 }
+
+func TestEdgeRequestValidation(t *testing.T) {
+	// 1. Mock backend
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	// 2. Setup gateway with validation schema
+	routes := []proxy.Route{
+		{
+			Prefix: "/api/users",
+			Target: backend.URL,
+			ValidationSchema: map[string]string{
+				"name":  "required,string",
+				"email": "required,email",
+				"age":   "int",
+			},
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Case A: Valid request
+	validBody := `{"name":"John Doe","email":"john@example.com","age":30}`
+	resp, err := client.Post(gwServer.URL+"/api/users", "application/json", strings.NewReader(validBody))
+	if err != nil {
+		t.Fatalf("Valid request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 for valid body, got %d", resp.StatusCode)
+	}
+
+	// Case B: Missing required field (name)
+	missingBody := `{"email":"john@example.com","age":30}`
+	resp, err = client.Post(gwServer.URL+"/api/users", "application/json", strings.NewReader(missingBody))
+	if err != nil {
+		t.Fatalf("Missing field request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected status 400 for missing required field, got %d", resp.StatusCode)
+	}
+	var errResp proxy.APIError
+	json.NewDecoder(resp.Body).Decode(&errResp)
+	if !strings.Contains(errResp.Error, "required") {
+		t.Errorf("Expected error to mention 'required', got: %s", errResp.Error)
+	}
+
+	// Case C: Invalid email format
+	badEmailBody := `{"name":"John Doe","email":"john-at-example.com","age":30}`
+	resp, err = client.Post(gwServer.URL+"/api/users", "application/json", strings.NewReader(badEmailBody))
+	if err != nil {
+		t.Fatalf("Invalid email request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected status 400 for invalid email, got %d", resp.StatusCode)
+	}
+
+	// Case D: Invalid age type (float instead of int)
+	floatAgeBody := `{"name":"John Doe","email":"john@example.com","age":30.5}`
+	resp, err = client.Post(gwServer.URL+"/api/users", "application/json", strings.NewReader(floatAgeBody))
+	if err != nil {
+		t.Fatalf("Float age request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected status 400 for float age, got %d", resp.StatusCode)
+	}
+}

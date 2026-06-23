@@ -23,17 +23,18 @@ import (
 )
 
 type Route struct {
-	Prefix             string   `json:"prefix"`
-	Target             string   `json:"target"`
-	Targets            []string `json:"targets,omitempty"`             // Multiple backend targets
-	LoadBalancer       string   `json:"load_balancer,omitempty"`       // "round_robin" or "least_conn"
-	TranspileType      string   `json:"transpile_type,omitempty"`      // "rest_to_grpc" or "grpc_to_rest"
-	Middleware         string   `json:"middleware,omitempty"`          // Request Middleware
-	ResponseMiddleware string   `json:"response_middleware,omitempty"` // Response Middleware
-	RateLimitRPM       int      `json:"rate_limit_rpm,omitempty"`      // Requests Per Minute Limit
-	PromptGuard        bool     `json:"prompt_guard,omitempty"`        // AI Prompt Guard
-	PiiRedact          bool     `json:"pii_redact,omitempty"`          // AI PII Redaction
-	SemanticCache      bool     `json:"semantic_cache,omitempty"`      // AI Semantic Cache
+	Prefix             string            `json:"prefix"`
+	Target             string            `json:"target"`
+	Targets            []string          `json:"targets,omitempty"`             // Multiple backend targets
+	LoadBalancer       string            `json:"load_balancer,omitempty"`       // "round_robin" or "least_conn"
+	TranspileType      string            `json:"transpile_type,omitempty"`      // "rest_to_grpc" or "grpc_to_rest"
+	Middleware         string            `json:"middleware,omitempty"`          // Request Middleware
+	ResponseMiddleware string            `json:"response_middleware,omitempty"` // Response Middleware
+	RateLimitRPM       int               `json:"rate_limit_rpm,omitempty"`      // Requests Per Minute Limit
+	PromptGuard        bool              `json:"prompt_guard,omitempty"`        // AI Prompt Guard
+	PiiRedact          bool              `json:"pii_redact,omitempty"`          // AI PII Redaction
+	SemanticCache      bool              `json:"semantic_cache,omitempty"`      // AI Semantic Cache
+	ValidationSchema   map[string]string `json:"validation_schema,omitempty"`   // Edge request validation rules
 }
 
 type rateLimiter struct {
@@ -222,6 +223,27 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if span != nil {
 		traceparent = fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID)
 		r.Header.Set("traceparent", traceparent)
+	}
+
+	// Edge Request Validation (JSON Schema)
+	if len(matchedRoute.ValidationSchema) > 0 {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			otel.EndSpan(span, err, map[string]interface{}{})
+			WriteJSONError(w, r, "Bad request: failed to read body", "ERR_VALIDATION_FAILED", http.StatusBadRequest)
+			return
+		}
+		r.Body.Close()
+
+		if err := ValidateRequest(bodyBytes, matchedRoute.ValidationSchema); err != nil {
+			otel.EndSpan(span, err, map[string]interface{}{})
+			WriteJSONError(w, r, err.Error(), "ERR_VALIDATION_FAILED", http.StatusBadRequest)
+			return
+		}
+
+		// Restore request body for subsequent handlers
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		r.ContentLength = int64(len(bodyBytes))
 	}
 
 	// Read request body to apply AI checks
