@@ -87,11 +87,11 @@ These items take ServGate from a capable reverse proxy to a **category-defining 
 | 9.2 | **Developer portal (API playground)** | Large | Embedded interactive API explorer (Swagger UI-style) served from the gateway. Developers can try endpoints directly with auth token injection. | [ ] |
 | 9.3 | **Request/response transformation rules** | Medium | Declarative JSON-path transformations applied to request body or response before forwarding — no WASM needed for simple field mapping/filtering. | [ ] |
 | 9.4 | **Multi-tenant API key management** | Large | Issue, rotate, and revoke API keys per tenant. Per-key rate limits, usage analytics, and key-scoped route access. Full lifecycle via admin API. | [ ] |
-| 9.5 | **Canary/blue-green traffic splitting** | Medium | Route a percentage of traffic to a canary backend: `"target": [{"url": "v2", "weight": 10}, {"url": "v1", "weight": 90}]`. Gradual rollouts without a service mesh. | [ ] |
+| 9.5 | **Canary/blue-green traffic splitting** | Medium | Route a percentage of traffic to a canary backend: `"targets_weighted": [{"url": "v2", "weight": 10}, {"url": "v1", "weight": 90}]`. Gradual rollouts without a service mesh. | [x] |
 | 9.6 | **Request validation (JSON Schema)** | Medium | Attach JSON Schema to routes — reject malformed requests at the gateway before they hit backends. Return structured validation errors. | [x] |
-| 9.7 | **Response caching (HTTP cache layer)** | Medium | Configurable HTTP response cache with TTL, cache-key rules, and invalidation API. Reduces backend load for idempotent GET routes. | [ ] |
+| 9.7 | **Response caching (HTTP cache layer)** | Medium | Configurable HTTP response cache with TTL, cache-key rules, and invalidation API. Reduces backend load for idempotent GET routes. | [x] |
 | 9.8 | **GraphQL federation proxy** | Large | Route GraphQL queries to multiple Serv backends, merge schemas, and execute federated resolvers. Position ServGate as a GraphQL supergraph router. | [ ] |
-| 9.9 | **Request logging & audit trail** | Medium | Structured JSON log of every request/response (headers, body hash, latency, status) with configurable retention and PII redaction. | [ ] |
+| 9.9 | **Request logging & audit trail** | Medium | Structured JSONL log of every request/response (method, path, latency, status, trace_id) with configurable per-route toggle. | [x] |
 | 9.10 | **Plugin SDK (Go interface)** | Medium | Define a Go interface for plugins: `type Middleware interface { OnRequest(ctx) Response }`. Allows community to build compiled middleware without WASM overhead. | [ ] |
 | 9.11 | **IP allowlisting/blocklisting** | Small | Per-route or global IP-based access control. CIDR range support. Auto-block on repeated 4xx/5xx from same source. | [x] |
 | 9.12 | **Mutual TLS (mTLS) for backends** | Medium | Support client certificate authentication when forwarding to backend services — required for zero-trust service-to-service communication. | [ ] |

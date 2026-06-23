@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -22,10 +24,17 @@ import (
 	"servgate/pkg/wasm"
 )
 
+// WeightedTarget represents a backend target with a traffic weight for canary/blue-green deployments.
+type WeightedTarget struct {
+	URL    string `json:"url"`
+	Weight int    `json:"weight"`
+}
+
 type Route struct {
 	Prefix             string            `json:"prefix"`
 	Target             string            `json:"target"`
 	Targets            []string          `json:"targets,omitempty"`             // Multiple backend targets
+	TargetsWeighted    []WeightedTarget  `json:"targets_weighted,omitempty"`    // Weighted canary/blue-green targets
 	LoadBalancer       string            `json:"load_balancer,omitempty"`       // "round_robin" or "least_conn"
 	TranspileType      string            `json:"transpile_type,omitempty"`      // "rest_to_grpc" or "grpc_to_rest"
 	Middleware         string            `json:"middleware,omitempty"`          // Request Middleware
@@ -37,6 +46,10 @@ type Route struct {
 	ValidationSchema   map[string]string `json:"validation_schema,omitempty"`   // Edge request validation rules
 	IPAllowlist        []string          `json:"ip_allowlist,omitempty"`        // Allowed IP or CIDR list
 	IPBlocklist        []string          `json:"ip_blocklist,omitempty"`        // Blocked IP or CIDR list
+	AccessLog          bool              `json:"access_log,omitempty"`          // Enable structured JSONL access logging
+	AccessLogPath      string            `json:"access_log_path,omitempty"`     // Path to access log file (default: ./logs/access.jsonl)
+	CacheTTLSeconds    int               `json:"cache_ttl_seconds,omitempty"`   // Response cache TTL in seconds (0 = disabled)
+	CacheMethods       []string          `json:"cache_methods,omitempty"`       // HTTP methods to cache (default: ["GET"])
 }
 
 type rateLimiter struct {
@@ -49,29 +62,52 @@ type GatewayHandler struct {
 	routesMu       sync.RWMutex
 	wasm           *wasm.MiddlewareManager
 	authToken      string
-	rateLimiters   map[string]*rateLimiter   // key: clientIP + routePrefix
+	ratLimiters    map[string]*rateLimiter   // key: clientIP + routePrefix
 	limiterMu      sync.Mutex
 	rrIndices      map[string]int            // route prefix -> current index
 	activeConns    map[string]int            // target URL -> active conn count
 	balancerMu     sync.Mutex
 	semanticCaches map[string]*SemanticCache // route prefix -> cache
+	accessLoggers  map[string]*AccessLogger  // route prefix -> logger
+	responseCaches map[string]*ResponseCache // route prefix -> cache
 }
 
 func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken string) *GatewayHandler {
 	semanticCaches := make(map[string]*SemanticCache)
+	accessLoggers := make(map[string]*AccessLogger)
+	responseCaches := make(map[string]*ResponseCache)
+
 	for _, route := range routes {
 		if route.SemanticCache {
 			semanticCaches[route.Prefix] = NewSemanticCache(0.85)
 		}
+		if route.AccessLog {
+			logPath := route.AccessLogPath
+			if logPath == "" {
+				logPath = "./logs/access.jsonl"
+			}
+			logger, err := NewAccessLogger(logPath)
+			if err != nil {
+				log.Printf("Gateway: failed to create access logger for %s: %v", route.Prefix, err)
+			} else {
+				accessLoggers[route.Prefix] = logger
+			}
+		}
+		if route.CacheTTLSeconds > 0 {
+			responseCaches[route.Prefix] = NewResponseCache(time.Duration(route.CacheTTLSeconds) * time.Second)
+		}
 	}
+
 	return &GatewayHandler{
 		routes:         routes,
 		wasm:           wasm,
 		authToken:      authToken,
-		rateLimiters:   make(map[string]*rateLimiter),
+		ratLimiters:    make(map[string]*rateLimiter),
 		rrIndices:      make(map[string]int),
 		activeConns:    make(map[string]int),
 		semanticCaches: semanticCaches,
+		accessLoggers:  accessLoggers,
+		responseCaches: responseCaches,
 	}
 }
 
@@ -86,6 +122,25 @@ func (h *GatewayHandler) UpdateRoutes(newRoutes []Route) {
 		if route.SemanticCache {
 			if _, exists := h.semanticCaches[route.Prefix]; !exists {
 				h.semanticCaches[route.Prefix] = NewSemanticCache(0.85)
+			}
+		}
+		if route.CacheTTLSeconds > 0 {
+			if _, exists := h.responseCaches[route.Prefix]; !exists {
+				h.responseCaches[route.Prefix] = NewResponseCache(time.Duration(route.CacheTTLSeconds) * time.Second)
+			}
+		}
+		if route.AccessLog {
+			if _, exists := h.accessLoggers[route.Prefix]; !exists {
+				logPath := route.AccessLogPath
+				if logPath == "" {
+					logPath = "./logs/access.jsonl"
+				}
+				logger, err := NewAccessLogger(logPath)
+				if err != nil {
+					log.Printf("Gateway: failed to create access logger for %s: %v", route.Prefix, err)
+				} else {
+					h.accessLoggers[route.Prefix] = logger
+				}
 			}
 		}
 	}
@@ -106,6 +161,16 @@ func (h *GatewayHandler) GetActiveConnections() map[string]int {
 		res[k] = v
 	}
 	return res
+}
+
+// Close shuts down all background resources (access loggers, cache eviction goroutines).
+func (h *GatewayHandler) Close() {
+	for _, logger := range h.accessLoggers {
+		logger.Close()
+	}
+	for _, cache := range h.responseCaches {
+		cache.Stop()
+	}
 }
 
 // RetryingTransport implements http.RoundTripper executing retries on network drops
@@ -152,10 +217,10 @@ func (h *GatewayHandler) isRateLimited(clientIP, routePrefix string, limit int) 
 
 	key := clientIP + ":" + routePrefix
 	h.limiterMu.Lock()
-	lim, exists := h.rateLimiters[key]
+	lim, exists := h.ratLimiters[key]
 	if !exists {
 		lim = &rateLimiter{}
-		h.rateLimiters[key] = lim
+		h.ratLimiters[key] = lim
 	}
 	h.limiterMu.Unlock()
 
@@ -183,6 +248,8 @@ func (h *GatewayHandler) isRateLimited(clientIP, routePrefix string, limit int) 
 }
 
 func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
 	if r.URL.Path == "/api/docs" {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(docsHTML))
@@ -255,9 +322,54 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	span := otel.StartSpan(fmt.Sprintf("%s %s", r.Method, r.URL.Path), traceparent)
 	
 	// Inject trace context headers
+	var traceID string
 	if span != nil {
 		traceparent = fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID)
 		r.Header.Set("traceparent", traceparent)
+		traceID = span.TraceID
+	}
+
+	// Response Cache — check for cache hit before proxying
+	var cacheKey string
+	var routeCache *ResponseCache
+	if matchedRoute.CacheTTLSeconds > 0 && IsCacheableMethod(r.Method, matchedRoute.CacheMethods) {
+		routeCache = h.responseCaches[matchedRoute.Prefix]
+		if routeCache != nil {
+			cacheKey = CacheKey(r.Method, r.URL.Path, r.URL.RawQuery)
+			if entry, hit := routeCache.Get(cacheKey); hit {
+				// Serve from cache
+				for k, vs := range entry.Headers {
+					for _, v := range vs {
+						w.Header().Add(k, v)
+					}
+				}
+				w.Header().Set("X-Cache", "HIT")
+				w.WriteHeader(entry.StatusCode)
+				w.Write(entry.Body)
+				otel.EndSpan(span, nil, map[string]interface{}{
+					"http.route": matchedRoute.Prefix,
+					"cache.hit":  true,
+				})
+				// Access log for cache hits
+				if logger, ok := h.accessLoggers[matchedRoute.Prefix]; ok {
+					logger.Log(LogEntry{
+						Timestamp:    start.UTC().Format(time.RFC3339),
+						Method:       r.Method,
+						Path:         r.URL.Path,
+						Route:        matchedRoute.Prefix,
+						ClientIP:     clientIP,
+						Status:       entry.StatusCode,
+						LatencyMs:    time.Since(start).Milliseconds(),
+						RequestSize:  r.ContentLength,
+						ResponseSize: len(entry.Body),
+						UserAgent:    r.Header.Get("User-Agent"),
+						TraceID:      traceID,
+						Target:       "cache",
+					})
+				}
+				return
+			}
+		}
 	}
 
 	// Edge Request Validation (JSON Schema)
@@ -505,6 +617,15 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Method = http.MethodPost
 	}
 
+	// Determine if we need to capture the response body (for caching or access logging)
+	needCapture := routeCache != nil && cacheKey != ""
+	rec := NewStatusRecordingResponseWriter(w, needCapture)
+
+	// Add canary target header for observability
+	if len(matchedRoute.TargetsWeighted) > 0 {
+		rec.Header().Set("X-Canary-Target", selectedTarget)
+	}
+
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = &RetryingTransport{base: http.DefaultTransport}
 
@@ -570,7 +691,22 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Custom Director rewrite to strip routing prefix
 	r.URL.Path = "/" + strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, matchedRoute.Prefix), "/")
 
-	proxy.ServeHTTP(w, r)
+	if needCapture {
+		w.Header().Set("X-Cache", "MISS")
+	}
+
+	proxy.ServeHTTP(rec, r)
+
+	// Store response in cache if applicable
+	if needCapture && rec.StatusCode >= 200 && rec.StatusCode < 300 {
+		routeCache.Set(cacheKey, rec.Body(), rec.StatusCode, rec.CapturedHeaders())
+	}
+
+	// Access logging
+	if logger, ok := h.accessLoggers[matchedRoute.Prefix]; ok {
+		logger.Log(BuildLogEntry(r, rec, matchedRoute.Prefix, selectedTarget, traceID, start, ""))
+	}
+
 	otel.EndSpan(span, nil, map[string]interface{}{
 		"http.route":   matchedRoute.Prefix,
 		"proxy.target": selectedTarget,
@@ -578,6 +714,25 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GatewayHandler) selectTarget(route *Route) string {
+	// Weighted targets take highest priority (canary/blue-green)
+	if len(route.TargetsWeighted) > 0 {
+		totalWeight := 0
+		for _, wt := range route.TargetsWeighted {
+			totalWeight += wt.Weight
+		}
+		if totalWeight > 0 {
+			r := rand.Intn(totalWeight)
+			accum := 0
+			for _, wt := range route.TargetsWeighted {
+				accum += wt.Weight
+				if r < accum {
+					return wt.URL
+				}
+			}
+			return route.TargetsWeighted[0].URL
+		}
+	}
+
 	if len(route.Targets) == 0 {
 		return route.Target
 	}
@@ -603,6 +758,26 @@ func (h *GatewayHandler) selectTarget(route *Route) string {
 	selected := route.Targets[idx%len(route.Targets)]
 	h.rrIndices[route.Prefix] = (idx + 1) % len(route.Targets)
 	return selected
+}
+
+// InvalidateCache removes entries matching the prefix from a route's response cache.
+func (h *GatewayHandler) InvalidateCache(routePrefix, keyPrefix string) int {
+	if cache, ok := h.responseCaches[routePrefix]; ok {
+		return cache.Invalidate(keyPrefix)
+	}
+	// If no specific route, clear all caches matching the route prefix
+	total := 0
+	for rp, cache := range h.responseCaches {
+		if strings.HasPrefix(rp, routePrefix) || routePrefix == "" {
+			total += cache.Invalidate("")
+		}
+	}
+	return total
+}
+
+// GetResponseCaches returns the response cache map for admin inspection.
+func (h *GatewayHandler) GetResponseCaches() map[string]*ResponseCache {
+	return h.responseCaches
 }
 
 func (h *GatewayHandler) incConn(target string) {

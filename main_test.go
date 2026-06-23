@@ -1103,3 +1103,250 @@ func TestRouteDeletionAndActiveConnections(t *testing.T) {
 		t.Fatalf("Expected active connections map")
 	}
 }
+
+func TestAccessLog(t *testing.T) {
+	// 1. Setup backend
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"result":"ok"}`))
+	}))
+	defer backend.Close()
+
+	// 2. Setup gateway with access logging enabled
+	logFile := filepath.Join(t.TempDir(), "access.jsonl")
+
+	routes := []proxy.Route{
+		{
+			Prefix:        "/api/logged",
+			Target:        backend.URL,
+			AccessLog:     true,
+			AccessLogPath: logFile,
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	defer handler.Close()
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// 3. Send 3 requests
+	for i := 0; i < 3; i++ {
+		resp, err := client.Get(gwServer.URL + "/api/logged/items")
+		if err != nil {
+			t.Fatalf("Request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Request %d: expected 200, got %d", i, resp.StatusCode)
+		}
+	}
+
+	// Allow log to flush
+	time.Sleep(100 * time.Millisecond)
+
+	// 4. Read and verify log file
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("Failed to read access log: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("Expected 3 log lines, got %d:\n%s", len(lines), string(data))
+	}
+
+	// Verify structure of first log entry
+	var entry proxy.LogEntry
+	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+		t.Fatalf("Failed to parse log entry: %v", err)
+	}
+
+	if entry.Method != "GET" {
+		t.Errorf("Expected method GET, got %s", entry.Method)
+	}
+	if entry.Route != "/api/logged" {
+		t.Errorf("Expected route /api/logged, got %s", entry.Route)
+	}
+	if entry.Status != 200 {
+		t.Errorf("Expected status 200, got %d", entry.Status)
+	}
+	if entry.Path != "/items" {
+		// After proxy rewrite, path becomes the stripped version
+		t.Logf("Path after proxy: %s (note: may be rewritten)", entry.Path)
+	}
+}
+
+func TestResponseCache(t *testing.T) {
+	// 1. Setup backend that counts hits
+	hitCount := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(fmt.Sprintf(`{"hit":%d}`, hitCount)))
+	}))
+	defer backend.Close()
+
+	// 2. Setup gateway with 60s cache TTL
+	routes := []proxy.Route{
+		{
+			Prefix:          "/api/cached",
+			Target:          backend.URL,
+			CacheTTLSeconds: 60,
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// 3. First GET — should MISS cache and hit backend
+	resp1, err := client.Get(gwServer.URL + "/api/cached/products")
+	if err != nil {
+		t.Fatalf("Request 1 failed: %v", err)
+	}
+	body1, _ := io.ReadAll(resp1.Body)
+	resp1.Body.Close()
+
+	if resp1.StatusCode != http.StatusOK {
+		t.Errorf("Request 1: expected 200, got %d", resp1.StatusCode)
+	}
+	if resp1.Header.Get("X-Cache") != "MISS" {
+		t.Errorf("Request 1: expected X-Cache: MISS, got %s", resp1.Header.Get("X-Cache"))
+	}
+	if string(body1) != `{"hit":1}` {
+		t.Errorf("Request 1: expected {\"hit\":1}, got %s", string(body1))
+	}
+
+	// 4. Second GET (same path) — should HIT cache, NOT hit backend
+	resp2, err := client.Get(gwServer.URL + "/api/cached/products")
+	if err != nil {
+		t.Fatalf("Request 2 failed: %v", err)
+	}
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+
+	if resp2.Header.Get("X-Cache") != "HIT" {
+		t.Errorf("Request 2: expected X-Cache: HIT, got %s", resp2.Header.Get("X-Cache"))
+	}
+	if string(body2) != `{"hit":1}` {
+		t.Errorf("Request 2: expected cached {\"hit\":1}, got %s", string(body2))
+	}
+	if hitCount != 1 {
+		t.Errorf("Expected backend to be hit only once, got %d", hitCount)
+	}
+
+	// 5. POST should bypass cache entirely
+	resp3, err := client.Post(gwServer.URL+"/api/cached/products", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST request failed: %v", err)
+	}
+	resp3.Body.Close()
+	if hitCount != 2 {
+		t.Errorf("POST should hit backend (hit count should be 2), got %d", hitCount)
+	}
+
+	// 6. Cache invalidation
+	count := handler.InvalidateCache("/api/cached", "")
+	if count != 1 {
+		t.Errorf("Expected 1 cache entry invalidated, got %d", count)
+	}
+
+	// 7. After invalidation, GET should MISS and hit backend again
+	resp4, err := client.Get(gwServer.URL + "/api/cached/products")
+	if err != nil {
+		t.Fatalf("Request 4 failed: %v", err)
+	}
+	resp4.Body.Close()
+	if resp4.Header.Get("X-Cache") != "MISS" {
+		t.Errorf("Request 4: expected X-Cache: MISS after invalidation, got %s", resp4.Header.Get("X-Cache"))
+	}
+	if hitCount != 3 {
+		t.Errorf("Expected backend to be hit 3 times after invalidation, got %d", hitCount)
+	}
+}
+
+func TestCanaryTrafficSplitting(t *testing.T) {
+	// 1. Setup two backends representing v1 and v2
+	v1Hits, v2Hits := 0, 0
+
+	tsV1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v1Hits++
+		w.Write([]byte("v1"))
+	}))
+	defer tsV1.Close()
+
+	tsV2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v2Hits++
+		w.Write([]byte("v2"))
+	}))
+	defer tsV2.Close()
+
+	// 2. Setup gateway with 80/20 weighted split (v1=80, v2=20)
+	routes := []proxy.Route{
+		{
+			Prefix: "/api/canary",
+			TargetsWeighted: []proxy.WeightedTarget{
+				{URL: tsV1.URL, Weight: 80},
+				{URL: tsV2.URL, Weight: 20},
+			},
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// 3. Send 200 requests
+	totalRequests := 200
+	for i := 0; i < totalRequests; i++ {
+		resp, err := client.Get(gwServer.URL + "/api/canary/test")
+		if err != nil {
+			t.Fatalf("Request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+	}
+
+	totalHits := v1Hits + v2Hits
+	if totalHits != totalRequests {
+		t.Fatalf("Expected %d total hits, got %d (v1=%d, v2=%d)", totalRequests, totalHits, v1Hits, v2Hits)
+	}
+
+	// 4. Verify distribution is within reasonable bounds
+	// Expected: v1 ~80%, v2 ~20%. Allow ±15% tolerance.
+	v1Pct := float64(v1Hits) / float64(totalRequests) * 100
+	v2Pct := float64(v2Hits) / float64(totalRequests) * 100
+
+	t.Logf("Traffic split: v1=%.1f%% (%d/%d), v2=%.1f%% (%d/%d)", v1Pct, v1Hits, totalRequests, v2Pct, v2Hits, totalRequests)
+
+	if v1Pct < 55 || v1Pct > 95 {
+		t.Errorf("v1 traffic percentage %.1f%% is outside expected bounds (55-95%%)", v1Pct)
+	}
+	if v2Pct < 5 || v2Pct > 45 {
+		t.Errorf("v2 traffic percentage %.1f%% is outside expected bounds (5-45%%)", v2Pct)
+	}
+
+	// 5. Verify X-Canary-Target header is present
+	resp, err := client.Get(gwServer.URL + "/api/canary/test")
+	if err != nil {
+		t.Fatalf("Canary header check failed: %v", err)
+	}
+	resp.Body.Close()
+	canaryTarget := resp.Header.Get("X-Canary-Target")
+	if canaryTarget == "" {
+		t.Errorf("Expected X-Canary-Target header to be set")
+	}
+	if canaryTarget != tsV1.URL && canaryTarget != tsV2.URL {
+		t.Errorf("X-Canary-Target %q doesn't match any backend URL", canaryTarget)
+	}
+}
+

@@ -256,6 +256,34 @@ func main() {
 	mux.HandleFunc("/api/admin/connections", withAdminRateLimit(60, handleConnections))
 	mux.HandleFunc("/api/v1/admin/connections", withAdminRateLimit(60, handleConnections))
 
+	// Cache invalidation admin endpoint
+	handleCacheInvalidation := func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthToken != "" {
+			if r.Header.Get("Authorization") != "Bearer "+cfg.AuthToken {
+				proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		if r.Method != http.MethodDelete {
+			proxy.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+			return
+		}
+
+		prefix := r.URL.Query().Get("prefix")
+		count := handler.InvalidateCache(prefix, "")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":            "success",
+			"entries_invalidated": count,
+			"prefix":            prefix,
+		})
+	}
+	mux.HandleFunc("/api/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
+	mux.HandleFunc("/api/v1/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
+
 	log.Printf("Starting ServGate reverse proxy on %s...", cfg.Addr)
 	server := &http.Server{
 		Addr:    cfg.Addr,
