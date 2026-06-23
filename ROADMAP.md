@@ -23,10 +23,10 @@ This roadmap outlines the planned development phases for the ServMesh library-le
 - [x] **Automatic Retries**: Implements exponential backoff retries on request timeouts.
 - [x] **OTel Context Propagation**: Transparent trace header injection via ServShared.
 
-## Phase 3: Security & Network Controls (Planned)
-- [ ] **Dynamic mTLS**: Auto-provisioned client/server certificates for zero-trust inter-service encryption.
-- [ ] **Registry JWT Protection**: Secure API registration with shared `SERV_JWT_SECRET` verification.
-- [ ] **Canary Traffic Splitting**: Route percentage of traffic to new versions at client-side.
+## Phase 3: Security & Network Controls (Completed)
+- [x] **Dynamic mTLS**: Auto-provisioned client/server certificates for zero-trust inter-service encryption.
+- [x] **Registry JWT Protection**: Secure API registration with shared `SERV_JWT_SECRET` verification.
+- [x] **Canary Traffic Splitting**: Route percentage of traffic to new versions at client-side.
 
 ## Phase 4: Console & Observability (Planned)
 - [ ] **Topology Map**: Real-time dependency graph visualization in ServConsole.

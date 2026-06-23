@@ -3,9 +3,17 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	mrand "math/rand"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,19 +30,26 @@ type MeshTransport struct {
 	registryURL string
 	
 	mu          sync.Mutex
-	cache       map[string][]string // service name -> list of addresses
+	cache       map[string][]registry.Instance // service name -> list of instances
 	cacheExpiry map[string]time.Time
 	breakers    map[string]*resilience.CircuitBreaker // target -> breaker
 	rrIndex     map[string]int
 	
 	cacheTTL    time.Duration
+	tlsConfig   *tls.Config
 }
 
 func NewMeshTransport(registryURL string, cacheTTL time.Duration) *MeshTransport {
+	transport := &http.Transport{
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	return &MeshTransport{
-		base:        http.DefaultTransport,
+		base:        transport,
 		registryURL: strings.TrimSuffix(registryURL, "/"),
-		cache:       make(map[string][]string),
+		cache:       make(map[string][]registry.Instance),
 		cacheExpiry: make(map[string]time.Time),
 		breakers:    make(map[string]*resilience.CircuitBreaker),
 		rrIndex:     make(map[string]int),
@@ -87,7 +102,11 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		clonedReq := req.Clone(req.Context())
-		clonedReq.URL.Scheme = targetURL.Scheme
+		if t.tlsConfig != nil {
+			clonedReq.URL.Scheme = "https"
+		} else {
+			clonedReq.URL.Scheme = targetURL.Scheme
+		}
 		clonedReq.URL.Host = targetURL.Host
 		clonedReq.Host = targetURL.Host
 
@@ -131,7 +150,7 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("mesh: inter-service request failed after %d attempts: %w", maxRetries, lastErr)
 }
 
-func (t *MeshTransport) resolve(ctx context.Context, serviceName string) ([]string, error) {
+func (t *MeshTransport) resolve(ctx context.Context, serviceName string) ([]registry.Instance, error) {
 	t.mu.Lock()
 	if exp, ok := t.cacheExpiry[serviceName]; ok && time.Now().Before(exp) {
 		targets := t.cache[serviceName]
@@ -162,29 +181,24 @@ func (t *MeshTransport) resolve(ctx context.Context, serviceName string) ([]stri
 		return nil, err
 	}
 
-	var targets []string
-	for _, inst := range instances {
-		targets = append(targets, inst.Address)
-	}
-
 	t.mu.Lock()
-	t.cache[serviceName] = targets
+	t.cache[serviceName] = instances
 	t.cacheExpiry[serviceName] = time.Now().Add(t.cacheTTL)
 	t.mu.Unlock()
 
-	return targets, nil
+	return instances, nil
 }
 
-func (t *MeshTransport) selectTarget(serviceName string, targets []string) string {
+func (t *MeshTransport) selectTarget(serviceName string, targets []registry.Instance) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Filter targets by circuit breaker state
-	var available []string
-	for _, target := range targets {
-		breaker, ok := t.breakers[target]
+	var available []registry.Instance
+	for _, inst := range targets {
+		breaker, ok := t.breakers[inst.Address]
 		if !ok || breaker.Allow() == nil {
-			available = append(available, target)
+			available = append(available, inst)
 		}
 	}
 
@@ -192,10 +206,41 @@ func (t *MeshTransport) selectTarget(serviceName string, targets []string) strin
 		return ""
 	}
 
-	idx := t.rrIndex[serviceName]
-	selected := available[idx%len(available)]
-	t.rrIndex[serviceName] = (idx + 1) % len(available)
-	return selected
+	// Calculate sum of weights and check if they are all default
+	totalWeight := 0
+	allDefault := true
+	for _, inst := range available {
+		w := inst.Weight
+		if w <= 0 {
+			w = 100
+		} else {
+			allDefault = false
+		}
+		totalWeight += w
+	}
+
+	if allDefault {
+		idx := t.rrIndex[serviceName]
+		selected := available[idx%len(available)].Address
+		t.rrIndex[serviceName] = (idx + 1) % len(available)
+		return selected
+	}
+
+	// Perform weighted selection
+	val := mrand.Intn(totalWeight)
+	current := 0
+	for _, inst := range available {
+		w := inst.Weight
+		if w <= 0 {
+			w = 100
+		}
+		current += w
+		if val < current {
+			return inst.Address
+		}
+	}
+
+	return available[0].Address
 }
 
 func (t *MeshTransport) getBreaker(target string) *resilience.CircuitBreaker {
@@ -209,4 +254,112 @@ func (t *MeshTransport) getBreaker(target string) *resilience.CircuitBreaker {
 		t.breakers[target] = breaker
 	}
 	return breaker
+}
+
+// SetupmTLS generates keys, CSR, requests signed cert from registry, and configures TLS configs.
+func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtToken string) (*tls.Config, *tls.Config, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate key: %w", err)
+	}
+
+	subj := pkix.Name{
+		CommonName:   serviceName + ".servverse",
+		Organization: []string{"Servverse"},
+	}
+	template := &x509.CertificateRequest{
+		Subject:            subj,
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
+		DNSNames:           []string{serviceName, serviceName + ".servverse", "localhost"},
+	}
+
+	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, template, priv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create CSR: %w", err)
+	}
+
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
+
+	payload := map[string]string{
+		"service": serviceName,
+		"csr":     string(csrPEM),
+	}
+	bodyBytes, _ := json.Marshal(payload)
+
+	csrURL := fmt.Sprintf("%s/api/csr", t.registryURL)
+	req, err := http.NewRequestWithContext(ctx, "POST", csrURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if jwtToken != "" {
+		req.Header.Set("Authorization", "Bearer "+jwtToken)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("CSR request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, nil, fmt.Errorf("CSR signing failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var respData struct {
+		Certificate string `json:"certificate"`
+		CA          string `json:"ca"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
+		return nil, nil, err
+	}
+
+	keyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+
+	tlsCert, err := tls.X509KeyPair([]byte(respData.Certificate), keyPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse X509 key pair: %w", err)
+	}
+
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM([]byte(respData.CA)) {
+		return nil, nil, fmt.Errorf("failed to append CA cert")
+	}
+
+	clientTLSConfig := &tls.Config{
+		Certificates:       []tls.Certificate{tlsCert},
+		RootCAs:            caPool,
+		InsecureSkipVerify: true,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			opts := x509.VerifyOptions{
+				DNSName:       serviceName + ".servverse",
+				Intermediates: x509.NewCertPool(),
+				Roots:         caPool,
+				KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			}
+			for _, cert := range cs.PeerCertificates[1:] {
+				opts.Intermediates.AddCert(cert)
+			}
+			_, err := cs.PeerCertificates[0].Verify(opts)
+			return err
+		},
+	}
+
+	serverTLSConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+	}
+
+	t.tlsConfig = clientTLSConfig
+	if transport, ok := t.base.(*http.Transport); ok {
+		transport.TLSClientConfig = clientTLSConfig
+	}
+
+	return clientTLSConfig, serverTLSConfig, nil
 }
