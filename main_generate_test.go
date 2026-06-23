@@ -120,3 +120,80 @@ type testGeneratorWrapper struct {
 func NewClientGeneratorFromProgram(prog *compiler.Program) *testGeneratorWrapper {
 	return &testGeneratorWrapper{compiler.NewClientGenerator(prog)}
 }
+
+func TestValidationSchemaExtraction(t *testing.T) {
+	srvContent := `
+route "POST" "/users" (req) {
+    let errors = validate(req.body, {
+        "name": "required,string",
+        "email": "required,email",
+        "age": "int"
+    })
+    return { "success": true }
+}
+`
+	tmpFile := "temp_test_validation.srv"
+	if err := os.WriteFile(tmpFile, []byte(srvContent), 0644); err != nil {
+		t.Fatalf("Failed to write temporary test file: %v", err)
+	}
+	defer os.Remove(tmpFile)
+
+	_, prog, err := parseProject(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to parse project: %v", err)
+	}
+
+	// 1. Test OpenAPI Spec generation
+	openAPIJson, err := compiler.GenerateOpenAPI(prog)
+	if err != nil {
+		t.Fatalf("OpenAPI generation failed: %v", err)
+	}
+
+	// Ensure properties and required lists are parsed
+	if !strings.Contains(openAPIJson, `"name"`) || !strings.Contains(openAPIJson, `"email"`) || !strings.Contains(openAPIJson, `"age"`) {
+		t.Errorf("OpenAPI does not contain validation properties: %s", openAPIJson)
+	}
+	if !strings.Contains(openAPIJson, `"required"`) || !strings.Contains(openAPIJson, `"integer"`) {
+		t.Errorf("OpenAPI missing field constraints: %s", openAPIJson)
+	}
+
+	// 2. Test Client SDK generations
+	g := NewClientGeneratorFromProgram(prog)
+
+	// TS
+	tsCode, err := g.GenerateTypeScript()
+	if err != nil {
+		t.Fatalf("TS SDK generation failed: %v", err)
+	}
+	if !strings.Contains(tsCode, "export interface PostUsersRequest") ||
+		!strings.Contains(tsCode, "name: string;") ||
+		!strings.Contains(tsCode, "age?: number;") ||
+		!strings.Contains(tsCode, "postUsers(body: PostUsersRequest)") {
+		t.Errorf("TS SDK missing typed validation contract: %s", tsCode)
+	}
+
+	// Python
+	pyCode, err := g.GeneratePython()
+	if err != nil {
+		t.Fatalf("Python SDK generation failed: %v", err)
+	}
+	if !strings.Contains(pyCode, "class PostUsersRequest:") ||
+		!strings.Contains(pyCode, "name: str") ||
+		!strings.Contains(pyCode, "age: Optional[int]") ||
+		!strings.Contains(pyCode, "post_users(self, body: PostUsersRequest)") {
+		t.Errorf("Python SDK missing typed validation dataclass: %s", pyCode)
+	}
+
+	// Go
+	goCode, err := g.GenerateGo()
+	if err != nil {
+		t.Fatalf("Go SDK generation failed: %v", err)
+	}
+	if !strings.Contains(goCode, "type PostUsersRequest struct") ||
+		!strings.Contains(goCode, "Name string") ||
+		!strings.Contains(goCode, "Age *int") ||
+		!strings.Contains(goCode, "PostUsers(body PostUsersRequest)") {
+		t.Errorf("Go SDK missing typed validation struct: %s", goCode)
+	}
+}
+

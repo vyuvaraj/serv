@@ -102,6 +102,35 @@ func (g *ClientGenerator) GenerateTypeScript() (string, error) {
 		buf.WriteString("}\n\n")
 	}
 
+	// Generate validation request interfaces
+	for _, route := range g.Routes {
+		methodLower := strings.ToLower(route.Method)
+		if methodLower == "post" || methodLower == "put" || methodLower == "patch" {
+			rules, keys := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				methodName := g.deriveMethodName(route.Method, route.Path)
+				reqTypeName := strings.Title(methodName) + "Request"
+				buf.WriteString(fmt.Sprintf("export interface %s {\n", reqTypeName))
+				for _, k := range keys {
+					ruleVal := rules[k]
+					tsType := "string"
+					if strings.Contains(ruleVal, "int") || strings.Contains(ruleVal, "float") {
+						tsType = "number"
+					} else if strings.Contains(ruleVal, "bool") {
+						tsType = "boolean"
+					}
+					isOptional := !strings.Contains(ruleVal, "required")
+					optStr := ""
+					if isOptional {
+						optStr = "?"
+					}
+					buf.WriteString(fmt.Sprintf("  %s%s: %s;\n", k, optStr, tsType))
+				}
+				buf.WriteString("}\n\n")
+			}
+		}
+	}
+
 	// Generate Client class
 	buf.WriteString(`export class Client {
   private baseUrl: string;
@@ -142,7 +171,13 @@ func (g *ClientGenerator) GenerateTypeScript() (string, error) {
 
 		hasBody := strings.ToLower(route.Method) == "post" || strings.ToLower(route.Method) == "put" || strings.ToLower(route.Method) == "patch"
 		if hasBody {
-			methodArgs = append(methodArgs, "body: any")
+			rules, _ := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				reqTypeName := strings.Title(methodName) + "Request"
+				methodArgs = append(methodArgs, "body: "+reqTypeName)
+			} else {
+				methodArgs = append(methodArgs, "body: any")
+			}
 		}
 
 		argsStr := strings.Join(methodArgs, ", ")
@@ -216,6 +251,37 @@ func (g *ClientGenerator) GeneratePython() (string, error) {
 		buf.WriteString("\n")
 	}
 
+	// Generate validation request dataclasses
+	for _, route := range g.Routes {
+		methodLower := strings.ToLower(route.Method)
+		if methodLower == "post" || methodLower == "put" || methodLower == "patch" {
+			rules, keys := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				methodName := g.deriveMethodName(route.Method, route.Path)
+				reqTypeName := strings.Title(methodName) + "Request"
+				buf.WriteString("@dataclass\n")
+				buf.WriteString(fmt.Sprintf("class %s:\n", reqTypeName))
+				for _, k := range keys {
+					ruleVal := rules[k]
+					pyType := "str"
+					if strings.Contains(ruleVal, "int") {
+						pyType = "int"
+					} else if strings.Contains(ruleVal, "float") {
+						pyType = "float"
+					} else if strings.Contains(ruleVal, "bool") {
+						pyType = "bool"
+					}
+					isOptional := !strings.Contains(ruleVal, "required")
+					if isOptional {
+						pyType = fmt.Sprintf("Optional[%s] = None", pyType)
+					}
+					buf.WriteString(fmt.Sprintf("    %s: %s\n", k, pyType))
+				}
+				buf.WriteString("\n")
+			}
+		}
+	}
+
 	// Generate Client class
 	buf.WriteString(`class Client:
     def __init__(self, base_url: str = "http://localhost:8080", token: str = ""):
@@ -256,7 +322,14 @@ func (g *ClientGenerator) GeneratePython() (string, error) {
 
 		hasBody := strings.ToLower(route.Method) == "post" || strings.ToLower(route.Method) == "put" || strings.ToLower(route.Method) == "patch"
 		if hasBody {
-			methodArgs = append(methodArgs, "body: Any")
+			rules, _ := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				rawMethodName := g.deriveMethodName(route.Method, route.Path)
+				reqTypeName := strings.Title(rawMethodName) + "Request"
+				methodArgs = append(methodArgs, "body: "+reqTypeName)
+			} else {
+				methodArgs = append(methodArgs, "body: Any")
+			}
 		}
 
 		argsStr := strings.Join(methodArgs, ", ")
@@ -343,6 +416,40 @@ func (g *ClientGenerator) GenerateGo() (string, error) {
 		buf.WriteString("}\n\n")
 	}
 
+	// Generate validation request structs
+	for _, route := range g.Routes {
+		methodLower := strings.ToLower(route.Method)
+		if methodLower == "post" || methodLower == "put" || methodLower == "patch" {
+			rules, keys := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				methodName := g.deriveMethodName(route.Method, route.Path)
+				reqTypeName := strings.Title(methodName) + "Request"
+				buf.WriteString(fmt.Sprintf("type %s struct {\n", reqTypeName))
+				for _, k := range keys {
+					ruleVal := rules[k]
+					goType := "string"
+					if strings.Contains(ruleVal, "int") {
+						goType = "int"
+					} else if strings.Contains(ruleVal, "float") {
+						goType = "float64"
+					} else if strings.Contains(ruleVal, "bool") {
+						goType = "bool"
+					}
+					isOptional := !strings.Contains(ruleVal, "required")
+					tagOpt := ""
+					if isOptional {
+						tagOpt = ",omitempty"
+						if goType == "int" || goType == "float64" || goType == "bool" {
+							goType = "*" + goType
+						}
+					}
+					buf.WriteString(fmt.Sprintf("	%s %s `json:%q`\n", strings.Title(k), goType, strings.ToLower(k)+tagOpt))
+				}
+				buf.WriteString("}\n\n")
+			}
+		}
+	}
+
 	// Generate Client struct
 	buf.WriteString(`type Client struct {
 	BaseURL    string
@@ -411,7 +518,14 @@ func (c *Client) request(method, path string, body interface{}) (map[string]inte
 
 		hasBody := strings.ToLower(route.Method) == "post" || strings.ToLower(route.Method) == "put" || strings.ToLower(route.Method) == "patch"
 		if hasBody {
-			methodArgs = append(methodArgs, "body interface{}")
+			rules, _ := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				rawMethodName := g.deriveMethodName(route.Method, route.Path)
+				reqTypeName := strings.Title(rawMethodName) + "Request"
+				methodArgs = append(methodArgs, "body "+reqTypeName)
+			} else {
+				methodArgs = append(methodArgs, "body interface{}")
+			}
 		}
 
 		argsStr := strings.Join(methodArgs, ", ")

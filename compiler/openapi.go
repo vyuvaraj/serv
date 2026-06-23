@@ -131,10 +131,38 @@ func GenerateOpenAPI(prog *Program) (string, error) {
 		// Add Request Body if POST/PUT
 		methodLower := strings.ToLower(route.Method)
 		if methodLower == "post" || methodLower == "put" || methodLower == "patch" {
+			reqSchema := &OpenAPISchema{
+				Type:       "object",
+				Properties: make(map[string]*OpenAPISchema),
+			}
+
+			rules, keys := parseValidationMap(route.Body)
+			if len(rules) > 0 {
+				for _, k := range keys {
+					ruleVal := rules[k]
+					fieldSchema := &OpenAPISchema{}
+					if strings.Contains(ruleVal, "string") || strings.Contains(ruleVal, "email") {
+						fieldSchema.Type = "string"
+					} else if strings.Contains(ruleVal, "int") {
+						fieldSchema.Type = "integer"
+					} else if strings.Contains(ruleVal, "float") {
+						fieldSchema.Type = "number"
+					} else if strings.Contains(ruleVal, "bool") {
+						fieldSchema.Type = "boolean"
+					} else {
+						fieldSchema.Type = "string"
+					}
+					reqSchema.Properties[k] = fieldSchema
+					if strings.Contains(ruleVal, "required") {
+						reqSchema.Required = append(reqSchema.Required, k)
+					}
+				}
+			}
+
 			op.RequestBody = &OpenAPIRequestBody{
 				Content: map[string]*OpenAPIMediaType{
 					"application/json": {
-						Schema: &OpenAPISchema{Type: "object"},
+						Schema: reqSchema,
 					},
 				},
 			}
@@ -215,4 +243,80 @@ func parseTypeToSchema(typ string) *OpenAPISchema {
 		// Custom struct reference
 		return &OpenAPISchema{Ref: "#/components/schemas/" + cleanType}
 	}
+}
+
+func parseValidationMap(body *BlockStmt) (map[string]string, []string) {
+	if body == nil {
+		return nil, nil
+	}
+
+	var findValidate func(stmts []Statement) *CallExpr
+	findValidate = func(stmts []Statement) *CallExpr {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *LetStmt:
+				if call, ok := s.Value.(*CallExpr); ok {
+					if ident, ok := call.Function.(*Identifier); ok && ident.Value == "validate" {
+						return call
+					}
+				}
+			case *ExprStmt:
+				if call, ok := s.Value.(*CallExpr); ok {
+					if ident, ok := call.Function.(*Identifier); ok && ident.Value == "validate" {
+						return call
+					}
+				}
+			case *IfStmt:
+				if call := findValidate(s.Body.Statements); call != nil {
+					return call
+				}
+				if s.ElseBody != nil {
+					if call := findValidate(s.ElseBody.Statements); call != nil {
+						return call
+					}
+				}
+			case *BlockStmt:
+				if call := findValidate(s.Statements); call != nil {
+					return call
+				}
+			case *ForStmt:
+				if call := findValidate(s.Body.Statements); call != nil {
+					return call
+				}
+			case *TryCatchStmt:
+				if call := findValidate(s.TryBody.Statements); call != nil {
+					return call
+				}
+				if s.CatchBody != nil {
+					if call := findValidate(s.CatchBody.Statements); call != nil {
+						return call
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	call := findValidate(body.Statements)
+	if call == nil || len(call.Arguments) < 2 {
+		return nil, nil
+	}
+
+	mapLit, ok := call.Arguments[1].(*MapLiteral)
+	if !ok {
+		return nil, nil
+	}
+
+	rules := make(map[string]string)
+	var keys []string
+
+	for _, key := range mapLit.KeyOrder {
+		expr := mapLit.Pairs[key]
+		if strLit, ok := expr.(*StringLiteral); ok {
+			rules[key] = strLit.Value
+			keys = append(keys, key)
+		}
+	}
+
+	return rules, keys
 }
