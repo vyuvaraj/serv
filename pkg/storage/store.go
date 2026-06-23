@@ -44,6 +44,13 @@ type LifecycleRule struct {
 	ExpirationDays int    `json:"expiration_days"` // Delete objects older than this many days
 }
 
+type EventNotificationRule struct {
+	ID         string   `json:"id"`
+	Events     []string `json:"events"`
+	FilterKey  string   `json:"filter_key,omitempty"`
+	WebhookURL string   `json:"webhook_url"`
+}
+
 type WASMTrigger struct {
 	Event       string `json:"event"`                  // "ObjectCreated:Put", "ObjectRemoved:Delete", or "*"
 	WASMKey     string `json:"wasm_key"`               // Key of the compiled WASM binary inside the bucket
@@ -54,13 +61,14 @@ type WASMTrigger struct {
 }
 
 type Bucket struct {
-	Name               string          `json:"name"`
-	CreatedTime        time.Time       `json:"created_time"`
-	Versioning         string          `json:"versioning"` // "Enabled", "Suspended", "Disabled"
-	Lifecycle          []LifecycleRule `json:"lifecycle,omitempty"`
-	ContentAddressable bool            `json:"content_addressable,omitempty"`
-	Quota              int64           `json:"quota,omitempty"`
-	Triggers           []WASMTrigger   `json:"triggers,omitempty"`
+	Name               string                  `json:"name"`
+	CreatedTime        time.Time               `json:"created_time"`
+	Versioning         string                  `json:"versioning"` // "Enabled", "Suspended", "Disabled"
+	Lifecycle          []LifecycleRule         `json:"lifecycle,omitempty"`
+	ContentAddressable bool                    `json:"content_addressable,omitempty"`
+	Quota              int64                   `json:"quota,omitempty"`
+	Triggers           []WASMTrigger           `json:"triggers,omitempty"`
+	NotificationConfig []EventNotificationRule `json:"notification_config,omitempty"`
 }
 
 type PartInfo struct {
@@ -96,6 +104,8 @@ type StorageEngine interface {
 	GetBucketQuota(ctx context.Context, bucket string) (int64, error)
 	SetBucketTriggers(ctx context.Context, bucket string, triggers []WASMTrigger) error
 	GetBucketTriggers(ctx context.Context, bucket string) ([]WASMTrigger, error)
+	SetBucketNotifications(ctx context.Context, bucket string, rules []EventNotificationRule) error
+	GetBucketNotifications(ctx context.Context, bucket string) ([]EventNotificationRule, error)
 
 
 

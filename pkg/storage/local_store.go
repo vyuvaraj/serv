@@ -2121,4 +2121,32 @@ func (s *LocalStore) GetBucketTriggers(ctx context.Context, bucket string) ([]WA
 	return b.Triggers, nil
 }
 
+func (s *LocalStore) SetBucketNotifications(ctx context.Context, bucket string, rules []EventNotificationRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	b, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return err
+	}
+
+	b.NotificationConfig = rules
+	return s.writeBucketMeta(bucket, b)
+}
+
+func (s *LocalStore) GetBucketNotifications(ctx context.Context, bucket string) ([]EventNotificationRule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	b, err := s.readBucketMeta(bucket)
+	if err != nil {
+		return nil, err
+	}
+
+	if b.NotificationConfig == nil {
+		return []EventNotificationRule{}, nil
+	}
+	return b.NotificationConfig, nil
+}
+
 

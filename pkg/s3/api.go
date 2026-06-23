@@ -287,6 +287,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.handleGetBucketQuota(w, r, bucket)
 			} else if r.URL.Query().Has("triggers") {
 				g.handleGetBucketTriggers(w, r, bucket)
+			} else if r.URL.Query().Has("notification") {
+				g.handleGetBucketNotifications(w, r, bucket)
 			} else {
 				g.handleListObjects(w, r, bucket)
 			}
@@ -301,6 +303,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				g.handlePutBucketQuota(w, r, bucket)
 			} else if r.URL.Query().Has("triggers") {
 				g.handlePutBucketTriggers(w, r, bucket)
+			} else if r.URL.Query().Has("notification") {
+				g.handlePutBucketNotifications(w, r, bucket)
 			} else {
 				g.handleCreateBucket(w, r, bucket)
 			}
@@ -622,6 +626,58 @@ func (g *Gateway) handleGetBucketTriggers(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(triggers)
+}
+
+func (g *Gateway) handlePutBucketNotifications(w http.ResponseWriter, r *http.Request, bucket string) {
+	var rules []storage.EventNotificationRule
+	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
+		g.writeError(w, http.StatusBadRequest, "InvalidJSON", "Failed to decode notifications JSON body.")
+		return
+	}
+
+	// Validate rules
+	for _, rule := range rules {
+		if rule.ID == "" || len(rule.Events) == 0 || rule.WebhookURL == "" {
+			g.writeError(w, http.StatusBadRequest, "InvalidRule", "Rule must specify 'id', 'events' and 'webhook_url'.")
+			return
+		}
+	}
+
+	payload, err := json.Marshal(rules)
+	if err != nil {
+		g.writeError(w, http.StatusInternalServerError, "InternalError", "Failed to marshal rules payload.")
+		return
+	}
+
+	err = g.proposeOrExecute(w, r, "SetBucketNotifications", bucket, "", payload, func() error {
+		return g.store.SetBucketNotifications(r.Context(), bucket, rules)
+	})
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (g *Gateway) handleGetBucketNotifications(w http.ResponseWriter, r *http.Request, bucket string) {
+	rules, err := g.store.GetBucketNotifications(r.Context(), bucket)
+	if err != nil {
+		if errors.Is(err, storage.ErrBucketNotFound) {
+			g.writeError(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+			return
+		}
+		g.writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(rules)
 }
 
 func (g *Gateway) handleListObjects(w http.ResponseWriter, r *http.Request, bucket string) {
@@ -2284,6 +2340,68 @@ func (g *Gateway) notifyEvent(eventName, bucket, key string, size int64, etag st
 				}
 				slog.Info("WASM trigger executed successfully", "wasm_key", tr.WASMKey, "output", string(out))
 			}(t, wasmBytes)
+		}
+	}()
+
+	// CloudEvents S3 Notifications Dispatch in a goroutine
+	go func() {
+		rules, err := g.store.GetBucketNotifications(context.Background(), bucket)
+		if err != nil {
+			return
+		}
+
+		for _, rule := range rules {
+			// Match event
+			eventMatched := false
+			for _, e := range rule.Events {
+				if e == "*" || e == eventName {
+					eventMatched = true
+					break
+				}
+			}
+			if !eventMatched {
+				continue
+			}
+
+			// Match prefix
+			if rule.FilterKey != "" && !strings.HasPrefix(key, rule.FilterKey) {
+				continue
+			}
+
+			// Format CloudEvent v1.0 payload
+			ceType := "com.servstore.s3.object.created"
+			if strings.Contains(eventName, "Delete") || strings.Contains(eventName, "Removed") {
+				ceType = "com.servstore.s3.object.deleted"
+			} else if strings.Contains(eventName, "Replication") || strings.Contains(eventName, "Replicated") {
+				ceType = "com.servstore.s3.object.replicated"
+			}
+
+			cePayload := map[string]interface{}{
+				"specversion":     "1.0",
+				"type":            ceType,
+				"source":          fmt.Sprintf("/buckets/%s/objects/%s", bucket, key),
+				"id":              fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+				"time":            time.Now().UTC().Format(time.RFC3339),
+				"datacontenttype": "application/json",
+				"data":            payload,
+			}
+
+			ceBytes, err := json.Marshal(cePayload)
+			if err != nil {
+				slog.Error("Failed to marshal CloudEvent notification", "error", err)
+				continue
+			}
+
+			// POST to Webhook
+			go func(url string, body []byte) {
+				resp, err := http.Post(url, "application/cloudevents+json", bytes.NewReader(body))
+				if err != nil {
+					slog.Error("Failed to dispatch CloudEvent to webhook", "url", url, "error", err)
+					return
+				}
+				resp.Body.Close()
+				slog.Info("Successfully dispatched CloudEvent to webhook", "url", url, "id", cePayload["id"])
+			}(rule.WebhookURL, ceBytes)
 		}
 	}()
 }

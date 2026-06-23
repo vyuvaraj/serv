@@ -71,6 +71,12 @@ func (f *MetadataFSM) Apply(l *raft.Log) interface{} {
 			return err
 		}
 		return f.store.SetBucketTriggers(ctx, cmd.BucketName, triggers)
+	case "SetBucketNotifications":
+		var rules []storage.EventNotificationRule
+		if err := json.Unmarshal(cmd.Value, &rules); err != nil {
+			return err
+		}
+		return f.store.SetBucketNotifications(ctx, cmd.BucketName, rules)
 	}
 
 	return fmt.Errorf("unsupported raft metadata op: %s", cmd.Op)
