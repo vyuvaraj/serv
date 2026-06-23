@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"servqueue/pkg/otel"
 )
 
 type Offloader struct {
@@ -23,7 +25,16 @@ func NewOffloader(endpoint, bucket, token string) *Offloader {
 	}
 }
 
-func (o *Offloader) OffloadSegment(closedPath string) error {
+func (o *Offloader) OffloadSegment(closedPath string) (err error) {
+	// Start trace span
+	span := otel.StartSpan("OffloadSegment", "")
+	defer func() {
+		otel.EndSpan(span, err, map[string]interface{}{
+			"segment.path": closedPath,
+			"s3.bucket":    o.s3Bucket,
+		})
+	}()
+
 	file, err := os.Open(closedPath)
 	if err != nil {
 		return fmt.Errorf("offloader: failed to open segment: %w", err)
@@ -50,6 +61,12 @@ func (o *Offloader) OffloadSegment(closedPath string) error {
 		req.Header.Set("Authorization", "Bearer "+o.accessToken)
 	}
 
+	// Inject traceparent if span is active
+	if span != nil {
+		traceparent := fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID)
+		req.Header.Set("traceparent", traceparent)
+	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("offloader: upload failed: %w", err)
@@ -57,7 +74,8 @@ func (o *Offloader) OffloadSegment(closedPath string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("offloader: upload returned HTTP status %d", resp.StatusCode)
+		err = fmt.Errorf("offloader: upload returned HTTP status %d", resp.StatusCode)
+		return err
 	}
 
 	// Remove local file once successfully uploaded to cold storage
