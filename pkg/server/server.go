@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/deploy", s.handleDeploy)
 	mux.HandleFunc("/api/services", s.handleListServices)
+	mux.HandleFunc("/api/history", s.handleGetHistory)
 	
 	// Support dynamic paths using simple path matching
 	mux.HandleFunc("/api/services/", func(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,18 @@ func (s *Server) Handler() http.Handler {
 		if len(parts) == 4 && parts[3] == "logs" {
 			if r.Method == http.MethodGet {
 				s.handleGetLogs(w, r, name)
+				return
+			}
+		}
+		if len(parts) == 4 && parts[3] == "stats" {
+			if r.Method == http.MethodGet {
+				s.handleGetStats(w, r, name)
+				return
+			}
+		}
+		if len(parts) == 4 && parts[3] == "rollback" {
+			if r.Method == http.MethodPost {
+				s.handleRollback(w, r, name)
 				return
 			}
 		}
@@ -191,4 +204,46 @@ func (s *Server) deregisterFromGateway(name string) {
 	// ServGate's API does not expose a DELETE for routes directly, but we can query then post back the list without the prefix, 
 	// or we can let it be. Let's make an attempt if we wanted to sync properly.
 	// In local dev, dynamic registration is the key value add.
+}
+
+func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	history := s.orch.GetHistory()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
+}
+
+func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request, name string) {
+	proc, ok := s.orch.GetService(name)
+	if !ok {
+		http.Error(w, "Service not found", http.StatusNotFound)
+		return
+	}
+	stats := proc.GetStats()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	proc, err := s.orch.Rollback(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Register with Gateway if configured
+	if s.gatewayURL != "" {
+		go s.registerWithGateway(name, proc.Port)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(proc)
 }

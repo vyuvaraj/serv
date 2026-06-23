@@ -107,7 +107,7 @@ server "8080" {
 	}
 
 	// 3. Make HTTP request directly to the deployed service port
-	serviceURL := fmt.Sprintf("http://localhost:%d", activePort)
+	serviceURL := fmt.Sprintf("http://127.0.0.1:%d", activePort)
 	
 	// Test health check
 	healthResp, err := http.Get(serviceURL + "/health")
@@ -168,5 +168,163 @@ server "8080" {
 	defer checkResp.Body.Close()
 	if checkResp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", checkResp.StatusCode)
+	}
+}
+
+func TestServCloudPhase3Features(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-phase3-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+
+	srv := server.NewServer(orch, "", "")
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	serviceName := "canary-service"
+	serviceCode1 := `server "8080" { route "/" -> "version 1" }`
+	serviceCode2 := `server "8080" { route "/" -> "version 2" }`
+
+	// 1. Deploy Version 1
+	payload := map[string]string{"name": serviceName, "code": serviceCode1}
+	bodyBytes, _ := json.Marshal(payload)
+	resp, err := http.Post(testServer.URL+"/api/deploy", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil || resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("Failed to deploy version 1: %v, status: %v", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Wait for running status
+	var activePort int
+	timeout := time.After(5 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for activePort == 0 {
+		select {
+		case <-timeout:
+			t.Fatal("Timeout waiting for deployment 1 to run")
+		case <-ticker.C:
+			proc, ok := orch.GetService(serviceName)
+			if ok && proc.Status == "running" {
+				activePort = proc.Port
+			}
+		}
+	}
+
+	// 2. Query stats endpoint
+	statsResp, err := http.Get(fmt.Sprintf("%s/api/services/%s/stats", testServer.URL, serviceName))
+	if err != nil {
+		t.Fatalf("failed to query stats: %v", err)
+	}
+	defer statsResp.Body.Close()
+	var stats orchestrator.ServiceStats
+	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
+		t.Fatalf("failed to decode stats: %v", err)
+	}
+	if stats.PID <= 0 {
+		t.Errorf("expected positive PID, got %d", stats.PID)
+	}
+
+	// 3. Deploy Version 2 (which overrides version 1 and adds to history)
+	payload2 := map[string]string{"name": serviceName, "code": serviceCode2}
+	bodyBytes2, _ := json.Marshal(payload2)
+	resp2, err := http.Post(testServer.URL+"/api/deploy", "application/json", bytes.NewReader(bodyBytes2))
+	if err != nil || resp2.StatusCode != http.StatusAccepted {
+		t.Fatalf("Failed to deploy version 2: %v", err)
+	}
+	resp2.Body.Close()
+
+	// Wait for running status
+	activePort2 := 0
+	timeout = time.After(5 * time.Second)
+	for activePort2 == 0 {
+		select {
+		case <-timeout:
+			t.Fatal("Timeout waiting for deployment 2 to run")
+		case <-ticker.C:
+			proc, ok := orch.GetService(serviceName)
+			if ok && proc.Status == "running" && proc.Port != activePort {
+				activePort2 = proc.Port
+			}
+		}
+	}
+
+	// 4. Retrieve deployment history
+	histResp, err := http.Get(testServer.URL + "/api/history")
+	if err != nil {
+		t.Fatalf("failed to query history: %v", err)
+	}
+	defer histResp.Body.Close()
+	var history []orchestrator.DeploymentHistoryItem
+	if err := json.NewDecoder(histResp.Body).Decode(&history); err != nil {
+		t.Fatalf("failed to decode history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Errorf("expected 2 history entries, got %d", len(history))
+	}
+
+	// 5. Test rollback to Version 1
+	rollResp, err := http.Post(fmt.Sprintf("%s/api/services/%s/rollback", testServer.URL, serviceName), "application/json", nil)
+	if err != nil || rollResp.StatusCode != http.StatusOK {
+		t.Fatalf("rollback failed: %v", err)
+	}
+	rollResp.Body.Close()
+
+	// Wait for running status again
+	activePort3 := 0
+	timeout = time.After(5 * time.Second)
+	for activePort3 == 0 {
+		select {
+		case <-timeout:
+			t.Fatal("Timeout waiting for rollback deployment to run")
+		case <-ticker.C:
+			proc, ok := orch.GetService(serviceName)
+			if ok && proc.Status == "running" && proc.Port != activePort2 {
+				activePort3 = proc.Port
+			}
+		}
+	}
+
+	if activePort3 == 0 {
+		t.Error("expected active port to be updated after rollback")
+	}
+
+	// 6. Test Health Check Eviction / Unhealthy transitions
+	proc, _ := orch.GetService(serviceName)
+	// Post to /toggle-health to make it unhealthy, with retries to let process bind to port
+	toggleURL := fmt.Sprintf("http://127.0.0.1:%d/toggle-health", proc.Port)
+	var respToggle *http.Response
+	for i := 0; i < 20; i++ {
+		respToggle, err = http.Get(toggleURL)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("failed to toggle health: %v", err)
+	}
+	respToggle.Body.Close()
+
+	// Wait for health check loop (takes at least 3 failed checks, checked every 2s)
+	// So it should take about 6 seconds to change to unhealthy
+	timeout = time.After(10 * time.Second)
+	unhealthy := false
+	for !unhealthy {
+		select {
+		case <-timeout:
+			t.Fatal("Timeout waiting for service to transition to unhealthy")
+		case <-ticker.C:
+			proc, ok := orch.GetService(serviceName)
+			if ok && proc.Status == "unhealthy" {
+				unhealthy = true
+			}
+		}
 	}
 }

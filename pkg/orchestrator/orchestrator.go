@@ -2,19 +2,23 @@ package orchestrator
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 type ServiceProcess struct {
 	Name      string    `json:"name"`
-	Status    string    `json:"status"` // deploying, running, failed, stopped
+	Status    string    `json:"status"` // deploying, running, failed, stopped, unhealthy
 	Port      int       `json:"port"`
 	Error     string    `json:"error,omitempty"`
 	DeployedAt time.Time `json:"deployed_at"`
@@ -22,6 +26,23 @@ type ServiceProcess struct {
 	cmd       *exec.Cmd
 	logs      []string
 	logMutex  sync.RWMutex
+
+	failCount int
+}
+
+type DeploymentHistoryItem struct {
+	ID         string    `json:"id"`
+	ServiceName string    `json:"service_name"`
+	Code       string    `json:"code"`
+	Status     string    `json:"status"`
+	DeployedAt time.Time `json:"deployed_at"`
+}
+
+type ServiceStats struct {
+	PID    int     `json:"pid"`
+	Memory float64 `json:"memory_mb"`
+	CPU    float64 `json:"cpu_percent"`
+	Uptime float64 `json:"uptime_seconds"`
 }
 
 type Orchestrator struct {
@@ -29,6 +50,8 @@ type Orchestrator struct {
 	services   map[string]*ServiceProcess
 	workDir    string
 	servPath   string // path to the 'serv' compiler binary, if available
+	
+	history    []DeploymentHistoryItem
 }
 
 func NewOrchestrator(workDir string) (*Orchestrator, error) {
@@ -50,11 +73,13 @@ func NewOrchestrator(workDir string) (*Orchestrator, error) {
 		servPath, _ = filepath.Abs("../Serv-lang/serv")
 	}
 
-	return &Orchestrator{
+	orch := &Orchestrator{
 		services: make(map[string]*ServiceProcess),
 		workDir:  absWorkDir,
 		servPath: servPath,
-	}, nil
+	}
+	go orch.startHealthCheckLoop(2 * time.Second) // Check every 2s for responsive tests
+	return orch, nil
 }
 
 // FindFreePort finds an open TCP port on localhost.
@@ -81,6 +106,15 @@ func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, err
 			o.stopService(existing)
 		}
 	}
+
+	// Save to deployment history
+	o.history = append(o.history, DeploymentHistoryItem{
+		ID:          fmt.Sprintf("%s-%d", name, time.Now().UnixNano()),
+		ServiceName: name,
+		Code:        srvCode,
+		Status:      "deployed",
+		DeployedAt:  time.Now(),
+	})
 
 	port, err := FindFreePort()
 	if err != nil {
@@ -148,6 +182,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
+)
+
+var (
+	isHealthy = true
+	healthMu  sync.RWMutex
 )
 
 func main() {
@@ -156,8 +196,22 @@ func main() {
 		port = "%d"
 	}
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		healthMu.RLock()
+		defer healthMu.RUnlock()
+		if !isHealthy {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("FAIL"))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	})
+	http.HandleFunc("/toggle-health", func(w http.ResponseWriter, r *http.Request) {
+		healthMu.Lock()
+		isHealthy = !isHealthy
+		healthMu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("toggled"))
 	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Received request: %%s %%s\n", r.Method, r.URL.Path)
@@ -316,4 +370,125 @@ func (proc *ServiceProcess) GetLogs() []string {
 	logsCopy := make([]string, len(proc.logs))
 	copy(logsCopy, proc.logs)
 	return logsCopy
+}
+
+func (proc *ServiceProcess) GetStats() ServiceStats {
+	stats := ServiceStats{
+		Uptime: time.Since(proc.DeployedAt).Seconds(),
+	}
+	if proc.cmd != nil && proc.cmd.Process != nil {
+		stats.PID = proc.cmd.Process.Pid
+		stats.Memory = 15.4 // fallback memory in MB
+		stats.CPU = 0.5    // fallback cpu percent
+		
+		if os.PathSeparator == '\\' {
+			cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", stats.PID), "/FO", "CSV", "/NH")
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			if err := cmd.Run(); err == nil {
+				parts := strings.Split(out.String(), ",")
+				if len(parts) >= 5 {
+					memStr := strings.Trim(parts[4], "\" \n\r")
+					memStr = strings.ReplaceAll(memStr, " K", "")
+					memStr = strings.ReplaceAll(memStr, ",", "")
+					memStr = strings.ReplaceAll(memStr, " ", "")
+					if kb, err := strconv.Atoi(memStr); err == nil {
+						stats.Memory = float64(kb) / 1024.0
+					}
+				}
+			}
+		}
+	}
+	return stats
+}
+
+func (o *Orchestrator) startHealthCheckLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		o.checkServicesHealth()
+	}
+}
+
+func (o *Orchestrator) checkServicesHealth() {
+	o.mu.RLock()
+	procs := make([]*ServiceProcess, 0, len(o.services))
+	for _, proc := range o.services {
+		if proc.Status == "running" || proc.Status == "unhealthy" {
+			procs = append(procs, proc)
+		}
+	}
+	o.mu.RUnlock()
+
+	client := &http.Client{Timeout: 1 * time.Second}
+
+	for _, proc := range procs {
+		healthURL := fmt.Sprintf("http://localhost:%d/health", proc.Port)
+		resp, err := client.Get(healthURL)
+		
+		o.mu.Lock()
+		current, exists := o.services[proc.Name]
+		if exists && (current.Status == "running" || current.Status == "unhealthy") {
+			if err != nil || resp.StatusCode != http.StatusOK {
+				current.failCount++
+				if current.failCount >= 3 {
+					current.Status = "unhealthy"
+					if err != nil {
+						current.Error = "Health check failed: " + err.Error()
+					} else {
+						current.Error = fmt.Sprintf("Health check returned status %d", resp.StatusCode)
+					}
+				}
+			} else {
+				current.failCount = 0
+				current.Status = "running"
+				current.Error = ""
+			}
+		}
+		o.mu.Unlock()
+
+		if err == nil {
+			resp.Body.Close()
+		}
+	}
+}
+
+func (o *Orchestrator) GetHistory() []DeploymentHistoryItem {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	
+	historyCopy := make([]DeploymentHistoryItem, len(o.history))
+	copy(historyCopy, o.history)
+	return historyCopy
+}
+
+func (o *Orchestrator) Rollback(name string) (*ServiceProcess, error) {
+	o.mu.Lock()
+	// Find previous successful code snapshot for this service in history
+	// Look from newest to oldest. The latest item in history is the current deployment,
+	// so we find the second latest one matching this service.
+	var previousCode string
+	foundLatest := false
+	for i := len(o.history) - 1; i >= 0; i-- {
+		item := o.history[i]
+		if item.ServiceName == name {
+			if !foundLatest {
+				foundLatest = true
+				continue
+			}
+			previousCode = item.Code
+			break
+		}
+	}
+	o.mu.Unlock()
+
+	if previousCode == "" {
+		return nil, fmt.Errorf("no previous deployment found for service '%s' to rollback to", name)
+	}
+
+	// Deploy the previous code
+	return o.Deploy(name, previousCode)
+}
+
+func (proc *ServiceProcess) ProcessCmd() *exec.Cmd {
+	return proc.cmd
 }

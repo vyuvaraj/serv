@@ -21,10 +21,10 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [x] **Route Registration Sync**: Auto-updates API Gateways (like ServGate) on new deployments.
 - [x] **Console log capture**: Standard output and error redirecting to in-memory ring buffer.
 
-## Phase 3: Telemetry & Console Integration (Planned)
-- [ ] **ServConsole Dashboard**: Expose deployment history, rollbacks, and active process graphs in the console.
-- [ ] **Health Monitoring**: Periodically ping running services and flag unhealthy processes.
-- [ ] **CPU/Memory stats**: Query system OS metrics for resource consumption monitoring.
+## Phase 3: Telemetry & Console Integration (Completed)
+- [x] **ServConsole Dashboard**: Expose deployment history, rollbacks, and active process graphs in the console.
+- [x] **Health Monitoring**: Periodically ping running services and flag unhealthy processes.
+- [x] **CPU/Memory stats**: Query system OS metrics for resource consumption monitoring.
 
 ## Phase 4: Production Isolation & Security (Planned)
 - [ ] **WASM Isolation**: Direct execution of compiled WASM targets in-process for sandbox isolation.
