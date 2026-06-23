@@ -189,21 +189,19 @@ func (s *Scheduler) executeJob(job *Job) {
 	}
 
 	resp, err := s.client.Do(req)
-	span.EndTime = time.Now().UnixNano()
 
+	var attrs map[string]interface{}
 	if err != nil {
-		span.Status = 2 // error
-		span.Attributes = map[string]interface{}{"error": err.Error()}
+		attrs = map[string]interface{}{"error": err.Error()}
 		log.Printf("Execution of job '%s' failed: %v", job.ID, err)
 	} else {
 		defer resp.Body.Close()
-		span.Status = 1 // ok
-		span.Attributes = map[string]interface{}{"status_code": resp.StatusCode}
+		attrs = map[string]interface{}{"status_code": resp.StatusCode}
 		log.Printf("Execution of job '%s' completed with status %d", job.ID, resp.StatusCode)
 	}
 
 	// Export span if telemetry is initialized
-	// (Internally handled by ServShared span buffer)
+	ServShared.EndSpan(&span, err, attrs)
 }
 
 func (s *Scheduler) calculateNextRun(job *Job, from time.Time) (time.Time, error) {
