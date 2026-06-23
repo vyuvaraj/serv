@@ -62,6 +62,7 @@ function initTabs() {
         fetchAuditLogs();
       } else if (tabId === 'database') {
         fetchDatabaseSchemas();
+        fetchMigrations();
       } else if (tabId === 'policies') {
         loadPoliciesView();
       }
@@ -1799,3 +1800,142 @@ async function selectUserPolicy(username) {
     if (jsonArea) jsonArea.value = "Error: " + err.message;
   }
 }
+
+// ─── Migration Auditing ────────────────────────────────────────────────────
+
+async function fetchMigrations() {
+  try {
+    const res = await fetch('/api/db/migrations');
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+    if (!res.ok) return;
+    const data = await res.json();
+    STATE.migrations = data || [];
+    renderMigrations();
+  } catch (err) {
+    console.error('Failed to fetch migrations:', err);
+  }
+}
+
+function renderMigrations() {
+  const tbody = document.querySelector('#migrations-table tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const migrations = STATE.migrations || [];
+  if (migrations.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No migrations applied yet. Use the form to apply your first schema revision.</td></tr>`;
+    return;
+  }
+
+  migrations.forEach(mig => {
+    const tr = document.createElement('tr');
+    const timeStr = new Date(mig.timestamp).toLocaleString();
+    const statusClass = mig.status === 'success' ? 'mig-success' : 'mig-failed';
+    const statusIcon = mig.status === 'success' ? '✓' : '✗';
+    const statusLabel = mig.status === 'success' ? 'Success' : 'Failed';
+    const deltaHtml = mig.delta ? escapeHtml(mig.delta) : '—';
+    const errorTip = mig.error ? ` title="${escapeHtml(mig.error)}"` : '';
+
+    tr.innerHTML = `
+      <td><span class="mig-revision-badge">${escapeHtml(mig.revision)}</span></td>
+      <td>
+        <div style="font-weight:500;">${escapeHtml(mig.description || '—')}</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.15rem;">
+          ${escapeHtml(mig.driver)} · ${escapeHtml(mig.user)} · ${mig.duration_ms}ms
+        </div>
+      </td>
+      <td><span class="mig-status-badge ${statusClass}"${errorTip}>${statusIcon} ${statusLabel}</span></td>
+      <td style="font-family:var(--font-mono); font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(mig.delta || '')}">${deltaHtml}</td>
+      <td style="font-size:0.78rem; color:var(--text-muted); white-space:nowrap;">${timeStr}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  logEvent('store', `Loaded ${migrations.length} migration audit entries`);
+}
+
+async function applyMigration() {
+  const driverEl = document.getElementById('mig-driver');
+  const dsnEl = document.getElementById('mig-dsn');
+  const revisionEl = document.getElementById('mig-revision');
+  const descEl = document.getElementById('mig-description');
+  const sqlEl = document.getElementById('mig-sql');
+  const statusEl = document.getElementById('migration-status');
+  const btnEl = document.getElementById('btn-apply-migration');
+
+  if (!driverEl || !dsnEl || !revisionEl || !sqlEl) return;
+
+  const driver = driverEl.value;
+  const dsn = dsnEl.value.trim();
+  const revision = revisionEl.value.trim();
+  const description = descEl.value.trim();
+  const sql = sqlEl.value.trim();
+
+  if (!dsn || !revision || !sql) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Please fill in Driver, DSN, Revision ID, and SQL script.';
+    return;
+  }
+
+  statusEl.className = 'status-message';
+  statusEl.textContent = '⚡ Applying migration...';
+  btnEl.disabled = true;
+  btnEl.textContent = 'Applying...';
+
+  try {
+    const res = await fetch('/api/db/migrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ driver, dsn, revision, description, sql })
+    });
+
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+
+    const data = await res.json();
+
+    if (data.status === 'success') {
+      statusEl.className = 'status-message success';
+      statusEl.textContent = `✓ Migration ${data.revision} applied successfully (${data.duration_ms}ms). Delta: ${data.delta}`;
+      logEvent('store', `Migration applied: rev ${data.revision} — ${data.delta}`);
+      // Reset form fields (except driver & DSN for convenience)
+      revisionEl.value = '';
+      descEl.value = '';
+      sqlEl.value = '';
+    } else {
+      statusEl.className = 'status-message error';
+      statusEl.textContent = `✗ Migration ${data.revision} failed: ${data.error}`;
+      logEvent('error', `Migration failed: rev ${data.revision} — ${data.error}`);
+    }
+
+    // Refresh the revisions table
+    fetchMigrations();
+  } catch (err) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = `Network error: ${err.message}`;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = '⚡ Apply Migration';
+  }
+}
+
+// Wire up migration UI on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  const migForm = document.getElementById('migration-form');
+  if (migForm) {
+    migForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      applyMigration();
+    });
+  }
+
+  const refreshMigBtn = document.getElementById('btn-refresh-migrations');
+  if (refreshMigBtn) {
+    refreshMigBtn.addEventListener('click', fetchMigrations);
+  }
+});

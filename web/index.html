@@ -559,6 +559,76 @@
               </div>
             </div>
           </div>
+        
+          <div class="card glass-card" style="margin-top:2rem;">
+            <div class="card-header">
+              <h2>Migration Auditing</h2>
+              <div style="display:flex; gap:0.75rem; align-items:center;">
+                <div class="badge badge-accent">Schema Revisions</div>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-migrations">↻ Refresh</button>
+              </div>
+            </div>
+            <p class="section-desc">Track database schema revisions, apply migrations, and audit all schema changes across your database backends.</p>
+
+            <div class="migration-layout" style="display:grid; grid-template-columns:1fr 1fr; gap:2rem; margin-top:1.5rem;">
+              <!-- Left: Migration Runner Form -->
+              <div class="migration-runner-panel">
+                <h3 style="font-size:1rem; font-weight:600; margin-bottom:1rem; color:var(--text-primary);">Apply New Migration</h3>
+                <form id="migration-form" style="display:flex; flex-direction:column; gap:1rem;">
+                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                      <label for="mig-driver" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Driver</label>
+                      <select id="mig-driver" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; cursor:pointer; font-family:var(--font-sans); font-size:0.85rem;">
+                        <option value="sqlite">SQLite</option>
+                        <option value="postgres">PostgreSQL</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="oracle">Oracle</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                      <label for="mig-revision" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Revision ID</label>
+                      <input type="text" id="mig-revision" placeholder="e.g. v1.0.0 or 001" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; font-size:0.85rem;" required>
+                    </div>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label for="mig-dsn" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Connection String / DSN</label>
+                    <input type="text" id="mig-dsn" placeholder="./dev.db" value="./dev.db" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; font-size:0.85rem;" required>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label for="mig-description" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Description</label>
+                    <input type="text" id="mig-description" placeholder="e.g. Create users table" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; font-size:0.85rem;">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label for="mig-sql" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">SQL Migration Script</label>
+                    <textarea id="mig-sql" rows="5" style="width:100%; font-family:var(--font-mono); font-size:0.85rem; padding:0.7rem; background:#0b0c16; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#a9b2c3; resize:vertical; outline:none;" placeholder="CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE);" required></textarea>
+                  </div>
+                  <button type="submit" class="btn btn-primary" id="btn-apply-migration" style="width:100%;">⚡ Apply Migration</button>
+                </form>
+                <div id="migration-status" class="status-message" style="margin-top:0.75rem;"></div>
+              </div>
+
+              <!-- Right: Applied Revisions Table -->
+              <div class="migration-log-panel">
+                <h3 style="font-size:1rem; font-weight:600; margin-bottom:1rem; color:var(--text-primary);">Applied Revisions</h3>
+                <div class="table-container" style="max-height:420px; overflow-y:auto;">
+                  <table id="migrations-table">
+                    <thead>
+                      <tr>
+                        <th>Rev</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Delta</th>
+                        <th>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td colspan="5" class="text-center text-muted">No migrations applied yet. Use the form to apply your first schema revision.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

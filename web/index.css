@@ -1019,3 +1019,96 @@ tr:hover td {
   color: #fff;
 }
 
+/* ─── Migration Auditing Styles ─────────────────────────────────────────── */
+
+.badge-accent {
+  background: linear-gradient(135deg, hsla(250, 100%, 75%, 0.15), hsla(190, 100%, 65%, 0.12));
+  color: var(--secondary);
+  border: 1px solid hsla(190, 100%, 65%, 0.25);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.mig-revision-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  background: linear-gradient(135deg, hsla(250, 80%, 55%, 0.2), hsla(280, 70%, 45%, 0.15));
+  border: 1px solid hsla(250, 80%, 55%, 0.3);
+  color: var(--primary);
+  letter-spacing: 0.3px;
+}
+
+.mig-status-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.mig-status-badge.mig-success {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.mig-status-badge.mig-failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.migration-runner-panel {
+  padding-right: 2rem;
+  border-right: 1px solid var(--border-glass);
+}
+
+.migration-log-panel {
+  min-width: 0;
+}
+
+#migrations-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#migrations-table td {
+  vertical-align: top;
+}
+
+#migrations-table tr:hover td {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.status-message.success {
+  color: var(--success);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.status-message.error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, hsl(355, 80%, 55%), hsl(340, 70%, 45%));
+  color: #fff;
+  border: none;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.btn-danger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.35);
+}
