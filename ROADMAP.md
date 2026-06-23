@@ -23,7 +23,7 @@ This roadmap outlines the planned development phases for the ServCache distribut
 - [x] **OTel context propagation**: Span tracing context forwarding.
 - [x] **GitHub Actions CI Pipeline**: Automated build and test pipeline configuration.
 
-## Phase 3: Cluster Replications & Cache Patterns (Planned)
-- [ ] **Multi-Region Replication**: Cache replication across geo-distributed nodes.
-- [ ] **Read-Through/Write-Behind Cache**: Automatic synchronization wrappers between ServCache and ServDB.
-- [ ] **Key Pattern Invalidations**: Flush caches dynamically using wildcard prefix matches.
+## Phase 3: Cluster Replications & Cache Patterns (Completed)
+- [x] **Multi-Region Replication**: Cache replication across geo-distributed nodes.
+- [x] **Read-Through/Write-Behind Cache**: Automatic synchronization wrappers between ServCache and ServDB.
+- [x] **Key Pattern Invalidations**: Flush caches dynamically using wildcard prefix matches.

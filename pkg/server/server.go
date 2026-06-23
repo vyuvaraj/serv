@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -13,10 +16,22 @@ import (
 
 type Server struct {
 	cache cache.Cache
+	peers []string
 }
 
 func NewServer(c cache.Cache) *Server {
-	return &Server{cache: c}
+	var peers []string
+	if rawPeers := os.Getenv("SERV_CACHE_PEERS"); rawPeers != "" {
+		for _, p := range strings.Split(rawPeers, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				peers = append(peers, trimmed)
+			}
+		}
+	}
+	return &Server{
+		cache: c,
+		peers: peers,
+	}
 }
 
 type SetRequest struct {
@@ -99,6 +114,13 @@ func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string)
 }
 
 func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		http.Error(w, "Read Body Error", http.StatusBadRequest)
+		return
+	}
+	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
 	var body SetRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		http.Error(w, "Malformed JSON", http.StatusBadRequest)
@@ -123,7 +145,7 @@ func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 	traceparent := req.Header.Get("traceparent")
 	span := otel.StartSpan(fmt.Sprintf("servcache:SET %s", body.Key), traceparent)
 
-	err := s.cache.Set(body.Key, body.Value, ttl)
+	err = s.cache.Set(body.Key, body.Value, ttl)
 
 	if span != nil {
 		otel.EndSpan(span, err, map[string]interface{}{
@@ -136,6 +158,10 @@ func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		http.Error(w, "Cache Write Error: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if req.URL.Query().Get("replicated") != "true" && len(s.peers) > 0 {
+		s.replicate(http.MethodPost, "/api/cache", bodyBytes)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -161,27 +187,79 @@ func (s *Server) handleDelete(w http.ResponseWriter, req *http.Request, key stri
 		return
 	}
 
+	if req.URL.Query().Get("replicated") != "true" && len(s.peers) > 0 {
+		s.replicate(http.MethodDelete, fmt.Sprintf("/api/cache/%s", key), nil)
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, req *http.Request) {
+	pattern := req.URL.Query().Get("pattern")
+	
+	var err error
 	traceparent := req.Header.Get("traceparent")
-	span := otel.StartSpan("servcache:CLEAR", traceparent)
-
-	err := s.cache.Clear()
-
-	if span != nil {
-		otel.EndSpan(span, err, map[string]interface{}{
-			"cache.error": err != nil,
-		})
+	
+	if pattern != "" {
+		span := otel.StartSpan(fmt.Sprintf("servcache:DELETE_PATTERN %s", pattern), traceparent)
+		err = s.cache.DeletePattern(pattern)
+		if span != nil {
+			otel.EndSpan(span, err, map[string]interface{}{
+				"cache.pattern": pattern,
+				"cache.error":   err != nil,
+			})
+		}
+	} else {
+		span := otel.StartSpan("servcache:CLEAR", traceparent)
+		err = s.cache.Clear()
+		if span != nil {
+			otel.EndSpan(span, err, map[string]interface{}{
+				"cache.error": err != nil,
+			})
+		}
 	}
 
 	if err != nil {
-		http.Error(w, "Cache Clear Error: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Cache Clear/DeletePattern Error: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if req.URL.Query().Get("replicated") != "true" && len(s.peers) > 0 {
+		urlPath := "/api/cache"
+		if pattern != "" {
+			urlPath = fmt.Sprintf("/api/cache?pattern=%s", pattern)
+		}
+		s.replicate(http.MethodDelete, urlPath, nil)
 	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success"}`))
+}
+
+func (s *Server) replicate(method string, path string, body []byte) {
+	for _, peer := range s.peers {
+		go func(p string) {
+			url := fmt.Sprintf("%s%s", strings.TrimSuffix(p, "/"), path)
+			if strings.Contains(path, "?") {
+				url += "&replicated=true"
+			} else {
+				url += "?replicated=true"
+			}
+			var bodyReader io.Reader
+			if body != nil {
+				bodyReader = bytes.NewReader(body)
+			}
+			req, err := http.NewRequest(method, url, bodyReader)
+			if err != nil {
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+			}
+		}(peer)
+	}
 }

@@ -55,3 +55,14 @@ func (r *RedisCache) Delete(key string) error {
 func (r *RedisCache) Clear() error {
 	return r.client.FlushDB(r.ctx).Err()
 }
+
+func (r *RedisCache) DeletePattern(pattern string) error {
+	keys, err := r.client.Keys(r.ctx, pattern).Result()
+	if err != nil {
+		return err
+	}
+	if len(keys) > 0 {
+		return r.client.Del(r.ctx, keys...).Err()
+	}
+	return nil
+}
