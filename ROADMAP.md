@@ -26,18 +26,18 @@
 ### 🔲 Phase 1: Production Hardening
 - [ ] TLS termination (auto-provisioned Let's Encrypt certs)
 - [ ] Wildcard DNS setup guide for `*.servverse.net`
-- [ ] Authentication (API key or token for client registration)
-- [ ] Rate limiting (per-tunnel request rate)
-- [ ] Connection timeout tuning and idle disconnect
+- [x] Authentication (API key or token for client registration)
+- [x] Rate limiting (per-tunnel request rate)
+- [x] Connection timeout tuning and idle disconnect
 - [ ] Binary body support (large file uploads)
-- [ ] WebSocket reconnection with exponential backoff on client
+- [x] WebSocket reconnection with exponential backoff on client
 
 ---
 
 ### 🔲 Phase 2: Developer Experience
 - [ ] Custom domain mapping (`dev.myapp.com` → tunnel)
-- [ ] Request replay endpoint (`POST /api/inspect/{id}/replay`)
-- [ ] Request filtering in inspector (by method, status, path)
+- [x] Request replay endpoint (`POST /api/inspect/{id}/replay`)
+- [x] Request filtering in inspector (by method, status, path)
 - [ ] Local web UI for request inspection (served by client)
 - [ ] `serv tunnel` integration in the Serv compiler CLI
 - [ ] Automatic subdomain based on git branch name

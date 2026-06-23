@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,6 +97,7 @@ type Server struct {
 	httpSrv     *http.Server
 	jwtSecret   string
 	staticToken string
+	idleTimeout time.Duration
 
 	mu      sync.RWMutex
 	tunnels map[string]*tunnelConn // subdomain → tunnelConn
@@ -103,12 +105,21 @@ type Server struct {
 
 // NewServer creates a new relay server.
 func NewServer(addr, baseDomain string, insp *inspector.Inspector) *Server {
+	idleTimeoutStr := os.Getenv("SERVTUNNEL_IDLE_TIMEOUT")
+	idleTimeout := 60 * time.Second
+	if d, err := time.ParseDuration(idleTimeoutStr); err == nil {
+		idleTimeout = d
+	} else if secs, err := strconv.Atoi(idleTimeoutStr); err == nil {
+		idleTimeout = time.Duration(secs) * time.Second
+	}
+
 	return &Server{
 		addr:        addr,
 		baseDomain:  baseDomain,
 		inspector:   insp,
 		jwtSecret:   os.Getenv("SERVTUNNEL_JWT_SECRET"),
 		staticToken: os.Getenv("SERVTUNNEL_TOKEN"),
+		idleTimeout: idleTimeout,
 		tunnels:     make(map[string]*tunnelConn),
 	}
 }
@@ -276,6 +287,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 // readLoop reads messages from a tunnel client.
 func (s *Server) readLoop(tc *tunnelConn) {
 	for {
+		_ = tc.conn.SetReadDeadline(time.Now().Add(s.idleTimeout))
 		var env tunnel.Envelope
 		if err := tc.conn.ReadJSON(&env); err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
@@ -466,7 +478,105 @@ func (s *Server) handleInspectEntry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"missing entry id"}`, http.StatusBadRequest)
 		return
 	}
+	if len(parts) >= 4 && parts[3] == "replay" {
+		s.handleReplayRequest(w, r, parts[2])
+		return
+	}
 	s.inspector.HandleGet(w, r, parts[2])
+}
+
+// handleReplayRequest retrieves a logged request by ID and forwards it through the tunnel again.
+func (s *Server) handleReplayRequest(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	entry, ok := s.inspector.Get(id)
+	if !ok {
+		http.Error(w, `{"error":"entry not found"}`, http.StatusNotFound)
+		return
+	}
+
+	s.mu.RLock()
+	tc, exists := s.tunnels[entry.Subdomain]
+	s.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, fmt.Sprintf(`{"error":"tunnel %q not found"}`, entry.Subdomain), http.StatusBadGateway)
+		return
+	}
+
+	if !tc.limiter.Allow() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limit exceeded"}`))
+		return
+	}
+
+	start := time.Now()
+	requestID := otel.GenerateSpanID()
+	env := tunnel.Envelope{
+		Type:      tunnel.TypeRequest,
+		RequestID: requestID,
+		Request: &tunnel.TunnelRequest{
+			Method:  entry.Method,
+			Path:    entry.Path,
+			Headers: entry.RequestHeaders,
+			Body:    entry.RequestBody,
+		},
+	}
+
+	pr := &pendingRequest{
+		ch:    make(chan tunnel.Envelope, 1),
+		start: start,
+	}
+	tc.pending.Store(requestID, pr)
+	defer tc.pending.Delete(requestID)
+
+	tc.mu.Lock()
+	err := tc.conn.WriteJSON(env)
+	tc.mu.Unlock()
+	if err != nil {
+		http.Error(w, `{"error":"failed to send request to tunnel client"}`, http.StatusBadGateway)
+		return
+	}
+
+	select {
+	case resp := <-pr.ch:
+		latency := time.Since(start)
+		if resp.Response == nil {
+			http.Error(w, `{"error":"empty response from tunnel"}`, http.StatusBadGateway)
+			return
+		}
+
+		for k, v := range resp.Response.Headers {
+			w.Header().Set(k, v)
+		}
+		w.WriteHeader(resp.Response.StatusCode)
+
+		if resp.Response.Body != "" {
+			bodyBytes, err := base64.StdEncoding.DecodeString(resp.Response.Body)
+			if err == nil {
+				w.Write(bodyBytes)
+			}
+		}
+
+		s.inspector.Record(inspector.Entry{
+			Method:          entry.Method,
+			Path:            entry.Path,
+			RequestHeaders:  entry.RequestHeaders,
+			RequestBody:     entry.RequestBody,
+			StatusCode:      resp.Response.StatusCode,
+			ResponseHeaders: resp.Response.Headers,
+			ResponseBody:    resp.Response.Body,
+			LatencyMs:       latency.Milliseconds(),
+			Subdomain:       entry.Subdomain,
+		})
+
+	case <-time.After(30 * time.Second):
+		http.Error(w, `{"error":"tunnel request timed out (30s)"}`, http.StatusGatewayTimeout)
+	}
 }
 
 // extractSubdomain pulls the subdomain from a Host header.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -101,7 +102,28 @@ func (ins *Inspector) HandleList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limitStr := r.URL.Query().Get("limit")
+	methodFilter := r.URL.Query().Get("method")
+	statusFilter := r.URL.Query().Get("status")
+	pathFilter := r.URL.Query().Get("path")
+
 	entries := ins.List()
+
+	var filtered []Entry
+	for _, e := range entries {
+		if methodFilter != "" && !strings.EqualFold(e.Method, methodFilter) {
+			continue
+		}
+		if statusFilter != "" {
+			if code, err := strconv.Atoi(statusFilter); err == nil && e.StatusCode != code {
+				continue
+			}
+		}
+		if pathFilter != "" && !strings.HasPrefix(e.Path, pathFilter) {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	entries = filtered
 
 	if limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 && limit < len(entries) {

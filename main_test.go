@@ -593,3 +593,222 @@ func TestClientReconnection(t *testing.T) {
 		t.Error("client failed to reconnect after server restart")
 	}
 }
+
+func TestConnectionIdleDisconnect(t *testing.T) {
+	t.Setenv("SERVTUNNEL_IDLE_TIMEOUT", "200ms")
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	relayAddr := listener.Addr().String()
+	listener.Close()
+
+	insp := inspector.New(10)
+	relaySrv := server.NewServer(":"+strings.Split(relayAddr, ":")[1], "localhost", insp)
+	go relaySrv.Start()
+	time.Sleep(200 * time.Millisecond)
+
+	wsURL := fmt.Sprintf("ws://%s/ws/connect", relayAddr)
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer ws.Close()
+
+	err = ws.WriteJSON(tunnel.Envelope{
+		Type:    tunnel.TypeRegister,
+		Control: &tunnel.ControlMessage{Subdomain: "timeoutapp"},
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	var regResp tunnel.Envelope
+	if err := ws.ReadJSON(&regResp); err != nil {
+		t.Fatalf("read reg response: %v", err)
+	}
+
+	// We expect the server to disconnect us if we are idle for 200ms
+	time.Sleep(400 * time.Millisecond)
+
+	// Trying to read should return error
+	var dummy tunnel.Envelope
+	err = ws.ReadJSON(&dummy)
+	if err == nil {
+		t.Error("expected connection to be closed by server due to idle timeout")
+	}
+}
+
+func TestRequestReplay(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	relayAddr := listener.Addr().String()
+	listener.Close()
+
+	insp := inspector.New(100)
+	relaySrv := server.NewServer(":"+strings.Split(relayAddr, ":")[1], "localhost", insp)
+	go relaySrv.Start()
+	time.Sleep(200 * time.Millisecond)
+
+	wsURL := fmt.Sprintf("ws://%s/ws/connect", relayAddr)
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer ws.Close()
+
+	err = ws.WriteJSON(tunnel.Envelope{
+		Type:    tunnel.TypeRegister,
+		Control: &tunnel.ControlMessage{Subdomain: "replayapp"},
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	var regResp tunnel.Envelope
+	if err := ws.ReadJSON(&regResp); err != nil {
+		t.Fatalf("read reg: %v", err)
+	}
+
+	// Channel to signal request received
+	reqChan := make(chan tunnel.Envelope, 10)
+	go func() {
+		for {
+			var env tunnel.Envelope
+			if err := ws.ReadJSON(&env); err != nil {
+				return
+			}
+			if env.Type == tunnel.TypeRequest {
+				reqChan <- env
+				// Respond
+				_ = ws.WriteJSON(tunnel.Envelope{
+					Type:      tunnel.TypeResponse,
+					RequestID: env.RequestID,
+					Response: &tunnel.TunnelResponse{
+						StatusCode: 201,
+						Headers:    map[string]string{"X-Test": "Replayed"},
+						Body:       base64.StdEncoding.EncodeToString([]byte(`{"ok":true}`)),
+					},
+				})
+			}
+		}
+	}()
+
+	// 1. Send first request to capture it
+	relayPort := strings.Split(relayAddr, ":")[1]
+	reqURL := fmt.Sprintf("http://127.0.0.1:%s/items", relayPort)
+	httpReq, _ := http.NewRequest("GET", reqURL, nil)
+	httpReq.Host = fmt.Sprintf("replayapp.localhost:%s", relayPort)
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	// Wait for the request to be processed
+	select {
+	case <-reqChan:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for first request")
+	}
+
+	// 2. Query inspector to get the ID
+	inspectResp, err := http.Get(fmt.Sprintf("http://%s/api/inspect", relayAddr))
+	if err != nil {
+		t.Fatalf("get inspect: %v", err)
+	}
+	var inspectResult map[string]interface{}
+	json.NewDecoder(inspectResp.Body).Decode(&inspectResult)
+	inspectResp.Body.Close()
+
+	entries := inspectResult["entries"].([]interface{})
+	if len(entries) == 0 {
+		t.Fatal("expected captured requests in inspector")
+	}
+	entry := entries[len(entries)-1].(map[string]interface{})
+	id := entry["id"].(string)
+
+	// 3. Trigger replay POST /api/inspect/{id}/replay
+	replayURL := fmt.Sprintf("http://%s/api/inspect/%s/replay", relayAddr, id)
+	replayResp, err := http.Post(replayURL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("post replay: %v", err)
+	}
+	defer replayResp.Body.Close()
+
+	if replayResp.StatusCode != 201 {
+		t.Errorf("replay status = %d, want 201", replayResp.StatusCode)
+	}
+	if val := replayResp.Header.Get("X-Test"); val != "Replayed" {
+		t.Errorf("replay header X-Test = %s, want Replayed", val)
+	}
+
+	// Verify request was sent to the client a second time
+	select {
+	case <-reqChan:
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for replayed request")
+	}
+}
+
+func TestRequestFiltering(t *testing.T) {
+	insp := inspector.New(100)
+
+	// Log some dummy entries
+	insp.Record(inspector.Entry{Method: "GET", Path: "/api/users", StatusCode: 200})
+	insp.Record(inspector.Entry{Method: "POST", Path: "/api/users", StatusCode: 201})
+	insp.Record(inspector.Entry{Method: "GET", Path: "/healthz", StatusCode: 200})
+	insp.Record(inspector.Entry{Method: "GET", Path: "/api/items", StatusCode: 404})
+
+	server := httptest.NewServer(http.HandlerFunc(insp.HandleList))
+	defer server.Close()
+
+	// 1. Filter by method = POST
+	resp, err := http.Get(server.URL + "?method=POST")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	resp.Body.Close()
+	if count := int(result["count"].(float64)); count != 1 {
+		t.Errorf("expected 1 result for method=POST, got %d", count)
+	}
+
+	// 2. Filter by status = 200
+	resp, err = http.Get(server.URL + "?status=200")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	resp.Body.Close()
+	if count := int(result["count"].(float64)); count != 2 {
+		t.Errorf("expected 2 results for status=200, got %d", count)
+	}
+
+	// 3. Filter by path prefix = /api
+	resp, err = http.Get(server.URL + "?path=/api")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	resp.Body.Close()
+	if count := int(result["count"].(float64)); count != 3 {
+		t.Errorf("expected 3 results for path=/api, got %d", count)
+	}
+
+	// 4. Combined filter path=/api and status=404
+	resp, err = http.Get(server.URL + "?path=/api&status=404")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	resp.Body.Close()
+	if count := int(result["count"].(float64)); count != 1 {
+		t.Errorf("expected 1 result for path=/api and status=404, got %d", count)
+	}
+}
