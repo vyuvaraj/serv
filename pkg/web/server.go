@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +52,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/v1/stats", s.authorize(s.handleStats))
 	mux.HandleFunc("/api/replay", s.authorize(s.handleReplay))
 	mux.HandleFunc("/api/v1/replay", s.authorize(s.handleReplay))
+	mux.HandleFunc("/api/offsets", s.authorize(s.handleOffsets))
+	mux.HandleFunc("/api/v1/offsets", s.authorize(s.handleOffsets))
 
 	s.httpSrv = &http.Server{
 		Addr:    s.addr,
@@ -260,21 +263,87 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
-	topic := r.URL.Query().Get("topic")
-	if topic == "" {
+	var req struct {
+		Topic  string `json:"topic"`
+		Offset int64  `json:"offset"`
+		Group  string `json:"group,omitempty"`
+	}
+
+	if r.Method == http.MethodPost {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteJSONError(w, r, "Bad request: invalid JSON body", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
+			return
+		}
+	} else if r.Method == http.MethodGet {
+		req.Topic = r.URL.Query().Get("topic")
+		req.Group = r.URL.Query().Get("group")
+		if offStr := r.URL.Query().Get("offset"); offStr != "" {
+			if parsed, err := strconv.ParseInt(offStr, 10, 64); err == nil {
+				req.Offset = parsed
+			}
+		}
+	} else {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if req.Topic == "" {
 		WriteJSONError(w, r, "Missing topic parameter", "ERR_MISSING_TOPIC_PARAMETER", http.StatusBadRequest)
 		return
 	}
 
-	// Dynamic replay log implementation:
-	// In production, offloaded files would be downloaded. 
-	// For local compatibility, we return status indicating replay completion initialization.
+	records, err := s.engine.ReplayMessages(r.Context(), req.Topic, req.Offset, req.Group)
+	if err != nil {
+		WriteJSONError(w, r, "Replay failed: "+err.Error(), "ERR_REPLAY_FAILED", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":  "replay_initialized",
-		"topic":   topic,
-		"records": 0,
+		"status":  "replay_completed",
+		"topic":   req.Topic,
+		"records": records,
 	})
+}
+
+func (s *Server) handleOffsets(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		group := r.URL.Query().Get("group")
+		topic := r.URL.Query().Get("topic")
+		if group == "" || topic == "" {
+			WriteJSONError(w, r, "Missing group or topic query parameters", "ERR_MISSING_PARAMETERS", http.StatusBadRequest)
+			return
+		}
+		offset := s.engine.GetOffset(group, topic)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"group":  group,
+			"topic":  topic,
+			"offset": offset,
+		})
+	} else if r.Method == http.MethodPost {
+		var req struct {
+			Group  string `json:"group"`
+			Topic  string `json:"topic"`
+			Offset int64  `json:"offset"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			WriteJSONError(w, r, "Bad request: invalid JSON body", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
+			return
+		}
+		if req.Group == "" || req.Topic == "" {
+			WriteJSONError(w, r, "Missing group or topic in JSON body", "ERR_MISSING_PARAMETERS", http.StatusBadRequest)
+			return
+		}
+		s.engine.CommitOffset(req.Group, req.Topic, req.Offset)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"message": "Offset committed successfully",
+		})
+	} else {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+	}
 }
 
 func validateJWT(tokenStr string, secret []byte) (string, bool) {

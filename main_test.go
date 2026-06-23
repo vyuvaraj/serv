@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,6 +387,84 @@ func TestConsumerGroups(t *testing.T) {
 
 	if g1Sub1Count != 2 || g1Sub2Count != 2 {
 		t.Errorf("Expected balanced delivery (2 and 2), but got %d and %d", g1Sub1Count, g1Sub2Count)
+	}
+}
+
+func TestReplayAndOffsets(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	webServer := web.NewServer("127.0.0.1:8085", engine, "", "", "")
+	go webServer.Start()
+	time.Sleep(200 * time.Millisecond)
+
+	// 1. Commit and get offsets
+	// POST /api/v1/offsets
+	offsetReq := `{"group":"group1","topic":"topic1","offset":42}`
+	resp, err := http.Post("http://127.0.0.1:8085/api/v1/offsets", "application/json", strings.NewReader(offsetReq))
+	if err != nil {
+		t.Fatalf("Failed to commit offset: %v", err)
+	}
+	resp.Body.Close()
+
+	// GET /api/v1/offsets
+	resp, err = http.Get("http://127.0.0.1:8085/api/v1/offsets?group=group1&topic=topic1")
+	if err != nil {
+		t.Fatalf("Failed to get offset: %v", err)
+	}
+	defer resp.Body.Close()
+	var offsetRes struct {
+		Offset int64 `json:"offset"`
+	}
+	json.NewDecoder(resp.Body).Decode(&offsetRes)
+	if offsetRes.Offset != 42 {
+		t.Errorf("Expected offset 42, got %d", offsetRes.Offset)
+	}
+
+	// 2. Publish some messages to WAL
+	topic := "replay-topic"
+	engine.Publish(context.Background(), topic, "message-0")
+	engine.Publish(context.Background(), topic, "message-1")
+	engine.Publish(context.Background(), topic, "message-2")
+
+	// Subscribe to topic
+	sub := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, sub)
+
+	// 3. Trigger replay via HTTP POST /api/v1/replay starting from index 1
+	replayReq := `{"topic":"replay-topic","offset":1}`
+	resp, err = http.Post("http://127.0.0.1:8085/api/v1/replay", "application/json", strings.NewReader(replayReq))
+	if err != nil {
+		t.Fatalf("Replay request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var replayRes struct {
+		Status  string `json:"status"`
+		Records int    `json:"records"`
+	}
+	json.NewDecoder(resp.Body).Decode(&replayRes)
+	if replayRes.Records != 2 {
+		t.Errorf("Expected 2 replayed records, got %d", replayRes.Records)
+	}
+
+	// Verify we receive message-1 and message-2 on the subscription channel
+	select {
+	case msg := <-sub:
+		if msg != "message-1" {
+			t.Errorf("Expected replayed 'message-1', got %q", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for first replayed message")
+	}
+
+	select {
+	case msg := <-sub:
+		if msg != "message-2" {
+			t.Errorf("Expected replayed 'message-2', got %q", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for second replayed message")
 	}
 }
 

@@ -51,6 +51,7 @@ type BrokerEngine struct {
 	delayedMu      sync.Mutex
 	delayedMsgs    map[string]DelayedMessage
 	delayedCounter uint64
+	groupOffsets   map[string]map[string]int64 // groupName -> topic -> offset
 }
 
 func NewBrokerEngine() *BrokerEngine {
@@ -75,6 +76,7 @@ func NewBrokerEngine() *BrokerEngine {
 		wal:          wal,
 		dedup:        NewDeduplicator(5 * time.Minute),
 		delayedMsgs:  make(map[string]DelayedMessage),
+		groupOffsets: make(map[string]map[string]int64),
 	}
 
 	if wal != nil {
@@ -616,4 +618,97 @@ func (e *BrokerEngine) GetDelayedMessages() []DelayedMessage {
 		msgs = append(msgs, m)
 	}
 	return msgs
+}
+
+func (e *BrokerEngine) GetOffset(group, topic string) int64 {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.groupOffsets[group] == nil {
+		return 0
+	}
+	return e.groupOffsets[group][topic]
+}
+
+func (e *BrokerEngine) CommitOffset(group, topic string, offset int64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.groupOffsets[group] == nil {
+		e.groupOffsets[group] = make(map[string]int64)
+	}
+	e.groupOffsets[group][topic] = offset
+}
+
+func (e *BrokerEngine) ReplayMessages(ctx context.Context, topic string, startOffset int64, groupName string) (int, error) {
+	if e.wal == nil {
+		return 0, fmt.Errorf("WAL is not initialized")
+	}
+
+	entries, err := e.wal.Recover()
+	if err != nil {
+		return 0, err
+	}
+
+	var filtered []storage.LogEntry
+	for _, entry := range entries {
+		if entry.Topic == topic {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	if startOffset < 0 || startOffset >= int64(len(filtered)) {
+		return 0, nil
+	}
+
+	count := 0
+	e.mu.RLock()
+	subs := e.topics[topic]
+	var gSubs []chan string
+	if groupName != "" && e.groupSubs[topic] != nil {
+		gSubs = e.groupSubs[topic][groupName]
+	}
+	e.mu.RUnlock()
+
+	for i := startOffset; i < int64(len(filtered)); i++ {
+		payload := filtered[i].Payload
+		processed := payload
+
+		e.mu.RLock()
+		compiledModule, hasTransform := e.transforms[topic]
+		e.mu.RUnlock()
+
+		if hasTransform && compiledModule != nil {
+			if p, err := e.wasmManager.RunTransform(ctx, compiledModule, payload, ""); err == nil {
+				processed = p
+			}
+		}
+
+		if groupName != "" {
+			if len(gSubs) > 0 {
+				e.mu.Lock()
+				if e.groupIndices[topic] == nil {
+					e.groupIndices[topic] = make(map[string]uint64)
+				}
+				idx := e.groupIndices[topic][groupName]
+				e.groupIndices[topic][groupName] = idx + 1
+				e.mu.Unlock()
+
+				targetChan := gSubs[idx%uint64(len(gSubs))]
+				select {
+				case targetChan <- processed:
+					count++
+				default:
+				}
+			}
+		} else {
+			for _, sub := range subs {
+				select {
+				case sub <- processed:
+				default:
+				}
+			}
+			count++
+		}
+	}
+
+	return count, nil
 }
