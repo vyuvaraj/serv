@@ -70,7 +70,7 @@ This document outlines the planned evolutionary stages of **ServGate** to evolve
 | 8.2 | **Graceful shutdown on SIGTERM** | Small | Drain in-flight proxy requests and flush OTel spans before exit. Required for zero-downtime k8s rolling updates. | [x] |
 | 8.3 | **Standardized error response contract** | Small | Return `{"error": "msg", "code": "ERR_CODE", "trace_id": "..."}` on all admin/proxy errors — consistent with ecosystem convention. | [x] |
 | 8.4 | **API versioning (`/v1/` prefix)** | Small | Version the admin API (`/api/v1/admin/...`) before breaking changes accumulate. | [x] |
-| 8.5 | **Rate limiting on admin endpoints** | Small | Protect admin/middleware upload routes against abuse — currently unthrottled. | [ ] |
+| 8.5 | **Rate limiting on admin endpoints** | Small | Protect admin/middleware upload routes against abuse — currently unthrottled. | [x] |
 | 8.6 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing — only Serv-lang has CI. | [x] |
 | 8.7 | **WebSocket-based real-time metrics feed** | Medium | Push live connection counts, request rates, and error rates to ServConsole via WebSocket (instead of polling). | [ ] |
 | 8.8 | **Config hot-reload without restart** | Medium | Watch `config.json` (or ServStore bucket) for changes and apply route updates without restarting the gateway process. | [x] |
@@ -83,17 +83,17 @@ These items take ServGate from a capable reverse proxy to a **category-defining 
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 9.1 | **OpenAPI auto-discovery** | Medium | Auto-generate an OpenAPI 3.1 spec from all registered routes — including request/response schemas inferred from Serv-lang type declarations. Serve at `/api/docs`. | [ ] |
+| 9.1 | **OpenAPI auto-discovery** | Medium | Auto-generate an OpenAPI 3.1 spec from all registered routes — including request/response schemas inferred from Serv-lang type declarations. Serve at `/api/docs`. | [x] |
 | 9.2 | **Developer portal (API playground)** | Large | Embedded interactive API explorer (Swagger UI-style) served from the gateway. Developers can try endpoints directly with auth token injection. | [ ] |
 | 9.3 | **Request/response transformation rules** | Medium | Declarative JSON-path transformations applied to request body or response before forwarding — no WASM needed for simple field mapping/filtering. | [ ] |
 | 9.4 | **Multi-tenant API key management** | Large | Issue, rotate, and revoke API keys per tenant. Per-key rate limits, usage analytics, and key-scoped route access. Full lifecycle via admin API. | [ ] |
 | 9.5 | **Canary/blue-green traffic splitting** | Medium | Route a percentage of traffic to a canary backend: `"target": [{"url": "v2", "weight": 10}, {"url": "v1", "weight": 90}]`. Gradual rollouts without a service mesh. | [ ] |
-| 9.6 | **Request validation (JSON Schema)** | Medium | Attach JSON Schema to routes — reject malformed requests at the gateway before they hit backends. Return structured validation errors. | [ ] |
+| 9.6 | **Request validation (JSON Schema)** | Medium | Attach JSON Schema to routes — reject malformed requests at the gateway before they hit backends. Return structured validation errors. | [x] |
 | 9.7 | **Response caching (HTTP cache layer)** | Medium | Configurable HTTP response cache with TTL, cache-key rules, and invalidation API. Reduces backend load for idempotent GET routes. | [ ] |
 | 9.8 | **GraphQL federation proxy** | Large | Route GraphQL queries to multiple Serv backends, merge schemas, and execute federated resolvers. Position ServGate as a GraphQL supergraph router. | [ ] |
 | 9.9 | **Request logging & audit trail** | Medium | Structured JSON log of every request/response (headers, body hash, latency, status) with configurable retention and PII redaction. | [ ] |
 | 9.10 | **Plugin SDK (Go interface)** | Medium | Define a Go interface for plugins: `type Middleware interface { OnRequest(ctx) Response }`. Allows community to build compiled middleware without WASM overhead. | [ ] |
-| 9.11 | **IP allowlisting/blocklisting** | Small | Per-route or global IP-based access control. CIDR range support. Auto-block on repeated 4xx/5xx from same source. | [ ] |
+| 9.11 | **IP allowlisting/blocklisting** | Small | Per-route or global IP-based access control. CIDR range support. Auto-block on repeated 4xx/5xx from same source. | [x] |
 | 9.12 | **Mutual TLS (mTLS) for backends** | Medium | Support client certificate authentication when forwarding to backend services — required for zero-trust service-to-service communication. | [ ] |
 | 9.13 | **Request queuing & backpressure** | Medium | When backends are overloaded, queue requests in-memory (bounded) and apply backpressure via `429`/`503` with `Retry-After` — prevents cascade failures. | [ ] |
 

@@ -35,6 +35,8 @@ type Route struct {
 	PiiRedact          bool              `json:"pii_redact,omitempty"`          // AI PII Redaction
 	SemanticCache      bool              `json:"semantic_cache,omitempty"`      // AI Semantic Cache
 	ValidationSchema   map[string]string `json:"validation_schema,omitempty"`   // Edge request validation rules
+	IPAllowlist        []string          `json:"ip_allowlist,omitempty"`        // Allowed IP or CIDR list
+	IPBlocklist        []string          `json:"ip_blocklist,omitempty"`        // Blocked IP or CIDR list
 }
 
 type rateLimiter struct {
@@ -170,6 +172,16 @@ func (h *GatewayHandler) isRateLimited(clientIP, routePrefix string, limit int) 
 }
 
 func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/docs" {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(docsHTML))
+		return
+	}
+	if r.URL.Path == "/api/docs/openapi.json" {
+		h.serveOpenAPIDocs(w, r)
+		return
+	}
+
 	// Authentication
 	if h.authToken != "" {
 		authHeader := r.Header.Get("Authorization")
@@ -208,8 +220,20 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate Limiting Check
+	// IP Allowlisting & Blocklisting Check
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+		if strings.HasPrefix(clientIP, "[") && strings.HasSuffix(clientIP, "]") {
+			clientIP = clientIP[1 : len(clientIP)-1]
+		}
+	}
+	if !checkIPAccess(clientIP, matchedRoute.IPAllowlist, matchedRoute.IPBlocklist) {
+		WriteJSONError(w, r, "Forbidden: IP access denied", "ERR_IP_ACCESS_DENIED", http.StatusForbidden)
+		return
+	}
+
+	// Rate Limiting Check
 	if h.isRateLimited(clientIP, matchedRoute.Prefix, matchedRoute.RateLimitRPM) {
 		WriteJSONError(w, r, "Too Many Requests", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
 		return
@@ -682,3 +706,241 @@ func base64UrlDecode(s string) ([]byte, error) {
 	s = strings.ReplaceAll(s, "_", "/")
 	return base64.URLEncoding.DecodeString(s)
 }
+
+func (h *GatewayHandler) serveOpenAPIDocs(w http.ResponseWriter, r *http.Request) {
+	h.routesMu.RLock()
+	routes := h.routes
+	h.routesMu.RUnlock()
+
+	openapi := map[string]interface{}{
+		"openapi": "3.1.0",
+		"info": map[string]interface{}{
+			"title":       "ServGate API Gateway Discovery",
+			"version":     "1.0.0",
+			"description": "Auto-discovered gateway proxy routes",
+		},
+		"paths": make(map[string]interface{}),
+		"components": map[string]interface{}{
+			"securitySchemes": map[string]interface{}{
+				"BearerAuth": map[string]interface{}{
+					"type":         "http",
+					"scheme":       "bearer",
+					"bearerFormat": "JWT",
+				},
+			},
+		},
+		"security": []interface{}{
+			map[string]interface{}{
+				"BearerAuth": []interface{}{},
+			},
+		},
+	}
+
+	paths := openapi["paths"].(map[string]interface{})
+
+	for _, route := range routes {
+		pathKey := route.Prefix
+		if !strings.HasSuffix(pathKey, "/") {
+			pathKey += "/"
+		}
+		pathKey += "{path}"
+
+		pathItem := map[string]interface{}{
+			"parameters": []interface{}{
+				map[string]interface{}{
+					"name":        "path",
+					"in":          "path",
+					"required":    true,
+					"description": "Sub-route path parameter",
+					"schema": map[string]interface{}{
+						"type": "string",
+					},
+				},
+			},
+		}
+
+		methods := []string{"get", "post", "put", "delete", "patch"}
+		for _, m := range methods {
+			op := map[string]interface{}{
+				"summary":     fmt.Sprintf("Proxy to %s", route.Target),
+				"description": fmt.Sprintf("Proxies requests starting with %s to target: %s", route.Prefix, route.Target),
+				"responses": map[string]interface{}{
+					"200": map[string]interface{}{
+						"description": "Successful proxy response",
+					},
+				},
+			}
+
+			if (m == "post" || m == "put") && len(route.ValidationSchema) > 0 {
+				properties := make(map[string]interface{})
+				var required []string
+				for fieldName, fieldType := range route.ValidationSchema {
+					pType := "string"
+					req := false
+					parts := strings.Split(fieldType, ",")
+					for _, part := range parts {
+						p := strings.TrimSpace(part)
+						if p == "required" {
+							req = true
+						} else if p == "int" || p == "integer" {
+							pType = "integer"
+						} else if p == "float" || p == "number" {
+							pType = "number"
+						} else if p == "bool" || p == "boolean" {
+							pType = "boolean"
+						} else if p == "string" {
+							pType = "string"
+						}
+					}
+					properties[fieldName] = map[string]interface{}{
+						"type": pType,
+					}
+					if req {
+						required = append(required, fieldName)
+					}
+				}
+
+				reqBodySchema := map[string]interface{}{
+					"type":       "object",
+					"properties": properties,
+				}
+				if len(required) > 0 {
+					reqBodySchema["required"] = required
+				}
+
+				op["requestBody"] = map[string]interface{}{
+					"required": true,
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"schema": reqBodySchema,
+						},
+					},
+				}
+			}
+
+			pathItem[m] = op
+		}
+
+		paths[pathKey] = pathItem
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(openapi)
+}
+
+func checkIPAccess(clientIP string, allowlist, blocklist []string) bool {
+	parsedIP := net.ParseIP(clientIP)
+	if parsedIP == nil {
+		return true
+	}
+
+	ipMatches := func(ip net.IP, pattern string) bool {
+		if strings.Contains(pattern, "/") {
+			_, subnet, err := net.ParseCIDR(pattern)
+			if err == nil {
+				return subnet.Contains(ip)
+			}
+		}
+		patternIP := net.ParseIP(pattern)
+		if patternIP != nil {
+			return patternIP.Equal(ip)
+		}
+		return false
+	}
+
+	// Check Blocklist first
+	for _, pattern := range blocklist {
+		if ipMatches(parsedIP, pattern) {
+			return false
+		}
+	}
+
+	// Check Allowlist second (if populated)
+	if len(allowlist) > 0 {
+		allowed := false
+		for _, pattern := range allowlist {
+			if ipMatches(parsedIP, pattern) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
+		}
+	}
+
+	return true
+}
+
+const docsHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ServGate API Portal</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: 'Outfit', sans-serif;
+    }
+    .swagger-ui {
+      filter: invert(88%) hue-rotate(180deg);
+    }
+    .swagger-ui .topbar {
+      display: none;
+    }
+    .header-panel {
+      background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
+      padding: 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header-panel h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .badge {
+      background: #4f46e5;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-panel">
+    <div>
+      <h1>⚡ ServGate <span style="color: #818cf8;">Developer Portal</span><span class="badge">Docs</span></h1>
+    </div>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/api/docs/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.swaggerPlugins.DownloadUrl
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>
+`

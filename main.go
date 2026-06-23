@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -188,10 +190,10 @@ func main() {
 		json.NewEncoder(w).Encode(handler.GetRoutes())
 	}
 
-	mux.HandleFunc("/api/admin/middleware/", handleMiddleware)
-	mux.HandleFunc("/api/v1/admin/middleware/", handleMiddleware)
-	mux.HandleFunc("/api/routes", handleRoutes)
-	mux.HandleFunc("/api/v1/routes", handleRoutes)
+	mux.HandleFunc("/api/admin/middleware/", withAdminRateLimit(60, handleMiddleware))
+	mux.HandleFunc("/api/v1/admin/middleware/", withAdminRateLimit(60, handleMiddleware))
+	mux.HandleFunc("/api/routes", withAdminRateLimit(60, handleRoutes))
+	mux.HandleFunc("/api/v1/routes", withAdminRateLimit(60, handleRoutes))
 
 	log.Printf("Starting ServGate reverse proxy on %s...", cfg.Addr)
 	server := &http.Server{
@@ -441,3 +443,53 @@ func main() {
 
 	fmt.Printf("✓ Successfully compiled policy to %s\n", outputWasm)
 }
+
+type adminRateLimiter struct {
+	mu      sync.Mutex
+	history map[string][]time.Time
+}
+
+func (al *adminRateLimiter) Limit(ip string, limit int) bool {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+
+	if al.history == nil {
+		al.history = make(map[string][]time.Time)
+	}
+
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Minute)
+
+	history := al.history[ip]
+	valid := history[:0]
+	for _, t := range history {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+
+	if len(valid) >= limit {
+		al.history[ip] = valid
+		return true // rate limited
+	}
+
+	valid = append(valid, now)
+	al.history[ip] = valid
+	return false
+}
+
+func withAdminRateLimit(limit int, next http.HandlerFunc) http.HandlerFunc {
+	limiter := &adminRateLimiter{}
+	return func(w http.ResponseWriter, r *http.Request) {
+		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if clientIP == "" {
+			clientIP = r.RemoteAddr
+		}
+		if limiter.Limit(clientIP, limit) {
+			proxy.WriteJSONError(w, r, "Too Many Requests", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
+			return
+		}
+		next(w, r)
+	}
+}
+

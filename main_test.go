@@ -800,3 +800,245 @@ func TestEdgeRequestValidation(t *testing.T) {
 		t.Errorf("Expected status 400 for float age, got %d", resp.StatusCode)
 	}
 }
+
+func TestOpenAPIDiscovery(t *testing.T) {
+	routes := []proxy.Route{
+		{
+			Prefix: "/api/users",
+			Target: "http://127.0.0.1:8099",
+			ValidationSchema: map[string]string{
+				"name":  "string,required",
+				"email": "string,required,email",
+				"age":   "integer",
+			},
+		},
+	}
+
+	wasmManager, err := wasm.GetMiddlewareManager(context.Background())
+	if err != nil {
+		t.Fatalf("WASM setup failed: %v", err)
+	}
+
+	gatewayHandler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(gatewayHandler)
+	defer gwServer.Close()
+
+	resp, err := http.Get(gwServer.URL + "/api/docs/openapi.json")
+	if err != nil {
+		t.Fatalf("Failed to fetch /api/docs: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	var schema map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&schema); err != nil {
+		t.Fatalf("Failed to decode OpenAPI schema: %v", err)
+	}
+
+	if schema["openapi"] != "3.1.0" {
+		t.Errorf("Expected openapi version '3.1.0', got %v", schema["openapi"])
+	}
+
+	paths, ok := schema["paths"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'paths' in OpenAPI document")
+	}
+
+	pathItem, ok := paths["/api/users/{path}"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing path '/api/users/{path}' in OpenAPI schema paths")
+	}
+
+	postOp, ok := pathItem["post"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'post' operation in path item")
+	}
+
+	reqBody, ok := postOp["requestBody"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'requestBody' in post operation")
+	}
+
+	content, ok := reqBody["content"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'content' in requestBody")
+	}
+
+	jsonType, ok := content["application/json"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'application/json' in content")
+	}
+
+	bodySchema, ok := jsonType["schema"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'schema' in application/json content")
+	}
+
+	props, ok := bodySchema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'properties' in body schema")
+	}
+
+	nameProp, ok := props["name"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'name' property")
+	}
+	if nameProp["type"] != "string" {
+		t.Errorf("Expected name property type 'string', got %v", nameProp["type"])
+	}
+
+	ageProp, ok := props["age"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing 'age' property")
+	}
+	if ageProp["type"] != "integer" {
+		t.Errorf("Expected age property type 'integer', got %v", ageProp["type"])
+	}
+
+	required, ok := bodySchema["required"].([]interface{})
+	if !ok {
+		t.Fatalf("Missing 'required' fields list")
+	}
+
+	hasName := false
+	hasEmail := false
+	for _, req := range required {
+		if req == "name" {
+			hasName = true
+		}
+		if req == "email" {
+			hasEmail = true
+		}
+	}
+	if !hasName || !hasEmail {
+		t.Errorf("Expected 'name' and 'email' in required list, got %v", required)
+	}
+}
+
+func TestIPAccessControl(t *testing.T) {
+	// A simple backend server to proxy to
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:      "/api/allowed-ip",
+			Target:      backend.URL,
+			IPAllowlist: []string{"127.0.0.1"},
+		},
+		{
+			Prefix:      "/api/allowed-cidr",
+			Target:      backend.URL,
+			IPAllowlist: []string{"127.0.0.0/24"},
+		},
+		{
+			Prefix:      "/api/blocked-ip",
+			Target:      backend.URL,
+			IPBlocklist: []string{"127.0.0.1"},
+		},
+		{
+			Prefix:      "/api/blocked-cidr",
+			Target:      backend.URL,
+			IPBlocklist: []string{"127.0.0.0/24"},
+		},
+		{
+			Prefix:      "/api/no-limits",
+			Target:      backend.URL,
+		},
+	}
+
+	wasmManager, err := wasm.GetMiddlewareManager(context.Background())
+	if err != nil {
+		t.Fatalf("WASM setup failed: %v", err)
+	}
+
+	gatewayHandler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(gatewayHandler)
+	defer gwServer.Close()
+
+	// Helper to send request and return status code
+	sendReq := func(path string) int {
+		resp, err := http.Get(gwServer.URL + path)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// 127.0.0.1 is client IP from httptest
+	// /api/allowed-ip: 127.0.0.1 is in allowlist -> 200
+	if status := sendReq("/api/allowed-ip"); status != http.StatusOK {
+		t.Errorf("Expected 200 for allowed IP, got %d", status)
+	}
+
+	// /api/allowed-cidr: 127.0.0.1 matches 127.0.0.0/24 -> 200
+	if status := sendReq("/api/allowed-cidr"); status != http.StatusOK {
+		t.Errorf("Expected 200 for allowed CIDR, got %d", status)
+	}
+
+	// /api/blocked-ip: 127.0.0.1 is in blocklist -> 403
+	if status := sendReq("/api/blocked-ip"); status != http.StatusForbidden {
+		t.Errorf("Expected 403 for blocked IP, got %d", status)
+	}
+
+	// /api/blocked-cidr: 127.0.0.1 matches 127.0.0.0/24 -> 403
+	if status := sendReq("/api/blocked-cidr"); status != http.StatusForbidden {
+		t.Errorf("Expected 403 for blocked CIDR, got %d", status)
+	}
+
+	// /api/no-limits: no IP restrictions -> 200
+	if status := sendReq("/api/no-limits"); status != http.StatusOK {
+		t.Errorf("Expected 200 for unrestricted route, got %d", status)
+	}
+}
+
+func TestAdminRateLimiting(t *testing.T) {
+	dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("admin ok"))
+	})
+
+	// Wrap handler with a low limit of 2 requests per minute for testing
+	limitedHandler := withAdminRateLimit(2, dummyHandler)
+	server := httptest.NewServer(limitedHandler)
+	defer server.Close()
+
+	// First request -> 200
+	resp1, err := http.Get(server.URL + "/api/routes")
+	if err != nil {
+		t.Fatalf("Request 1 failed: %v", err)
+	}
+	defer resp1.Body.Close()
+	if resp1.StatusCode != http.StatusOK {
+		t.Errorf("Request 1: expected 200, got %d", resp1.StatusCode)
+	}
+
+	// Second request -> 200
+	resp2, err := http.Get(server.URL + "/api/routes")
+	if err != nil {
+		t.Fatalf("Request 2 failed: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("Request 2: expected 200, got %d", resp2.StatusCode)
+	}
+
+	// Third request -> 429
+	resp3, err := http.Get(server.URL + "/api/routes")
+	if err != nil {
+		t.Fatalf("Request 3 failed: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("Request 3: expected 429, got %d", resp3.StatusCode)
+	}
+}
+
+
