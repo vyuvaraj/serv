@@ -20,9 +20,9 @@ This roadmap outlines the planned development phases for the ServRegistry packag
 - [x] **JWT Security**: Verification of signature tokens to protect publishing scopes.
 
 ## Phase 2: Semver Range Resolution (Q3 2026)
-- [ ] **Range Matching**: Add server-side parsing for semantic version ranges (e.g. `^1.2.0`, `~0.4.1`).
-- [ ] **Package Deprecation**: API flag to mark versions as deprecated with warning payloads.
+- [x] **Range Matching**: Add server-side parsing for semantic version ranges (e.g. `^1.2.0`, `~0.4.1`).
+- [x] **Package Deprecation**: API flag to mark versions as deprecated with warning payloads.
 
 ## Phase 3: Cryptographic Signatures (Q4 2026)
-- [ ] **Package Signing**: Support uploading `.sig` signature files alongside tarballs.
-- [ ] **Public Key Verification**: Cryptographically verify author signatures at the command-line before installation.
+- [x] **Package Signing**: Support uploading `.sig` signature files alongside tarballs.
+- [x] **Public Key Verification**: Cryptographically verify author signatures at the command-line before installation.

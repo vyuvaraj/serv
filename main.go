@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,15 +53,19 @@ type PackageIndexItem struct {
 }
 
 type PackageMetadata struct {
-	Name     string                    `json:"name"`
-	Versions map[string]VersionDetails `json:"versions"`
+	Name           string                    `json:"name"`
+	Versions       map[string]VersionDetails `json:"versions"`
+	Deprecated     bool                      `json:"deprecated,omitempty"`
+	DeprecationMsg string                    `json:"deprecationMsg,omitempty"`
 }
 
 type VersionDetails struct {
-	Version      string   `json:"version"`
-	Dependencies []string `json:"dependencies"`
-	Size         int64    `json:"size"`
-	PublishedAt  string   `json:"publishedAt"`
+	Version        string   `json:"version"`
+	Dependencies   []string `json:"dependencies"`
+	Size           int64    `json:"size"`
+	PublishedAt    string   `json:"publishedAt"`
+	Deprecated     bool     `json:"deprecated,omitempty"`
+	DeprecationMsg string   `json:"deprecationMsg,omitempty"`
 }
 
 type PackageInfo struct {
@@ -218,6 +225,38 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cryptographic Ed25519 signature check
+	sigHex := r.Header.Get("X-Signature")
+	if sigHex == "" {
+		sigHex = r.Header.Get("signature")
+	}
+	pubKeyHex := r.Header.Get("X-Public-Key")
+	if pubKeyHex == "" {
+		pubKeyHex = r.Header.Get("public-key")
+	}
+
+	if sigHex == "" || pubKeyHex == "" {
+		WriteJSONError(w, r, "Missing signature or public key", "ERR_MISSING_SIGNATURE", http.StatusBadRequest)
+		return
+	}
+
+	sigBytes, err := hex.DecodeString(sigHex)
+	if err != nil || len(sigBytes) != ed25519.SignatureSize {
+		WriteJSONError(w, r, "Invalid signature format", "ERR_INVALID_SIGNATURE", http.StatusBadRequest)
+		return
+	}
+
+	pubKeyBytes, err := hex.DecodeString(pubKeyHex)
+	if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
+		WriteJSONError(w, r, "Invalid public key format", "ERR_INVALID_PUBLIC_KEY", http.StatusBadRequest)
+		return
+	}
+
+	if !ed25519.Verify(pubKeyBytes, data, sigBytes) {
+		WriteJSONError(w, r, "Signature verification failed", "ERR_SIGNATURE_VERIFICATION_FAILED", http.StatusBadRequest)
+		return
+	}
+
 	// 2. Parse serv.toml from uploaded tar.gz
 	name, version, deps, err := parseServTomlFromTarGz(data)
 	if err != nil {
@@ -305,6 +344,20 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 5. Upload signature companion to S3
+	sigObjectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz.sig", name, version, name, version)
+	_, err = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(sigObjectKey),
+		Body:        bytes.NewReader(sigBytes),
+		ContentType: aws.String("application/octet-stream"),
+	})
+	if err != nil {
+		log.Printf("Failed to upload signature companion to S3: %v", err)
+		WriteJSONError(w, r, "Failed to upload signature to storage: "+err.Error(), "ERR_SIGNATURE_UPLOAD_FAILED", http.StatusInternalServerError)
+		return
+	}
+
 	// Proactively update local cache index
 	packageIndexMu.Lock()
 	versions := []string{}
@@ -351,24 +404,42 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Fetching package: %s", path)
 
 	var s3Key string
-	// Check if path is simple name (e.g. "mypkg.tar.gz") vs full version key (e.g. "mypkg/1.0.0/mypkg-1.0.0.tar.gz")
-	if !strings.Contains(path, "/") && strings.HasSuffix(path, ".tar.gz") {
-		name := strings.TrimSuffix(path, ".tar.gz")
-		// Fetch metadata to find the latest version
+	var name, version string
+
+	parts := strings.Split(path, "/")
+	if len(parts) == 3 {
+		name = parts[0]
+		version = parts[1]
+		if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
+			metadataKey := fmt.Sprintf("%s/metadata.json", name)
+			metaResp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(metadataKey),
+			})
+			if err == nil {
+				defer metaResp.Body.Close()
+				var metadata PackageMetadata
+				metaData, merr := io.ReadAll(metaResp.Body)
+				if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
+					version = resolveBestVersion(version, metadata.Versions)
+				}
+			}
+		}
+		s3Key = fmt.Sprintf("%s/%s/%s-%s.tar.gz", name, version, name, version)
+	} else if !strings.Contains(path, "/") && strings.HasSuffix(path, ".tar.gz") {
+		name = strings.TrimSuffix(path, ".tar.gz")
 		metadataKey := fmt.Sprintf("%s/metadata.json", name)
 		metaResp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
 			Bucket: aws.String(bucketName),
 			Key:    aws.String(metadataKey),
 		})
 		if err != nil {
-			// Backwards compatibility: maybe it was stored as mypkg.tar.gz in the S3 root?
 			s3Key = path
 		} else {
 			defer metaResp.Body.Close()
 			var metadata PackageMetadata
 			metaData, merr := io.ReadAll(metaResp.Body)
 			if merr == nil && json.Unmarshal(metaData, &metadata) == nil && len(metadata.Versions) > 0 {
-				// Find latest version
 				var latest string
 				var latestTime time.Time
 				for v, details := range metadata.Versions {
@@ -380,6 +451,7 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 						latest = v
 					}
 				}
+				version = latest
 				s3Key = fmt.Sprintf("%s/%s/%s-%s.tar.gz", name, latest, name, latest)
 			} else {
 				s3Key = path
@@ -387,6 +459,10 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		s3Key = path
+		if len(parts) >= 2 {
+			name = parts[0]
+			version = parts[1]
+		}
 	}
 
 	resp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
@@ -399,6 +475,10 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+
+	if name != "" && version != "" {
+		checkDeprecationsAndAddHeader(w, r.Context(), name, version)
+	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", resp.ContentLength))
@@ -431,6 +511,10 @@ func handlePackagesAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.Contains(r.URL.Path, "/deps") {
 		handleGetDeps(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/deprecate") {
+		handleDeprecate(w, r)
 		return
 	}
 	handleListPackages(w, r)
@@ -492,6 +576,8 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 				version = v
 			}
 		}
+	} else if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
+		version = resolveBestVersion(version, metadata.Versions)
 	}
 
 	versionDetails, ok := metadata.Versions[version]
@@ -859,3 +945,202 @@ func WriteJSONError(w http.ResponseWriter, r *http.Request, msg string, code str
 		TraceID: traceID,
 	})
 }
+
+func handleDeprecate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if jwtSecret := os.Getenv("SERV_JWT_SECRET"); jwtSecret != "" {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+			WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+			return
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if _, ok := validateJWT(token, []byte(jwtSecret)); !ok {
+			WriteJSONError(w, r, "Unauthorized", "ERR_INVALID_JWT", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	var path string
+	if strings.HasPrefix(r.URL.Path, "/api/v1/packages/") {
+		path = strings.TrimPrefix(r.URL.Path, "/api/v1/packages/")
+	} else {
+		path = strings.TrimPrefix(r.URL.Path, "/api/packages/")
+	}
+	path = strings.TrimSuffix(path, "/deprecate")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		WriteJSONError(w, r, "Invalid path", "ERR_INVALID_PATH", http.StatusBadRequest)
+		return
+	}
+	name, version := parts[0], parts[1]
+
+	var body struct {
+		Message string `json:"message"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	metadataKey := fmt.Sprintf("%s/metadata.json", name)
+	resp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(metadataKey),
+	})
+	if err != nil {
+		WriteJSONError(w, r, "Package not found", "ERR_PACKAGE_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+	defer resp.Body.Close()
+
+	metaData, _ := io.ReadAll(resp.Body)
+	var metadata PackageMetadata
+	_ = json.Unmarshal(metaData, &metadata)
+
+	vd, ok := metadata.Versions[version]
+	if !ok {
+		WriteJSONError(w, r, "Version not found", "ERR_VERSION_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+
+	vd.Deprecated = true
+	vd.DeprecationMsg = body.Message
+	metadata.Versions[version] = vd
+
+	updatedMetaBytes, _ := json.MarshalIndent(metadata, "", "  ")
+	_, err = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(metadataKey),
+		Body:        bytes.NewReader(updatedMetaBytes),
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		WriteJSONError(w, r, "Failed to save deprecation", "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success":true,"message":"Version deprecated successfully"}`))
+}
+
+func parseSemver(v string) (int, int, int, error) {
+	v = strings.TrimPrefix(v, "v")
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return 0, 0, 0, fmt.Errorf("invalid semver: %s", v)
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	patch, err3 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return 0, 0, 0, fmt.Errorf("invalid semver integers: %s", v)
+	}
+	return major, minor, patch, nil
+}
+
+func matchSemver(rangeStr, versionStr string) bool {
+	if rangeStr == "" || rangeStr == "*" || rangeStr == "latest" {
+		return true
+	}
+	if rangeStr == versionStr {
+		return true
+	}
+
+	vMaj, vMin, vPat, err := parseSemver(versionStr)
+	if err != nil {
+		return false
+	}
+
+	if strings.HasPrefix(rangeStr, "^") {
+		rStr := strings.TrimPrefix(rangeStr, "^")
+		rMaj, rMin, rPat, err := parseSemver(rStr)
+		if err != nil {
+			return false
+		}
+		if vMaj != rMaj {
+			return false
+		}
+		if vMin < rMin {
+			return false
+		}
+		if vMin == rMin && vPat < rPat {
+			return false
+		}
+		return true
+	}
+
+	if strings.HasPrefix(rangeStr, "~") {
+		rStr := strings.TrimPrefix(rangeStr, "~")
+		rMaj, rMin, rPat, err := parseSemver(rStr)
+		if err != nil {
+			return false
+		}
+		if vMaj != rMaj || vMin != rMin {
+			return false
+		}
+		if vPat < rPat {
+			return false
+		}
+		return true
+	}
+
+	return false
+}
+
+func resolveBestVersion(rangeStr string, versions map[string]VersionDetails) string {
+	var bestVersion string
+	var bestMaj, bestMin, bestPat int
+	found := false
+
+	for v := range versions {
+		if matchSemver(rangeStr, v) {
+			maj, min, pat, err := parseSemver(v)
+			if err != nil {
+				continue
+			}
+			if !found {
+				bestVersion = v
+				bestMaj, bestMin, bestPat = maj, min, pat
+				found = true
+				continue
+			}
+			if maj > bestMaj {
+				bestVersion = v
+				bestMaj, bestMin, bestPat = maj, min, pat
+			} else if maj == bestMaj {
+				if min > bestMin {
+					bestVersion = v
+					bestMaj, bestMin, bestPat = maj, min, pat
+				} else if min == bestMin {
+					if pat > bestPat {
+						bestVersion = v
+						bestMaj, bestMin, bestPat = maj, min, pat
+					}
+				}
+			}
+		}
+	}
+
+	return bestVersion
+}
+
+func checkDeprecationsAndAddHeader(w http.ResponseWriter, ctx context.Context, name, version string) {
+	metadataKey := fmt.Sprintf("%s/metadata.json", name)
+	resp, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(metadataKey),
+	})
+	if err == nil {
+		defer resp.Body.Close()
+		var metadata PackageMetadata
+		metaData, merr := io.ReadAll(resp.Body)
+		if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
+			if vd, ok := metadata.Versions[version]; ok && vd.Deprecated {
+				w.Header().Set("X-Deprecation-Warning", vd.DeprecationMsg)
+			}
+		}
+	}
+}
+

@@ -4,9 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -138,4 +140,123 @@ func base64UrlEncode(data []byte) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+func TestSemverMatching(t *testing.T) {
+	tests := []struct {
+		rangeStr   string
+		versionStr string
+		expected   bool
+	}{
+		{"^1.2.0", "1.2.3", true},
+		{"^1.2.0", "1.3.0", true},
+		{"^1.2.0", "2.0.0", false},
+		{"^1.2.0", "1.1.9", false},
+		{"~0.4.1", "0.4.5", true},
+		{"~0.4.1", "0.5.0", false},
+		{"~0.4.1", "0.4.0", false},
+		{"1.0.0", "1.0.0", true},
+		{"1.0.0", "1.0.1", false},
+		{"*", "2.3.4", true},
+		{"", "1.0.0", true},
+		{"latest", "5.6.7", true},
+	}
+
+	for _, tc := range tests {
+		got := matchSemver(tc.rangeStr, tc.versionStr)
+		if got != tc.expected {
+			t.Errorf("matchSemver(%q, %q) = %t; want %t", tc.rangeStr, tc.versionStr, got, tc.expected)
+		}
+	}
+}
+
+func TestResolveBestVersion(t *testing.T) {
+	versions := map[string]VersionDetails{
+		"1.2.0": {Version: "1.2.0"},
+		"1.2.5": {Version: "1.2.5"},
+		"1.3.0": {Version: "1.3.0"},
+		"2.0.0": {Version: "2.0.0"},
+	}
+
+	best := resolveBestVersion("^1.2.0", versions)
+	if best != "1.3.0" {
+		t.Errorf("Expected best version to be '1.3.0', got '%s'", best)
+	}
+
+	bestTilde := resolveBestVersion("~1.2.0", versions)
+	if bestTilde != "1.2.5" {
+		t.Errorf("Expected best version to be '1.2.5', got '%s'", bestTilde)
+	}
+}
+
+func TestPublishSignatureVerification(t *testing.T) {
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("Failed to generate key pair: %v", err)
+	}
+	pubKeyHex := hex.EncodeToString(pubKey)
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+	tomlContent := `
+name = "signedpkg"
+version = "1.0.0"
+`
+	hdr := &tar.Header{
+		Name: "serv.toml",
+		Size: int64(len(tomlContent)),
+		Mode: 0644,
+	}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte(tomlContent))
+	tw.Close()
+	gw.Close()
+
+	data := buf.Bytes()
+	sig := ed25519.Sign(privKey, data)
+	sigHex := hex.EncodeToString(sig)
+
+	// 1. Missing signature/pubkey headers
+	req := httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(data))
+	rr := httptest.NewRecorder()
+	handlePublish(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for missing headers, got %d", rr.Code)
+	}
+
+	// 2. Invalid signature hex
+	req = httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(data))
+	req.Header.Set("X-Signature", "invalid-hex")
+	req.Header.Set("X-Public-Key", pubKeyHex)
+	rr = httptest.NewRecorder()
+	handlePublish(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid signature hex, got %d", rr.Code)
+	}
+
+	// 3. Signature verification failure
+	req = httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(data))
+	req.Header.Set("X-Signature", hex.EncodeToString(make([]byte, 64)))
+	req.Header.Set("X-Public-Key", pubKeyHex)
+	rr = httptest.NewRecorder()
+	handlePublish(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 Bad Request for invalid signature, got %d", rr.Code)
+	}
+
+	// 4. Valid signature - should pass signature verification and attempt metadata access (which will panic due to nil s3Client)
+	defer func() {
+		if r := recover(); r != nil {
+			// Panic is expected because s3Client is nil, which means signature verification succeeded!
+		} else {
+			t.Errorf("Expected panic due to nil s3Client after successful signature check, but got no panic")
+		}
+	}()
+
+	req = httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(data))
+	req.Header.Set("X-Signature", sigHex)
+	req.Header.Set("X-Public-Key", pubKeyHex)
+	rr = httptest.NewRecorder()
+	handlePublish(rr, req)
 }
