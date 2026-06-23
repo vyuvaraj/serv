@@ -149,3 +149,58 @@ func TestHandleEvents(t *testing.T) {
 	}
 }
 
+func TestHandleStatusHealthz(t *testing.T) {
+	oldGate := *gateUrl
+	oldStore := *storeUrl
+	oldQueue := *queueUrl
+	defer func() {
+		*gateUrl = oldGate
+		*storeUrl = oldStore
+		*queueUrl = oldQueue
+	}()
+
+	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"healthy"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockSrv.Close()
+
+	*gateUrl = mockSrv.URL
+	*storeUrl = mockSrv.URL
+	*queueUrl = mockSrv.URL
+
+	req := httptest.NewRequest("GET", "/api/status", nil)
+	w := httptest.NewRecorder()
+
+	handleStatus(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+	resp.Body.Close()
+
+	components, ok := result["components"].([]any)
+	if !ok {
+		t.Fatal("expected components list in response")
+	}
+
+	if len(components) != 3 {
+		t.Fatalf("expected 3 components, got %d", len(components))
+	}
+
+	for _, c := range components {
+		compMap := c.(map[string]any)
+		if !compMap["online"].(bool) {
+			t.Errorf("component %s expected to be online", compMap["name"])
+		}
+	}
+}
+

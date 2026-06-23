@@ -326,9 +326,9 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	statuses := []ComponentStatus{
-		checkStatus("ServGate", *gateUrl, "/"),
-		checkStatus("ServStore", *storeUrl, "/console/metrics"),
-		checkStatus("ServQueue", *queueUrl, "/api/stats"),
+		checkStatus("ServGate", *gateUrl),
+		checkStatus("ServStore", *storeUrl),
+		checkStatus("ServQueue", *queueUrl),
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
@@ -337,12 +337,13 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func checkStatus(name string, baseUrl string, healthPath string) ComponentStatus {
+func checkStatus(name string, baseUrl string) ComponentStatus {
 	client := http.Client{
 		Timeout: 1 * time.Second,
 	}
 
-	reqUrl := fmt.Sprintf("%s%s", strings.TrimSuffix(baseUrl, "/"), healthPath)
+	// 1. Poll standardized /healthz endpoint
+	reqUrl := fmt.Sprintf("%s/healthz", strings.TrimSuffix(baseUrl, "/"))
 	req, err := http.NewRequest("GET", reqUrl, nil)
 	if err != nil {
 		return ComponentStatus{Name: name, Online: false, Url: baseUrl}
@@ -361,30 +362,58 @@ func checkStatus(name string, baseUrl string, healthPath string) ComponentStatus
 	if err != nil {
 		return ComponentStatus{Name: name, Online: false, Url: baseUrl}
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
 
 	latency := time.Since(start).Milliseconds()
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-		var details any
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err == nil && len(bodyBytes) > 0 {
-			_ = json.Unmarshal(bodyBytes, &details)
-		}
+	if resp.StatusCode != http.StatusOK {
 		return ComponentStatus{
 			Name:      name,
-			Online:    true,
+			Online:    false,
 			Url:       baseUrl,
 			LatencyMs: latency,
-			Details:   details,
+		}
+	}
+
+	// 2. Fetch metrics for details if healthy
+	var details any
+	var detailsPath string
+	switch name {
+	case "ServStore":
+		detailsPath = "/console/metrics"
+	case "ServQueue":
+		detailsPath = "/api/stats"
+	case "ServGate":
+		detailsPath = "/"
+	}
+
+	if detailsPath != "" {
+		detUrl := fmt.Sprintf("%s%s", strings.TrimSuffix(baseUrl, "/"), detailsPath)
+		dreq, derr := http.NewRequest("GET", detUrl, nil)
+		if derr == nil {
+			switch name {
+			case "ServGate":
+				dreq.Header.Set("Authorization", "Bearer "+*authToken)
+			case "ServQueue":
+				dreq.Header.Set("Authorization", "Bearer secret-token")
+			}
+			dresp, derr2 := client.Do(dreq)
+			if derr2 == nil {
+				bodyBytes, _ := io.ReadAll(dresp.Body)
+				dresp.Body.Close()
+				if len(bodyBytes) > 0 {
+					_ = json.Unmarshal(bodyBytes, &details)
+				}
+			}
 		}
 	}
 
 	return ComponentStatus{
 		Name:      name,
-		Online:    false,
+		Online:    true,
 		Url:       baseUrl,
 		LatencyMs: latency,
+		Details:   details,
 	}
 }
 
@@ -1180,9 +1209,9 @@ func startEventBroadcaster(ctx context.Context) {
 			}
 
 			statuses := []ComponentStatus{
-				checkStatus("ServGate", *gateUrl, "/"),
-				checkStatus("ServStore", *storeUrl, "/console/metrics"),
-				checkStatus("ServQueue", *queueUrl, "/api/stats"),
+				checkStatus("ServGate", *gateUrl),
+				checkStatus("ServStore", *storeUrl),
+				checkStatus("ServQueue", *queueUrl),
 			}
 
 			eventData := map[string]any{
@@ -1233,9 +1262,9 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	statuses := []ComponentStatus{
-		checkStatus("ServGate", *gateUrl, "/"),
-		checkStatus("ServStore", *storeUrl, "/console/metrics"),
-		checkStatus("ServQueue", *queueUrl, "/api/stats"),
+		checkStatus("ServGate", *gateUrl),
+		checkStatus("ServStore", *storeUrl),
+		checkStatus("ServQueue", *queueUrl),
 	}
 	initialData, _ := json.Marshal(map[string]any{
 		"timestamp":  time.Now().Format(time.RFC3339),

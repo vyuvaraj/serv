@@ -109,16 +109,20 @@ function initPolling() {
 
 function updateSummaryUI() {
   // Global Status
-  const allOnline = Object.values(STATE.components).every(c => c.online);
+  const statuses = Object.values(STATE.components).map(c => c.online);
+  const onlineCount = statuses.filter(Boolean).length;
   const statusDot = document.getElementById('global-status-dot');
   const statusText = document.getElementById('global-status-text');
   
-  if (allOnline) {
+  if (onlineCount === statuses.length) {
     statusDot.className = 'status-indicator online';
     statusText.textContent = 'Ecosystem Online';
+  } else if (onlineCount > 0) {
+    statusDot.className = 'status-indicator degraded';
+    statusText.textContent = 'Degraded State Detected';
   } else {
     statusDot.className = 'status-indicator offline';
-    statusText.textContent = 'Degraded State Detected';
+    statusText.textContent = 'Ecosystem Offline';
   }
   
   // ServGate Card
