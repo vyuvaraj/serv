@@ -4,9 +4,9 @@
 
 Serv has achieved impressive feature breadth for a service-oriented language project. The core compilation pipeline works, the runtime is functional, and the language covers its target domain (services, schedulers, pub/sub, APIs) well. 
 
-With the recent completions of **Find References & Rename refactoring** (6.4), **Module-Level Visibility Enforcement** (8.3), and the **Escape-Analysis Map Optimization** (3.6), the language is entering a highly professional and robust stage. Almost the entire core roadmap has been successfully implemented.
+With the recent completion of **Zero-Downtime Hot-Reload** (14.2) via `serv run --hot`, Serv now offers a category-defining local development experience — TCP proxy-based binary swapping with zero dropped connections. Combined with earlier completions like **Find References & Rename refactoring** (6.4), **Module-Level Visibility Enforcement** (8.3), and the **Escape-Analysis Map Optimization** (3.6), the language is entering a highly professional and robust stage. Almost the entire core roadmap has been successfully implemented.
 
-The roadmap below captures the current status of all features and details the remaining next steps to complete Phase 9 (Distribution & Ecosystem) and harden the language for production.
+The roadmap below captures the current status of all features and details the remaining next steps across Phases 13–15.
 
 ---
 
@@ -230,7 +230,7 @@ These items take Serv from a capable service language to a **category-defining**
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 14.1 | **Compile-time dependency injection** | Large | Declare service dependencies as interfaces, auto-wire implementations via `serv.toml` bindings. Enables testable architectures without runtime reflection. | [ ] |
-| 14.2 | **Hot-reload without restart (`serv run --hot`)** | Large | On `.srv` file save, recompile and swap the running binary via SO/DLL injection or process replacement with socket handoff. Zero-downtime local development. | [ ] |
+| 14.2 | **Hot-reload without restart (`serv run --hot`)** | Large | ✅ Done — On `.srv` file save, recompile and swap the running binary via TCP proxy + process replacement. Zero-downtime local development with no dropped connections. | [x] |
 | 14.3 | **OpenAPI spec auto-generation** | Medium | `serv docs generate` emits a complete OpenAPI 3.1 spec from route declarations, request/response types, and middleware annotations. | [x] |
 | 14.4 | **Client SDK code generation** | Large | `serv generate client --lang typescript` / `--lang python` / `--lang go` emits typed API client libraries from route declarations. No OpenAPI intermediary needed. | [x] |
 | 14.5 | **Incremental compilation** | Large | Cache AST and codegen artifacts per-file. Only recompile changed files and their dependents. Critical for large multi-file projects (>50 files). | [ ] |
