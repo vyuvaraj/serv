@@ -72,4 +72,8 @@ require (
 	modernc.org/mathutil v1.6.0 // indirect
 	modernc.org/memory v1.7.2 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
+	servtunnel v0.0.0
 )
+
+replace servtunnel => ../ServTunnel
+
