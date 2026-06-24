@@ -104,6 +104,9 @@ jobs:
         with:
           go-version: '1.26.4'
 
+      - name: Tidy Go modules
+        run: go mod tidy
+
       - name: Build serv compiler (Linux)
         run: go build -o serv .
 
