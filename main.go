@@ -284,6 +284,23 @@ func main() {
 	mux.HandleFunc("/api/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
 	mux.HandleFunc("/api/v1/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
 
+	handleMetricsWS := func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthToken != "" {
+			token := r.Header.Get("Authorization")
+			token = strings.TrimPrefix(token, "Bearer ")
+			if token == "" {
+				token = r.URL.Query().Get("token")
+			}
+			if token != cfg.AuthToken {
+				proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+				return
+			}
+		}
+		proxy.HandleWebSocketMetrics(w, r, handler)
+	}
+	mux.HandleFunc("/api/admin/metrics/ws", handleMetricsWS)
+	mux.HandleFunc("/api/v1/admin/metrics/ws", handleMetricsWS)
+
 	log.Printf("Starting ServGate reverse proxy on %s...", cfg.Addr)
 	server := &http.Server{
 		Addr:    cfg.Addr,

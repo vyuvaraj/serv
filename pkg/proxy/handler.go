@@ -52,6 +52,43 @@ type Route struct {
 	CacheMethods       []string          `json:"cache_methods,omitempty"`       // HTTP methods to cache (default: ["GET"])
 }
 
+type MetricsTracker struct {
+	mu            sync.RWMutex
+	totalRequests uint64
+	totalErrors   uint64
+	lastRequests  uint64
+	lastErrors    uint64
+	reqRate       float64
+	errRate       float64
+}
+
+func (m *MetricsTracker) IncRequest() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.totalRequests++
+}
+
+func (m *MetricsTracker) IncError() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.totalErrors++
+}
+
+func (m *MetricsTracker) Tick() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reqRate = float64(m.totalRequests - m.lastRequests)
+	m.errRate = float64(m.totalErrors - m.lastErrors)
+	m.lastRequests = m.totalRequests
+	m.lastErrors = m.totalErrors
+}
+
+func (m *MetricsTracker) Snapshot() (uint64, uint64, float64, float64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.totalRequests, m.totalErrors, m.reqRate, m.errRate
+}
+
 type rateLimiter struct {
 	mu      sync.Mutex
 	history []time.Time
@@ -70,6 +107,7 @@ type GatewayHandler struct {
 	semanticCaches map[string]*SemanticCache // route prefix -> cache
 	accessLoggers  map[string]*AccessLogger  // route prefix -> logger
 	responseCaches map[string]*ResponseCache // route prefix -> cache
+	metricsTracker *MetricsTracker
 }
 
 func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken string) *GatewayHandler {
@@ -98,6 +136,14 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		}
 	}
 
+	tracker := &MetricsTracker{}
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		for range ticker.C {
+			tracker.Tick()
+		}
+	}()
+
 	return &GatewayHandler{
 		routes:         routes,
 		wasm:           wasm,
@@ -108,6 +154,7 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		semanticCaches: semanticCaches,
 		accessLoggers:  accessLoggers,
 		responseCaches: responseCaches,
+		metricsTracker: tracker,
 	}
 }
 
@@ -161,6 +208,27 @@ func (h *GatewayHandler) GetActiveConnections() map[string]int {
 		res[k] = v
 	}
 	return res
+}
+
+type GatewayMetricsSnapshot struct {
+	TotalRequests     uint64         `json:"total_requests"`
+	TotalErrors       uint64         `json:"total_errors"`
+	RequestRate       float64        `json:"request_rate"`
+	ErrorRate         float64        `json:"error_rate"`
+	ActiveConnections map[string]int `json:"active_connections"`
+	Timestamp         int64          `json:"timestamp"`
+}
+
+func (h *GatewayHandler) GetMetricsSnapshot() GatewayMetricsSnapshot {
+	totalReq, totalErr, reqRate, errRate := h.metricsTracker.Snapshot()
+	return GatewayMetricsSnapshot{
+		TotalRequests:     totalReq,
+		TotalErrors:       totalErr,
+		RequestRate:       reqRate,
+		ErrorRate:         errRate,
+		ActiveConnections: h.GetActiveConnections(),
+		Timestamp:         time.Now().Unix(),
+	}
 }
 
 // Close shuts down all background resources (access loggers, cache eviction goroutines).
@@ -249,6 +317,7 @@ func (h *GatewayHandler) isRateLimited(clientIP, routePrefix string, limit int) 
 
 func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	h.metricsTracker.IncRequest()
 
 	if r.URL.Path == "/api/docs" {
 		w.Header().Set("Content-Type", "text/html")
@@ -295,6 +364,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !found {
 		WriteJSONError(w, r, "Bad gateway: route match not found", "ERR_ROUTE_NOT_FOUND", http.StatusBadGateway)
+		h.metricsTracker.IncError()
 		return
 	}
 
@@ -471,6 +541,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			otel.EndSpan(span, err, map[string]interface{}{})
 			WriteJSONError(w, r, "Internal Server Error: WASM Middleware execution failed", "ERR_WASM_MIDDLEWARE_FAILED", http.StatusInternalServerError)
+			h.metricsTracker.IncError()
 			return
 		}
 
@@ -551,6 +622,9 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode >= 400 {
 			otel.EndSpan(span, fmt.Errorf("queue publish returned %d", resp.StatusCode), map[string]interface{}{})
 			WriteJSONError(w, r, fmt.Sprintf("Queue Error: %s", string(respBody)), "ERR_QUEUE_RESPONSE_ERROR", resp.StatusCode)
+			if resp.StatusCode >= 500 {
+				h.metricsTracker.IncError()
+			}
 			return
 		}
 
@@ -571,6 +645,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		otel.EndSpan(span, err, map[string]interface{}{})
 		WriteJSONError(w, r, "Bad Gateway Target", "ERR_BAD_GATEWAY_TARGET", http.StatusBadGateway)
+		h.metricsTracker.IncError()
 		return
 	}
 
@@ -696,6 +771,10 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.ServeHTTP(rec, r)
+
+	if rec.StatusCode >= 500 {
+		h.metricsTracker.IncError()
+	}
 
 	// Store response in cache if applicable
 	if needCapture && rec.StatusCode >= 200 && rec.StatusCode < 300 {

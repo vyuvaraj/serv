@@ -72,7 +72,7 @@ This document outlines the planned evolutionary stages of **ServGate** to evolve
 | 8.4 | **API versioning (`/v1/` prefix)** | Small | Version the admin API (`/api/v1/admin/...`) before breaking changes accumulate. | [x] |
 | 8.5 | **Rate limiting on admin endpoints** | Small | Protect admin/middleware upload routes against abuse — currently unthrottled. | [x] |
 | 8.6 | **CI/CD pipeline (GitHub Actions)** | Small | Automated build, test, and format checks on every PR. Currently missing — only Serv-lang has CI. | [x] |
-| 8.7 | **WebSocket-based real-time metrics feed** | Medium | Push live connection counts, request rates, and error rates to ServConsole via WebSocket (instead of polling). | [ ] |
+| 8.7 | **WebSocket-based real-time metrics feed** | Medium | Push live connection counts, request rates, and error rates to ServConsole via WebSocket (instead of polling). | [x] |
 | 8.8 | **Config hot-reload without restart** | Medium | Watch `config.json` (or ServStore bucket) for changes and apply route updates without restarting the gateway process. | [x] |
 
 ---
