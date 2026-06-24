@@ -812,3 +812,26 @@ func TestRequestFiltering(t *testing.T) {
 		t.Errorf("expected 1 result for path=/api and status=404, got %d", count)
 	}
 }
+
+func TestSanitizeBranchName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"feature/add-auth", "feature-add-auth"},
+		{"bug_123_fix", "bug-123-fix"},
+		{"main", "main"},
+		{"my-Feature-12", "my-feature-12"},
+		{"---weird---name---", "weird-name"},
+		{"a//b\\\\c", "a-b-c"},
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		actual := sanitizeBranchName(tc.input)
+		if actual != tc.expected {
+			t.Errorf("sanitizeBranchName(%q) = %q, want %q", tc.input, actual, tc.expected)
+		}
+	}
+}
+

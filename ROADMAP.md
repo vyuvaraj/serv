@@ -40,7 +40,7 @@
 - [x] Request filtering in inspector (by method, status, path)
 - [ ] Local web UI for request inspection (served by client)
 - [ ] `serv tunnel` integration in the Serv compiler CLI
-- [ ] Automatic subdomain based on git branch name
+- [x] Automatic subdomain based on git branch name
 
 ---
 

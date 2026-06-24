@@ -8,6 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 	"context"
+	"os/exec"
+	"regexp"
+	"strings"
 	"time"
 
 	"servtunnel/pkg/client"
@@ -124,6 +127,13 @@ func runClient() {
 		}
 	}
 
+	if subdomain == "" {
+		if gitSub := getGitBranchSubdomain(); gitSub != "" {
+			subdomain = gitSub
+			log.Printf("No subdomain specified. Auto-detected Git branch: %s", subdomain)
+		}
+	}
+
 	localAddr := "localhost:" + localPort
 	c := client.NewClient(localAddr, relayURL, subdomain, token)
 
@@ -132,6 +142,34 @@ func runClient() {
 		os.Exit(1)
 	}
 }
+
+func getGitBranchSubdomain() string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "" || branch == "HEAD" {
+		return ""
+	}
+
+	return sanitizeBranchName(branch)
+}
+
+func sanitizeBranchName(branch string) string {
+	// Lowercase
+	branch = strings.ToLower(branch)
+	// Replace non-alphanumeric character sequences with a single hyphen
+	reg := regexp.MustCompile(`[^a-z0-9]+`)
+	sanitized := reg.ReplaceAllString(branch, "-")
+	// Trim leading/trailing hyphens
+	sanitized = strings.Trim(sanitized, "-")
+
+	return sanitized
+}
+
+
 
 func printUsage() {
 	fmt.Printf("ServTunnel v%s — Secure dev tunneling for the Serv ecosystem\n\n", version)
