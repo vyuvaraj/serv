@@ -217,6 +217,9 @@ func main() {
 	case "generate":
 		runGenerate()
 
+	case "tunnel":
+		runTunnelCmd()
+
 	default:
 		printUsage()
 	}
@@ -243,5 +246,6 @@ func printUsage() {
 	fmt.Println("  serv dockerize <file.srv>                  Generate a Dockerfile for the Serv service")
 	fmt.Println("  serv deploy --target <target> [file.srv]   Generate deploy config (fly, railway, render, k8s, docker)")
 	fmt.Println("  serv monitor [port-or-url]                 Terminal htop-style live dashboard for a running service")
+	fmt.Println("  serv tunnel <port> [options]               Expose a local service via the ServTunnel relay server")
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
 }
