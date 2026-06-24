@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"servtunnel/pkg/client"
 )
 
@@ -54,13 +55,51 @@ func runTunnelCmd() {
 		}
 	}
 
-	localAddr := "localhost:" + localPort
-	c := client.NewClient(localAddr, *relayFlag, subdomain, customDomain, *tokenFlag, *inspectPortFlag, *shareAuthFlag)
-
-	if err := c.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Tunnel error: %v\n", err)
-		os.Exit(1)
+	var tunnelConfigs []struct {
+		port      string
+		subdomain string
 	}
+
+	parts := strings.Split(localPort, ",")
+	for _, p := range parts {
+		subParts := strings.Split(p, ":")
+		portVal := subParts[0]
+		subVal := ""
+		if len(subParts) > 1 {
+			subVal = subParts[1]
+		} else {
+			subVal = subdomain
+		}
+
+		if subVal == "" {
+			if gitSub := getGitBranchSubdomainForServ(); gitSub != "" {
+				subVal = gitSub
+				log.Printf("No subdomain specified for port %s. Auto-detected Git branch: %s", portVal, subVal)
+			}
+		}
+		tunnelConfigs = append(tunnelConfigs, struct {
+			port      string
+			subdomain string
+		}{port: portVal, subdomain: subVal})
+	}
+
+	var wg sync.WaitGroup
+	for i, tc := range tunnelConfigs {
+		wg.Add(1)
+		currInspectPort := *inspectPortFlag
+		if i > 0 {
+			currInspectPort = "0"
+		}
+		go func(port, sub, insp string) {
+			defer wg.Done()
+			localAddr := "localhost:" + port
+			c := client.NewClient(localAddr, *relayFlag, sub, customDomain, *tokenFlag, insp, *shareAuthFlag)
+			if err := c.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Tunnel error on port %s (subdomain: %s): %v\n", port, sub, err)
+			}
+		}(tc.port, tc.subdomain, currInspectPort)
+	}
+	wg.Wait()
 }
 
 func getGitBranchSubdomainForServ() string {
