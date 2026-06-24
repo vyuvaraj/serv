@@ -45,7 +45,7 @@
 ---
 
 ### 🔲 Phase 3: Advanced Features
-- [ ] Multiple simultaneous tunnels per client
+- [x] Multiple simultaneous tunnels per client
 - [ ] TCP tunneling (not just HTTP)
 - [x] gRPC tunneling support
 - [x] Tunnel sharing (team access to a tunnel)

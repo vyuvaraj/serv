@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1119,6 +1120,92 @@ func TestTunnelSharing(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 OK, got %d", resp.StatusCode)
+	}
+}
+
+func TestMultipleTunnels(t *testing.T) {
+	l1, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := strings.Split(l1.Addr().String(), ":")[1]
+	l1.Close()
+
+	addr := "127.0.0.1:" + port
+
+	insp := inspector.New(10)
+	srv := server.NewServer(":"+port, "localhost", insp)
+	go srv.Start()
+	time.Sleep(150 * time.Millisecond)
+	defer srv.Shutdown(context.Background())
+
+	l2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	portA := strings.Split(l2.Addr().String(), ":")[1]
+	l2.Close()
+
+	l3, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	portB := strings.Split(l3.Addr().String(), ":")[1]
+	l3.Close()
+
+	// Start two local servers
+	localMuxA := http.NewServeMux()
+	localMuxA.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("responseA"))
+	})
+	localSrvA := &http.Server{Addr: "127.0.0.1:" + portA, Handler: localMuxA}
+	go localSrvA.ListenAndServe()
+	defer localSrvA.Shutdown(context.Background())
+
+	localMuxB := http.NewServeMux()
+	localMuxB.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("responseB"))
+	})
+	localSrvB := &http.Server{Addr: "127.0.0.1:" + portB, Handler: localMuxB}
+	go localSrvB.ListenAndServe()
+	defer localSrvB.Shutdown(context.Background())
+
+	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
+	
+	// Create client A
+	cA := client.NewClient("127.0.0.1:"+portA, relayURL, "suba", "", "", "0", "")
+	go cA.Run()
+
+	// Create client B
+	cB := client.NewClient("127.0.0.1:"+portB, relayURL, "subb", "", "", "0", "")
+	go cB.Run()
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Make request to A
+	reqA, _ := http.NewRequest("GET", "http://"+addr+"/", nil)
+	reqA.Host = "suba.localhost:" + port
+	respA, err := http.DefaultClient.Do(reqA)
+	if err != nil {
+		t.Fatalf("A failed: %v", err)
+	}
+	bodyA, _ := io.ReadAll(respA.Body)
+	respA.Body.Close()
+	if string(bodyA) != "responseA" {
+		t.Errorf("got %q, want responseA", bodyA)
+	}
+
+	// Make request to B
+	reqB, _ := http.NewRequest("GET", "http://"+addr+"/", nil)
+	reqB.Host = "subb.localhost:" + port
+	respB, err := http.DefaultClient.Do(reqB)
+	if err != nil {
+		t.Fatalf("B failed: %v", err)
+	}
+	bodyB, _ := io.ReadAll(respB.Body)
+	respB.Body.Close()
+	if string(bodyB) != "responseB" {
+		t.Errorf("got %q, want responseB", bodyB)
 	}
 }
 
