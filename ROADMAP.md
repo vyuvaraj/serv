@@ -35,7 +35,7 @@
 ---
 
 ### 🔲 Phase 2: Developer Experience
-- [ ] Custom domain mapping (`dev.myapp.com` → tunnel)
+- [x] Custom domain mapping (`dev.myapp.com` → tunnel)
 - [x] Request replay endpoint (`POST /api/inspect/{id}/replay`)
 - [x] Request filtering in inspector (by method, status, path)
 - [ ] Local web UI for request inspection (served by client)

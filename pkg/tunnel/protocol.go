@@ -43,9 +43,10 @@ type Envelope struct {
 
 // ControlMessage carries registration and error information.
 type ControlMessage struct {
-	Subdomain string `json:"subdomain,omitempty"`
-	PublicURL string `json:"public_url,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Subdomain    string `json:"subdomain,omitempty"`
+	CustomDomain string `json:"custom_domain,omitempty"`
+	PublicURL    string `json:"public_url,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // TunnelRequest represents an incoming HTTP request forwarded through the tunnel.

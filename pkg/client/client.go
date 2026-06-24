@@ -27,22 +27,24 @@ import (
 
 // Client is the ServTunnel tunnel client.
 type Client struct {
-	localAddr  string // e.g., "localhost:8080"
-	relayURL   string // WebSocket URL of the relay
-	subdomain  string // requested subdomain (empty for auto-assign)
-	token      string // registration token
-	conn       *websocket.Conn
-	mu         sync.Mutex
-	httpClient *http.Client
+	localAddr    string // e.g., "localhost:8080"
+	relayURL     string // WebSocket URL of the relay
+	subdomain    string // requested subdomain (empty for auto-assign)
+	customDomain string // requested custom domain
+	token        string // registration token
+	conn         *websocket.Conn
+	mu           sync.Mutex
+	httpClient   *http.Client
 }
 
 // NewClient creates a new tunnel client.
-func NewClient(localAddr, relayURL, subdomain, token string) *Client {
+func NewClient(localAddr, relayURL, subdomain, customDomain, token string) *Client {
 	return &Client{
-		localAddr:  localAddr,
-		relayURL:   relayURL,
-		subdomain:  subdomain,
-		token:      token,
+		localAddr:    localAddr,
+		relayURL:     relayURL,
+		subdomain:    subdomain,
+		customDomain: customDomain,
+		token:        token,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -118,7 +120,8 @@ func (c *Client) Run() error {
 		regMsg := tunnel.Envelope{
 			Type: tunnel.TypeRegister,
 			Control: &tunnel.ControlMessage{
-				Subdomain: c.subdomain,
+				Subdomain:    c.subdomain,
+				CustomDomain: c.customDomain,
 			},
 		}
 		if err := conn.WriteJSON(regMsg); err != nil {
@@ -180,6 +183,9 @@ func (c *Client) Run() error {
 		fmt.Println()
 		fmt.Printf("  Public URL:     %s\n", regResp.Control.PublicURL)
 		fmt.Printf("  Subdomain:      %s\n", regResp.Control.Subdomain)
+		if regResp.Control.CustomDomain != "" {
+			fmt.Printf("  Custom Domain:  http://%s\n", regResp.Control.CustomDomain)
+		}
 		fmt.Println()
 		fmt.Println("  ─────────────────────────────────────────")
 		fmt.Println("  Forwarding requests... (Ctrl+C to stop)")

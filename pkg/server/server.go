@@ -82,25 +82,27 @@ func (rl *RateLimiter) Allow() bool {
 
 // tunnelConn represents a connected tunnel client.
 type tunnelConn struct {
-	subdomain string
-	conn      *websocket.Conn
-	mu        sync.Mutex // protects writes to conn
-	pending   sync.Map   // requestID → *pendingRequest
-	limiter   *RateLimiter
+	subdomain    string
+	customDomain string
+	conn         *websocket.Conn
+	mu           sync.Mutex // protects writes to conn
+	pending      sync.Map   // requestID → *pendingRequest
+	limiter      *RateLimiter
 }
 
 // Server is the ServTunnel relay server.
 type Server struct {
-	addr        string
-	baseDomain  string // e.g., "servverse.net" or "localhost"
-	inspector   *inspector.Inspector
-	httpSrv     *http.Server
-	jwtSecret   string
-	staticToken string
-	idleTimeout time.Duration
+	addr          string
+	baseDomain    string // e.g., "servverse.net" or "localhost"
+	inspector     *inspector.Inspector
+	httpSrv       *http.Server
+	jwtSecret     string
+	staticToken   string
+	idleTimeout   time.Duration
 
-	mu      sync.RWMutex
-	tunnels map[string]*tunnelConn // subdomain → tunnelConn
+	mu            sync.RWMutex
+	tunnels       map[string]*tunnelConn // subdomain → tunnelConn
+	customTunnels map[string]*tunnelConn // customDomain → tunnelConn
 }
 
 // NewServer creates a new relay server.
@@ -114,13 +116,14 @@ func NewServer(addr, baseDomain string, insp *inspector.Inspector) *Server {
 	}
 
 	return &Server{
-		addr:        addr,
-		baseDomain:  baseDomain,
-		inspector:   insp,
-		jwtSecret:   os.Getenv("SERVTUNNEL_JWT_SECRET"),
-		staticToken: os.Getenv("SERVTUNNEL_TOKEN"),
-		idleTimeout: idleTimeout,
-		tunnels:     make(map[string]*tunnelConn),
+		addr:          addr,
+		baseDomain:    baseDomain,
+		inspector:     insp,
+		jwtSecret:     os.Getenv("SERVTUNNEL_JWT_SECRET"),
+		staticToken:   os.Getenv("SERVTUNNEL_TOKEN"),
+		idleTimeout:   idleTimeout,
+		tunnels:       make(map[string]*tunnelConn),
+		customTunnels: make(map[string]*tunnelConn),
 	}
 }
 
@@ -242,6 +245,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		subdomain = generateSubdomain()
 	}
 
+	customDomain := env.Control.CustomDomain
+	if customDomain != "" {
+		customDomain = strings.ToLower(strings.TrimSpace(customDomain))
+		if idx := strings.LastIndex(customDomain, ":"); idx != -1 {
+			customDomain = customDomain[:idx]
+		}
+		if customDomain == "localhost" || strings.HasSuffix(customDomain, s.baseDomain) {
+			writeWSError(conn, fmt.Sprintf("invalid custom domain %q", customDomain))
+			conn.Close()
+			return
+		}
+	}
+
 	// Check for conflicts.
 	s.mu.Lock()
 	if _, exists := s.tunnels[subdomain]; exists {
@@ -250,25 +266,38 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		conn.Close()
 		return
 	}
+	if customDomain != "" {
+		if _, exists := s.customTunnels[customDomain]; exists {
+			s.mu.Unlock()
+			writeWSError(conn, fmt.Sprintf("custom domain %q already in use", customDomain))
+			conn.Close()
+			return
+		}
+	}
 
 	tc := &tunnelConn{
-		subdomain: subdomain,
-		conn:      conn,
-		limiter:   NewRateLimiter(50, 100),
+		subdomain:    subdomain,
+		customDomain: customDomain,
+		conn:         conn,
+		limiter:      NewRateLimiter(50, 100),
 	}
 	s.tunnels[subdomain] = tc
+	if customDomain != "" {
+		s.customTunnels[customDomain] = tc
+	}
 	s.mu.Unlock()
 
 	publicURL := fmt.Sprintf("http://%s.%s%s", subdomain, s.baseDomain, s.addr)
-	log.Printf("Tunnel registered: %s → %s", subdomain, publicURL)
+	log.Printf("Tunnel registered: %s (custom: %s) → %s", subdomain, customDomain, publicURL)
 
 	// Send confirmation.
 	tc.mu.Lock()
 	_ = conn.WriteJSON(tunnel.Envelope{
 		Type: tunnel.TypeRegistered,
 		Control: &tunnel.ControlMessage{
-			Subdomain: subdomain,
-			PublicURL: publicURL,
+			Subdomain:    subdomain,
+			CustomDomain: customDomain,
+			PublicURL:    publicURL,
 		},
 	})
 	tc.mu.Unlock()
@@ -279,9 +308,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Cleanup on disconnect.
 	s.mu.Lock()
 	delete(s.tunnels, subdomain)
+	if customDomain != "" {
+		delete(s.customTunnels, customDomain)
+	}
 	s.mu.Unlock()
 	conn.Close()
-	log.Printf("Tunnel disconnected: %s", subdomain)
+	log.Printf("Tunnel disconnected: %s (custom: %s)", subdomain, customDomain)
 }
 
 // readLoop reads messages from a tunnel client.
@@ -313,23 +345,42 @@ func (s *Server) readLoop(tc *tunnelConn) {
 // handleTunnelRequest receives an external HTTP request and forwards it
 // through the tunnel to the client's local service.
 func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
-	subdomain := s.extractSubdomain(r.Host)
-	if subdomain == "" {
-		// Not a tunnel request — show a landing message.
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"service": "ServTunnel",
-			"status":  "running",
-			"hint":    "Connect via: servtunnel client <port> --relay ws://" + r.Host + "/ws/connect",
-		})
-		return
+	host := r.Host
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	host = strings.ToLower(host)
+
+	var tc *tunnelConn
+	var exists bool
+	var subdomain string
+
+	s.mu.RLock()
+	tc, exists = s.customTunnels[host]
+	if exists {
+		subdomain = tc.subdomain
+	}
+	s.mu.RUnlock()
+
+	if !exists {
+		subdomain = s.extractSubdomain(r.Host)
+		if subdomain == "" {
+			// Not a tunnel request — show a landing message.
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"service": "ServTunnel",
+				"status":  "running",
+				"hint":    "Connect via: servtunnel client <port> --relay ws://" + r.Host + "/ws/connect",
+			})
+			return
+		}
+
+		s.mu.RLock()
+		tc, exists = s.tunnels[subdomain]
+		s.mu.RUnlock()
 	}
 
 	span := otel.StartSpan("tunnel.proxy", r.Header.Get("traceparent"))
-
-	s.mu.RLock()
-	tc, exists := s.tunnels[subdomain]
-	s.mu.RUnlock()
 
 	if !exists {
 		otel.EndSpan(span, fmt.Errorf("tunnel not found: %s", subdomain), nil)
@@ -456,10 +507,11 @@ func (s *Server) handleListTunnels(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.RLock()
 	tunnels := make([]map[string]string, 0, len(s.tunnels))
-	for sub := range s.tunnels {
+	for sub, tc := range s.tunnels {
 		tunnels = append(tunnels, map[string]string{
-			"subdomain":  sub,
-			"public_url": fmt.Sprintf("http://%s.%s%s", sub, s.baseDomain, s.addr),
+			"subdomain":     sub,
+			"custom_domain": tc.customDomain,
+			"public_url":    fmt.Sprintf("http://%s.%s%s", sub, s.baseDomain, s.addr),
 		})
 	}
 	s.mu.RUnlock()

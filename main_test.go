@@ -64,8 +64,9 @@ func TestControlMessageSerialization(t *testing.T) {
 	env := tunnel.Envelope{
 		Type: tunnel.TypeRegistered,
 		Control: &tunnel.ControlMessage{
-			Subdomain: "myapp",
-			PublicURL: "http://myapp.localhost:8443",
+			Subdomain:    "myapp",
+			CustomDomain: "dev.myapp.com",
+			PublicURL:    "http://myapp.localhost:8443",
 		},
 	}
 
@@ -84,6 +85,9 @@ func TestControlMessageSerialization(t *testing.T) {
 	}
 	if decoded.Control.Subdomain != "myapp" {
 		t.Errorf("subdomain = %s, want myapp", decoded.Control.Subdomain)
+	}
+	if decoded.Control.CustomDomain != "dev.myapp.com" {
+		t.Errorf("customDomain = %s, want dev.myapp.com", decoded.Control.CustomDomain)
 	}
 }
 
@@ -554,7 +558,7 @@ func TestClientReconnection(t *testing.T) {
 
 	// 2. Start the client
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
-	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "")
+	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "", "")
 
 	// Run client in background
 	go func() {
@@ -834,4 +838,135 @@ func TestSanitizeBranchName(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomDomainMapping(t *testing.T) {
+	// 1. Start a local target HTTP server.
+	localServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"status":"custom-domain-ok"}`))
+	}))
+	defer localServer.Close()
+
+	// 2. Start the relay server on a random port.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	relayAddr := listener.Addr().String()
+	listener.Close()
+
+	insp := inspector.New(100)
+	relaySrv := server.NewServer(":"+strings.Split(relayAddr, ":")[1], "localhost", insp)
+	go relaySrv.Start()
+	time.Sleep(200 * time.Millisecond)
+
+	// 3. Connect WebSocket client.
+	wsURL := fmt.Sprintf("ws://%s/ws/connect", relayAddr)
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer ws.Close()
+
+	// 4. Register subdomain and custom domain.
+	err = ws.WriteJSON(tunnel.Envelope{
+		Type: tunnel.TypeRegister,
+		Control: &tunnel.ControlMessage{
+			Subdomain:    "testapp",
+			CustomDomain: "dev.myapp.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	var regResp tunnel.Envelope
+	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := ws.ReadJSON(&regResp); err != nil {
+		t.Fatalf("read reg response: %v", err)
+	}
+	ws.SetReadDeadline(time.Time{})
+
+	if regResp.Type != tunnel.TypeRegistered {
+		t.Fatalf("expected registered, got %s", regResp.Type)
+	}
+	if regResp.Control.CustomDomain != "dev.myapp.com" {
+		t.Fatalf("custom domain = %s, want dev.myapp.com", regResp.Control.CustomDomain)
+	}
+
+	// 5. Try to register another tunnel with same custom domain -> should fail conflict.
+	ws2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		defer ws2.Close()
+		_ = ws2.WriteJSON(tunnel.Envelope{
+			Type: tunnel.TypeRegister,
+			Control: &tunnel.ControlMessage{
+				Subdomain:    "testapp2",
+				CustomDomain: "dev.myapp.com",
+			},
+		})
+		var regResp2 tunnel.Envelope
+		ws2.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_ = ws2.ReadJSON(&regResp2)
+		if regResp2.Type != tunnel.TypeError {
+			t.Errorf("expected conflict registration to fail with error type, got %s", regResp2.Type)
+		}
+	}
+
+	// 6. Start proxy reading loop.
+	go func() {
+		for {
+			var env tunnel.Envelope
+			if err := ws.ReadJSON(&env); err != nil {
+				return
+			}
+			if env.Type == tunnel.TypeRequest && env.Request != nil {
+				localURL := localServer.URL + env.Request.Path
+				resp, err := http.Get(localURL)
+				if err != nil {
+					continue
+				}
+				body := make([]byte, 4096)
+				n, _ := resp.Body.Read(body)
+				resp.Body.Close()
+
+				_ = ws.WriteJSON(tunnel.Envelope{
+					Type:      tunnel.TypeResponse,
+					RequestID: env.RequestID,
+					Response: &tunnel.TunnelResponse{
+						StatusCode: resp.StatusCode,
+						Headers:    map[string]string{"Content-Type": "application/json"},
+						Body:       base64.StdEncoding.EncodeToString(body[:n]),
+					},
+				})
+			}
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// 7. Make request to relay using custom domain Host.
+	relayPort := strings.Split(relayAddr, ":")[1]
+	reqURL := fmt.Sprintf("http://127.0.0.1:%s/api/test", relayPort)
+	httpReq, _ := http.NewRequest("GET", reqURL, nil)
+	httpReq.Host = fmt.Sprintf("dev.myapp.com:%s", relayPort)
+
+	httpResp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("custom domain request: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", httpResp.StatusCode)
+	}
+
+	var body map[string]string
+	json.NewDecoder(httpResp.Body).Decode(&body)
+	if body["status"] != "custom-domain-ok" {
+		t.Errorf("body = %v, want status custom-domain-ok", body)
+	}
+}
+
 

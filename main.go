@@ -105,6 +105,7 @@ func runClient() {
 	localPort := os.Args[2]
 	relayURL := getEnvOrDefault("SERVTUNNEL_RELAY", "ws://localhost:8443/ws/connect")
 	subdomain := ""
+	customDomain := ""
 	token := getEnvOrDefault("SERVTUNNEL_TOKEN", "")
 
 	for i := 3; i < len(os.Args); i++ {
@@ -117,6 +118,11 @@ func runClient() {
 		case "--subdomain", "-s":
 			if i+1 < len(os.Args) {
 				subdomain = os.Args[i+1]
+				i++
+			}
+		case "--custom-domain", "-c":
+			if i+1 < len(os.Args) {
+				customDomain = os.Args[i+1]
 				i++
 			}
 		case "--token", "-t":
@@ -135,7 +141,7 @@ func runClient() {
 	}
 
 	localAddr := "localhost:" + localPort
-	c := client.NewClient(localAddr, relayURL, subdomain, token)
+	c := client.NewClient(localAddr, relayURL, subdomain, customDomain, token)
 
 	if err := c.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -189,6 +195,7 @@ func printUsage() {
 	fmt.Println("  servtunnel client <local-port> [options]")
 	fmt.Println("  --relay, -r <url>         Relay WebSocket URL (default: ws://localhost:8443/ws/connect)")
 	fmt.Println("  --subdomain, -s <name>    Requested subdomain (default: auto-generated)")
+	fmt.Println("  --custom-domain, -c <dom> Requested custom domain mapping (optional)")
 	fmt.Println("  --token, -t <token>       Authentication token")
 	fmt.Println()
 	fmt.Println("Examples:")
