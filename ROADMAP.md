@@ -39,7 +39,7 @@
 - [x] Request replay endpoint (`POST /api/inspect/{id}/replay`)
 - [x] Request filtering in inspector (by method, status, path)
 - [ ] Local web UI for request inspection (served by client)
-- [ ] `serv tunnel` integration in the Serv compiler CLI
+- [x] `serv tunnel` integration in the Serv compiler CLI
 - [x] Automatic subdomain based on git branch name
 
 ---
