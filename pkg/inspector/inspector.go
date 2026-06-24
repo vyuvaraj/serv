@@ -46,13 +46,14 @@ func New(maxSize int) *Inspector {
 	}
 }
 
-// Record adds a new entry to the ring buffer.
-func (ins *Inspector) Record(e Entry) {
+// Record adds a new entry to the ring buffer and returns its ID.
+func (ins *Inspector) Record(e Entry) string {
 	ins.mu.Lock()
 	defer ins.mu.Unlock()
 
 	ins.counter++
-	e.ID = fmt.Sprintf("req-%d", ins.counter)
+	id := fmt.Sprintf("req-%d", ins.counter)
+	e.ID = id
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now()
 	}
@@ -63,6 +64,23 @@ func (ins *Inspector) Record(e Entry) {
 		ins.entries[len(ins.entries)-1] = e
 	} else {
 		ins.entries = append(ins.entries, e)
+	}
+	return id
+}
+
+// Update updates an existing entry with response details.
+func (ins *Inspector) Update(id string, statusCode int, respHeaders map[string]string, respBody string, latencyMs int64) {
+	ins.mu.Lock()
+	defer ins.mu.Unlock()
+
+	for i, e := range ins.entries {
+		if e.ID == id {
+			ins.entries[i].StatusCode = statusCode
+			ins.entries[i].ResponseHeaders = respHeaders
+			ins.entries[i].ResponseBody = respBody
+			ins.entries[i].LatencyMs = latencyMs
+			return
+		}
 	}
 }
 

@@ -558,7 +558,7 @@ func TestClientReconnection(t *testing.T) {
 
 	// 2. Start the client
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
-	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "", "")
+	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "", "", "")
 
 	// Run client in background
 	go func() {

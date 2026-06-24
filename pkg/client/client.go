@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"servtunnel/pkg/inspector"
 	"servtunnel/pkg/tunnel"
 
 	"github.com/gorilla/websocket"
@@ -35,16 +36,25 @@ type Client struct {
 	conn         *websocket.Conn
 	mu           sync.Mutex
 	httpClient   *http.Client
+
+	inspectPort  string               // local HTTP port for the inspector UI
+	inspector    *inspector.Inspector // captures requests
 }
 
 // NewClient creates a new tunnel client.
-func NewClient(localAddr, relayURL, subdomain, customDomain, token string) *Client {
+func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort string) *Client {
+	var insp *inspector.Inspector
+	if inspectPort != "" && inspectPort != "0" {
+		insp = inspector.New(100)
+	}
 	return &Client{
 		localAddr:    localAddr,
 		relayURL:     relayURL,
 		subdomain:    subdomain,
 		customDomain: customDomain,
 		token:        token,
+		inspectPort:  inspectPort,
+		inspector:    insp,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -64,6 +74,10 @@ func (c *Client) Run() error {
 	fmt.Printf("  Local service:  http://%s\n", c.localAddr)
 	fmt.Printf("  Relay server:   %s\n", c.relayURL)
 	fmt.Println()
+
+	if c.inspectPort != "" && c.inspector != nil {
+		go c.startInspectorServer()
+	}
 
 	// Handle shutdown signals.
 	stopChan := make(chan os.Signal, 1)
@@ -256,6 +270,21 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 	start := time.Now()
 	req := env.Request
 
+	var inspectReqID string
+	if c.inspector != nil {
+		var reqBody string
+		if req.Body != "" {
+			reqBody = req.Body
+		}
+		inspectReqID = c.inspector.Record(inspector.Entry{
+			Timestamp:      start,
+			Method:         req.Method,
+			Path:           req.Path,
+			RequestHeaders: req.Headers,
+			RequestBody:    reqBody,
+		})
+	}
+
 	// Build local URL.
 	localURL := fmt.Sprintf("http://%s%s", c.localAddr, req.Path)
 
@@ -271,6 +300,9 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 	// Create HTTP request.
 	httpReq, err := http.NewRequest(req.Method, localURL, bodyReader)
 	if err != nil {
+		if c.inspector != nil && inspectReqID != "" {
+			c.inspector.Update(inspectReqID, 502, nil, base64.StdEncoding.EncodeToString([]byte("failed to create request")), 0)
+		}
 		c.sendErrorResponse(conn, env.RequestID, 502, "failed to create request")
 		return
 	}
@@ -291,6 +323,9 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 		latency := time.Since(start)
 		fmt.Printf("  %s %-6s %-30s → ERR  (%dms) %v\n",
 			time.Now().Format("15:04:05"), req.Method, req.Path, latency.Milliseconds(), err)
+		if c.inspector != nil && inspectReqID != "" {
+			c.inspector.Update(inspectReqID, 502, nil, base64.StdEncoding.EncodeToString([]byte(err.Error())), latency.Milliseconds())
+		}
 		c.sendErrorResponse(conn, env.RequestID, 502, "local service error: "+err.Error())
 		return
 	}
@@ -310,6 +345,10 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 	}
 
 	latency := time.Since(start)
+
+	if c.inspector != nil && inspectReqID != "" {
+		c.inspector.Update(inspectReqID, resp.StatusCode, respHeaders, respBodyB64, latency.Milliseconds())
+	}
 
 	// Terminal output with color.
 	statusColor := "\033[32m" // green
@@ -375,3 +414,37 @@ func (c *Client) keepalive(conn *websocket.Conn, done chan struct{}) {
 		}
 	}
 }
+
+// startInspectorServer runs the local HTTP server serving the Web UI and JSON endpoints.
+func (c *Client) startInspectorServer() {
+	port := c.inspectPort
+	if !strings.HasPrefix(port, ":") {
+		port = ":" + port
+	}
+
+	fmt.Printf("  Inspector UI:   http://localhost%s\n", port)
+	fmt.Println()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(inspectorHTML))
+			return
+		}
+		if r.URL.Path == "/api/inspect" || r.URL.Path == "/api/inspect/" {
+			c.inspector.HandleList(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/inspect/") {
+			id := strings.TrimPrefix(r.URL.Path, "/api/inspect/")
+			c.inspector.HandleGet(w, r, id)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	_ = http.ListenAndServe(port, mux)
+}
+
