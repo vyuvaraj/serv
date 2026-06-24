@@ -7,6 +7,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -115,7 +116,13 @@ func (c *Client) Run() error {
 			}
 		}
 
-		conn, _, err := websocket.DefaultDialer.Dial(u, header)
+		dialer := &websocket.Dialer{
+			Proxy:            http.ProxyFromEnvironment,
+			HandshakeTimeout: 45 * time.Second,
+			ReadBufferSize:   256 * 1024,
+			WriteBufferSize:  256 * 1024,
+		}
+		conn, _, err := dialer.Dial(u, header)
 		if err != nil {
 			fmt.Printf("  failed to connect to relay: %v\n", err)
 			c.sleepWithJitter(backoff)
@@ -125,6 +132,7 @@ func (c *Client) Run() error {
 			}
 			continue
 		}
+		conn.SetReadLimit(50 * 1024 * 1024) // 50MB read limit
 
 		c.mu.Lock()
 		c.conn = conn
@@ -293,7 +301,7 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 	if req.Body != "" {
 		bodyBytes, err := base64.StdEncoding.DecodeString(req.Body)
 		if err == nil {
-			bodyReader = strings.NewReader(string(bodyBytes))
+			bodyReader = bytes.NewReader(bodyBytes)
 		}
 	}
 

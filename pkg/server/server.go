@@ -29,8 +29,8 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
+	ReadBufferSize:  256 * 1024,
+	WriteBufferSize: 256 * 1024,
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
@@ -223,6 +223,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
+	conn.SetReadLimit(50 * 1024 * 1024) // 50MB read limit
 
 	// Wait for registration message.
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))

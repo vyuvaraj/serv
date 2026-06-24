@@ -29,7 +29,7 @@
 - [x] Authentication (API key or token for client registration)
 - [x] Rate limiting (per-tunnel request rate)
 - [x] Connection timeout tuning and idle disconnect
-- [ ] Binary body support (large file uploads)
+- [x] Binary body support (large file uploads)
 - [x] WebSocket reconnection with exponential backoff on client
 
 ---
@@ -51,7 +51,7 @@
 - [ ] Tunnel sharing (team access to a tunnel)
 - [ ] Bandwidth monitoring and quotas
 - [ ] ServConsole integration (view tunnels in dashboard)
-- [ ] Webhook signature verification helpers
+- [x] Webhook signature verification helpers
 
 ---
 
