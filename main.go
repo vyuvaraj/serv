@@ -109,6 +109,7 @@ func runClient() {
 	customDomain := ""
 	token := getEnvOrDefault("SERVTUNNEL_TOKEN", "")
 	inspectPort := "4040"
+	shareAuth := ""
 
 	for i := 3; i < len(os.Args); i++ {
 		switch os.Args[i] {
@@ -137,6 +138,11 @@ func runClient() {
 				inspectPort = os.Args[i+1]
 				i++
 			}
+		case "--share-auth", "-a":
+			if i+1 < len(os.Args) {
+				shareAuth = os.Args[i+1]
+				i++
+			}
 		}
 	}
 
@@ -148,7 +154,7 @@ func runClient() {
 	}
 
 	localAddr := "localhost:" + localPort
-	c := client.NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort)
+	c := client.NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort, shareAuth)
 
 	if err := c.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -205,6 +211,7 @@ func printUsage() {
 	fmt.Println("  --custom-domain, -c <dom> Requested custom domain mapping (optional)")
 	fmt.Println("  --token, -t <token>       Authentication token")
 	fmt.Println("  --inspect-port, -i <port> Local inspection web UI port (default: 4040)")
+	fmt.Println("  --share-auth, -a <usr:pwd> Basic authentication to protect public tunnel (optional)")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  servtunnel server --port 8443 --domain servverse.net")

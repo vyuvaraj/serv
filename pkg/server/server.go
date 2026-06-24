@@ -92,6 +92,7 @@ type tunnelConn struct {
 	bytesRead    int64
 	bytesWritten int64
 	quotaLimit   int64
+	sharingAuth  string
 }
 
 // Server is the ServTunnel relay server.
@@ -286,6 +287,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		conn:         conn,
 		limiter:      NewRateLimiter(50, 100),
 		quotaLimit:   100 * 1024 * 1024, // 100 MB default quota
+		sharingAuth:  env.Control.SharingAuth,
 	}
 	s.tunnels[subdomain] = tc
 	if customDomain != "" {
@@ -402,6 +404,23 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests) // 429
 		w.Write([]byte(`{"error":"bandwidth quota exceeded"}`))
 		return
+	}
+
+	// Check sharing basic authentication
+	if tc.sharingAuth != "" {
+		username, password, ok := r.BasicAuth()
+		parts := strings.SplitN(tc.sharingAuth, ":", 2)
+		expectedUser := parts[0]
+		expectedPass := ""
+		if len(parts) > 1 {
+			expectedPass = parts[1]
+		}
+		if !ok || username != expectedUser || password != expectedPass {
+			otel.EndSpan(span, fmt.Errorf("unauthorized sharing access"), nil)
+			w.Header().Set("WWW-Authenticate", `Basic realm="ServTunnel Share"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	// Rate limiting check

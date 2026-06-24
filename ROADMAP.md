@@ -48,9 +48,9 @@
 - [ ] Multiple simultaneous tunnels per client
 - [ ] TCP tunneling (not just HTTP)
 - [x] gRPC tunneling support
-- [ ] Tunnel sharing (team access to a tunnel)
+- [x] Tunnel sharing (team access to a tunnel)
 - [x] Bandwidth monitoring and quotas
-- [ ] ServConsole integration (view tunnels in dashboard)
+- [x] ServConsole integration (view tunnels in dashboard)
 - [x] Webhook signature verification helpers
 
 ---

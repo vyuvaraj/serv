@@ -47,6 +47,7 @@ type ControlMessage struct {
 	CustomDomain string `json:"custom_domain,omitempty"`
 	PublicURL    string `json:"public_url,omitempty"`
 	Error        string `json:"error,omitempty"`
+	SharingAuth  string `json:"sharing_auth,omitempty"`
 }
 
 // TunnelRequest represents an incoming HTTP request forwarded through the tunnel.

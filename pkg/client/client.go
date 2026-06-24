@@ -40,10 +40,11 @@ type Client struct {
 
 	inspectPort  string               // local HTTP port for the inspector UI
 	inspector    *inspector.Inspector // captures requests
+	shareAuth    string               // credentials for basic auth sharing (user:pass)
 }
 
 // NewClient creates a new tunnel client.
-func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort string) *Client {
+func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort, shareAuth string) *Client {
 	var insp *inspector.Inspector
 	if inspectPort != "" && inspectPort != "0" {
 		insp = inspector.New(100)
@@ -56,6 +57,7 @@ func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort 
 		token:        token,
 		inspectPort:  inspectPort,
 		inspector:    insp,
+		shareAuth:    shareAuth,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -144,6 +146,7 @@ func (c *Client) Run() error {
 			Control: &tunnel.ControlMessage{
 				Subdomain:    c.subdomain,
 				CustomDomain: c.customDomain,
+				SharingAuth:  c.shareAuth,
 			},
 		}
 		if err := conn.WriteJSON(regMsg); err != nil {

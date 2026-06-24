@@ -558,7 +558,7 @@ func TestClientReconnection(t *testing.T) {
 
 	// 2. Start the client
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
-	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "", "", "")
+	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "", "", "", "")
 
 	// Run client in background
 	go func() {
@@ -1004,7 +1004,7 @@ func TestBandwidthQuota(t *testing.T) {
 	defer localSrv.Shutdown(context.Background())
 
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
-	c := client.NewClient("127.0.0.1:"+localPort, relayURL, "quotatest", "", "", "0")
+	c := client.NewClient("127.0.0.1:"+localPort, relayURL, "quotatest", "", "", "0", "")
 	go c.Run()
 	time.Sleep(150 * time.Millisecond)
 
@@ -1043,6 +1043,82 @@ func TestBandwidthQuota(t *testing.T) {
 	}
 	if bytesWritten != 12 { // "responsebody" is 12 bytes
 		t.Errorf("bytes_written = %v, want 12", bytesWritten)
+	}
+}
+
+func TestTunnelSharing(t *testing.T) {
+	l1, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := strings.Split(l1.Addr().String(), ":")[1]
+	l1.Close()
+
+	addr := "127.0.0.1:" + port
+
+	insp := inspector.New(10)
+	srv := server.NewServer(":"+port, "localhost", insp)
+	go srv.Start()
+	time.Sleep(150 * time.Millisecond)
+	defer srv.Shutdown(context.Background())
+
+	l2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	localPort := strings.Split(l2.Addr().String(), ":")[1]
+	l2.Close()
+
+	localMux := http.NewServeMux()
+	localMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("shared-secret-data"))
+	})
+	localSrv := &http.Server{Addr: "127.0.0.1:" + localPort, Handler: localMux}
+	go localSrv.ListenAndServe()
+	defer localSrv.Shutdown(context.Background())
+
+	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
+	c := client.NewClient("127.0.0.1:"+localPort, relayURL, "sharetest", "", "", "0", "admin:pass123")
+	go c.Run()
+	time.Sleep(150 * time.Millisecond)
+
+	// Send request without basic auth -> expect 401
+	req, _ := http.NewRequest("GET", "http://"+addr+"/", nil)
+	req.Host = "sharetest.localhost:" + port
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized, got %d", resp.StatusCode)
+	}
+
+	// Send request with incorrect basic auth -> expect 401
+	req, _ = http.NewRequest("GET", "http://"+addr+"/", nil)
+	req.Host = "sharetest.localhost:" + port
+	req.SetBasicAuth("admin", "wrongpass")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized, got %d", resp.StatusCode)
+	}
+
+	// Send request with correct basic auth -> expect 200
+	req, _ = http.NewRequest("GET", "http://"+addr+"/", nil)
+	req.Host = "sharetest.localhost:" + port
+	req.SetBasicAuth("admin", "pass123")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", resp.StatusCode)
 	}
 }
 
