@@ -1209,5 +1209,79 @@ func TestMultipleTunnels(t *testing.T) {
 	}
 }
 
+func TestReservedSubdomains(t *testing.T) {
+	t.Setenv("SERVTUNNEL_RESERVED_SUBDOMAINS", "special:secrettoken,other:anothertoken")
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := strings.Split(l.Addr().String(), ":")[1]
+	l.Close()
+
+	addr := "127.0.0.1:" + port
+
+	insp := inspector.New(10)
+	srv := server.NewServer(":"+port, "localhost", insp)
+	go srv.Start()
+	time.Sleep(150 * time.Millisecond)
+	defer srv.Shutdown(context.Background())
+
+	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
+
+	// Case 1: Connect to reserved subdomain "special" with incorrect token -> should fail to register
+	c1 := client.NewClient("127.0.0.1:8080", relayURL, "special", "", "wrongtoken", "0", "")
+	go c1.Run()
+	time.Sleep(150 * time.Millisecond)
+
+	// Query /api/tunnels to verify "special" is NOT active
+	resp1, err := http.Get("http://" + addr + "/api/tunnels")
+	if err != nil {
+		t.Fatalf("GET tunnels failed: %v", err)
+	}
+	var res1 struct {
+		Tunnels []map[string]interface{} `json:"tunnels"`
+		Count   int                      `json:"count"`
+	}
+	json.NewDecoder(resp1.Body).Decode(&res1)
+	resp1.Body.Close()
+
+	for _, tun := range res1.Tunnels {
+		if tun["subdomain"] == "special" {
+			t.Error("expected 'special' subdomain to NOT be registered with incorrect token")
+		}
+	}
+
+	// Case 2: Connect to reserved subdomain "special" with correct token -> should succeed
+	c2 := client.NewClient("127.0.0.1:8080", relayURL, "special", "", "secrettoken", "0", "")
+	go c2.Run()
+	time.Sleep(150 * time.Millisecond)
+
+	// Query /api/tunnels to verify "special" IS active
+	resp2, err := http.Get("http://" + addr + "/api/tunnels")
+	if err != nil {
+		t.Fatalf("GET tunnels failed: %v", err)
+	}
+	var res2 struct {
+		Tunnels []map[string]interface{} `json:"tunnels"`
+		Count   int                      `json:"count"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&res2)
+	resp2.Body.Close()
+
+	found := false
+	for _, tun := range res2.Tunnels {
+		if tun["subdomain"] == "special" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'special' subdomain to be registered with correct token")
+	}
+}
+
+
+
 
 

@@ -57,6 +57,6 @@
 
 ### 🔲 Phase 4: Scale
 - [ ] Multi-relay federation (distribute tunnels across regions)
-- [ ] Persistent tunnel names (reserved subdomains)
+- [x] Persistent tunnel names (reserved subdomains)
 - [ ] Usage analytics and billing integration
 - [ ] Enterprise features (SSO, audit logging, IP allowlists)

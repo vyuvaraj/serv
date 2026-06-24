@@ -104,6 +104,7 @@ type Server struct {
 	jwtSecret     string
 	staticToken   string
 	idleTimeout   time.Duration
+	reservedSubdomains map[string]string // subdomain -> token
 
 	mu            sync.RWMutex
 	tunnels       map[string]*tunnelConn // subdomain → tunnelConn
@@ -120,15 +121,31 @@ func NewServer(addr, baseDomain string, insp *inspector.Inspector) *Server {
 		idleTimeout = time.Duration(secs) * time.Second
 	}
 
+	reserved := make(map[string]string)
+	if envReserved := os.Getenv("SERVTUNNEL_RESERVED_SUBDOMAINS"); envReserved != "" {
+		parts := strings.Split(envReserved, ",")
+		for _, part := range parts {
+			subParts := strings.SplitN(part, ":", 2)
+			if len(subParts) == 2 {
+				sub := sanitizeSubdomain(subParts[0])
+				token := strings.TrimSpace(subParts[1])
+				if sub != "" && token != "" {
+					reserved[sub] = token
+				}
+			}
+		}
+	}
+
 	return &Server{
-		addr:          addr,
-		baseDomain:    baseDomain,
-		inspector:     insp,
-		jwtSecret:     os.Getenv("SERVTUNNEL_JWT_SECRET"),
-		staticToken:   os.Getenv("SERVTUNNEL_TOKEN"),
-		idleTimeout:   idleTimeout,
-		tunnels:       make(map[string]*tunnelConn),
-		customTunnels: make(map[string]*tunnelConn),
+		addr:               addr,
+		baseDomain:         baseDomain,
+		inspector:          insp,
+		jwtSecret:          os.Getenv("SERVTUNNEL_JWT_SECRET"),
+		staticToken:        os.Getenv("SERVTUNNEL_TOKEN"),
+		idleTimeout:        idleTimeout,
+		reservedSubdomains: reserved,
+		tunnels:            make(map[string]*tunnelConn),
+		customTunnels:      make(map[string]*tunnelConn),
 	}
 }
 
@@ -248,7 +265,40 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	subdomain := sanitizeSubdomain(env.Control.Subdomain)
 	if subdomain == "" {
-		subdomain = generateSubdomain()
+		for {
+			subdomain = generateSubdomain()
+			s.mu.RLock()
+			_, exists := s.tunnels[subdomain]
+			_, isReserved := s.reservedSubdomains[subdomain]
+			s.mu.RUnlock()
+			if !exists && !isReserved {
+				break
+			}
+		}
+	} else {
+		// Check if the subdomain is reserved
+		s.mu.RLock()
+		expectedToken, isReserved := s.reservedSubdomains[subdomain]
+		s.mu.RUnlock()
+		if isReserved {
+			var tokenUsed string
+			if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+				var err error
+				tokenUsed, err = ServShared.ExtractTokenFromHeader(authHeader)
+				if err != nil {
+					tokenUsed = strings.TrimPrefix(authHeader, "Bearer ")
+					tokenUsed = strings.TrimSpace(tokenUsed)
+				}
+			}
+			if tokenUsed == "" {
+				tokenUsed = r.URL.Query().Get("token")
+			}
+			if tokenUsed != expectedToken {
+				writeWSError(conn, fmt.Sprintf("subdomain %q is reserved", subdomain))
+				conn.Close()
+				return
+			}
+		}
 	}
 
 	customDomain := env.Control.CustomDomain
