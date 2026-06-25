@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -110,6 +111,7 @@ type Server struct {
 	mu            sync.RWMutex
 	tunnels       map[string]*tunnelConn // subdomain → tunnelConn
 	customTunnels map[string]*tunnelConn // customDomain → tunnelConn
+	tcpListeners  map[int]net.Listener   // port → net.Listener (for active TCP tunnels)
 }
 
 // NewServer creates a new relay server.
@@ -147,6 +149,7 @@ func NewServer(addr, baseDomain string, insp *inspector.Inspector) *Server {
 		reservedSubdomains: reserved,
 		tunnels:            make(map[string]*tunnelConn),
 		customTunnels:      make(map[string]*tunnelConn),
+		tcpListeners:       make(map[int]net.Listener),
 	}
 }
 
@@ -204,6 +207,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			_ = tc.conn.Close()
 		}
 		tc.mu.Unlock()
+	}
+	for port, l := range s.tcpListeners {
+		_ = l.Close()
+		delete(s.tcpListeners, port)
 	}
 	s.mu.Unlock()
 
@@ -361,6 +368,36 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		quotaLimit:   100 * 1024 * 1024, // 100 MB default quota
 		sharingAuth:  env.Control.SharingAuth,
 	}
+
+	tcpPort := env.Control.TCPPort
+	if tcpPort > 0 {
+		if _, exists := s.tcpListeners[tcpPort]; exists {
+			s.mu.Unlock()
+			writeWSError(conn, fmt.Sprintf("TCP port %d already in use", tcpPort))
+			conn.Close()
+			return
+		}
+		l, err := net.Listen("tcp", fmt.Sprintf(":%d", tcpPort))
+		if err != nil {
+			s.mu.Unlock()
+			writeWSError(conn, fmt.Sprintf("failed to listen on TCP port %d: %v", tcpPort, err))
+			conn.Close()
+			return
+		}
+		s.tcpListeners[tcpPort] = l
+
+		go func(tc *tunnelConn, listener net.Listener, port int) {
+			defer listener.Close()
+			for {
+				clientConn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				go s.handleTCPConnection(tc, clientConn)
+			}
+		}(tc, l, tcpPort)
+	}
+
 	s.tunnels[subdomain] = tc
 	if customDomain != "" {
 		s.customTunnels[customDomain] = tc
@@ -368,7 +405,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	publicURL := fmt.Sprintf("http://%s.%s%s", subdomain, s.baseDomain, s.addr)
-	log.Printf("Tunnel registered: %s (custom: %s) → %s", subdomain, customDomain, publicURL)
+	if tcpPort > 0 {
+		publicURL = fmt.Sprintf("tcp://%s:%d", s.baseDomain, tcpPort)
+	}
+	log.Printf("Tunnel registered: %s (custom: %s, tcp: %d) → %s", subdomain, customDomain, tcpPort, publicURL)
 
 	// Send confirmation.
 	tc.mu.Lock()
@@ -378,6 +418,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			Subdomain:    subdomain,
 			CustomDomain: customDomain,
 			PublicURL:    publicURL,
+			TCPPort:      tcpPort,
 		},
 	})
 	tc.mu.Unlock()
@@ -390,6 +431,12 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	delete(s.tunnels, subdomain)
 	if customDomain != "" {
 		delete(s.customTunnels, customDomain)
+	}
+	if tcpPort > 0 {
+		if l, exists := s.tcpListeners[tcpPort]; exists {
+			l.Close()
+			delete(s.tcpListeners, tcpPort)
+		}
 	}
 	s.mu.Unlock()
 	conn.Close()
@@ -807,4 +854,63 @@ func writeWSError(conn *websocket.Conn, msg string) {
 		Type:    tunnel.TypeError,
 		Control: &tunnel.ControlMessage{Error: msg},
 	})
+}
+
+// handleTCPConnection handles a single accepted TCP connection, forwarding
+// data bidirectionally between the TCP client and the tunnel client.
+func (s *Server) handleTCPConnection(tc *tunnelConn, clientConn net.Conn) {
+	defer clientConn.Close()
+
+	// Unique session identifier for this TCP connection
+	requestID := otel.GenerateSpanID()
+
+	// Setup pending request channel to receive responses back from client
+	pr := &pendingRequest{
+		ch:    make(chan tunnel.Envelope, 10),
+		start: time.Now(),
+	}
+	tc.pending.Store(requestID, pr)
+	defer tc.pending.Delete(requestID)
+
+	// Goroutine to read TCP responses from client websocket and write to local client TCP socket
+	go func() {
+		for env := range pr.ch {
+			if env.Response != nil && env.Response.TCPData != "" {
+				data, err := base64.StdEncoding.DecodeString(env.Response.TCPData)
+				if err == nil {
+					_, _ = clientConn.Write(data)
+					atomic.AddInt64(&tc.bytesWritten, int64(len(data)))
+				}
+			}
+		}
+	}()
+
+	buf := make([]byte, 32*1024)
+	for {
+		_ = clientConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		n, err := clientConn.Read(buf)
+		if err != nil {
+			break
+		}
+
+		if n > 0 {
+			atomic.AddInt64(&tc.bytesRead, int64(n))
+			payloadB64 := base64.StdEncoding.EncodeToString(buf[:n])
+
+			env := tunnel.Envelope{
+				Type:      tunnel.TypeRequest,
+				RequestID: requestID,
+				Request: &tunnel.TunnelRequest{
+					TCPData: payloadB64,
+				},
+			}
+
+			tc.mu.Lock()
+			writeErr := tc.conn.WriteJSON(env)
+			tc.mu.Unlock()
+			if writeErr != nil {
+				break
+			}
+		}
+	}
 }

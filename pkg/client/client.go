@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,6 +42,8 @@ type Client struct {
 	inspectPort  string               // local HTTP port for the inspector UI
 	inspector    *inspector.Inspector // captures requests
 	shareAuth    string               // credentials for basic auth sharing (user:pass)
+	tcpPort      int                  // requested TCP relay port
+	tcpConns     map[string]net.Conn  // active downstream TCP connections (session -> net.Conn)
 }
 
 // NewClient creates a new tunnel client.
@@ -58,6 +61,7 @@ func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort,
 		inspectPort:  inspectPort,
 		inspector:    insp,
 		shareAuth:    shareAuth,
+		tcpConns:     make(map[string]net.Conn),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -65,6 +69,12 @@ func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort,
 			},
 		},
 	}
+}
+
+// WithTCPPort configures the client to request a TCP tunnel.
+func (c *Client) WithTCPPort(port int) *Client {
+	c.tcpPort = port
+	return c
 }
 
 // Run connects to the relay and starts proxying. Blocks until interrupted.
@@ -147,6 +157,7 @@ func (c *Client) Run() error {
 				Subdomain:    c.subdomain,
 				CustomDomain: c.customDomain,
 				SharingAuth:  c.shareAuth,
+				TCPPort:      c.tcpPort,
 			},
 		}
 		if err := conn.WriteJSON(regMsg); err != nil {
@@ -275,6 +286,11 @@ func (c *Client) readLoop(conn *websocket.Conn) {
 // handleRequest proxies a single request to the local service.
 func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 	if env.Request == nil {
+		return
+	}
+
+	if env.Request.TCPData != "" {
+		c.handleTCPTraffic(conn, env)
 		return
 	}
 
@@ -466,5 +482,66 @@ func (c *Client) startInspectorServer() {
 	})
 
 	_ = http.ListenAndServe(port, mux)
+}
+
+// handleTCPTraffic proxies incoming TCP data chunks to the local TCP target,
+// and relays responses back through the WebSocket connection to the server.
+func (c *Client) handleTCPTraffic(conn *websocket.Conn, env tunnel.Envelope) {
+	c.mu.Lock()
+	localConn, ok := c.tcpConns[env.RequestID]
+	c.mu.Unlock()
+
+	if !ok {
+		// Establish new connection to local target
+		var err error
+		localConn, err = net.Dial("tcp", c.localAddr)
+		if err != nil {
+			log.Printf("  Failed to dial local target %s: %v", c.localAddr, err)
+			return
+		}
+		c.mu.Lock()
+		c.tcpConns[env.RequestID] = localConn
+		c.mu.Unlock()
+
+		// Start background goroutine to read local TCP target responses and send back via websocket
+		go func(requestID string, targetConn net.Conn) {
+			defer func() {
+				targetConn.Close()
+				c.mu.Lock()
+				delete(c.tcpConns, requestID)
+				c.mu.Unlock()
+			}()
+
+			buf := make([]byte, 32*1024)
+			for {
+				n, err := targetConn.Read(buf)
+				if err != nil {
+					break
+				}
+				if n > 0 {
+					payloadB64 := base64.StdEncoding.EncodeToString(buf[:n])
+					respEnv := tunnel.Envelope{
+						Type:      tunnel.TypeResponse,
+						RequestID: requestID,
+						Response: &tunnel.TunnelResponse{
+							TCPData: payloadB64,
+						},
+					}
+					c.mu.Lock()
+					writeErr := conn.WriteJSON(respEnv)
+					c.mu.Unlock()
+					if writeErr != nil {
+						break
+					}
+				}
+			}
+		}(env.RequestID, localConn)
+	}
+
+	// Write payload chunk to local target
+	data, err := base64.StdEncoding.DecodeString(env.Request.TCPData)
+	if err == nil && len(data) > 0 {
+		_, _ = localConn.Write(data)
+	}
 }
 

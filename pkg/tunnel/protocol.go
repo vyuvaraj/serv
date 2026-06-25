@@ -48,20 +48,23 @@ type ControlMessage struct {
 	PublicURL    string `json:"public_url,omitempty"`
 	Error        string `json:"error,omitempty"`
 	SharingAuth  string `json:"sharing_auth,omitempty"`
+	TCPPort      int    `json:"tcp_port,omitempty"` // Requested TCP port for TCP Tunneling
 }
 
-// TunnelRequest represents an incoming HTTP request forwarded through the tunnel.
+// TunnelRequest represents an incoming HTTP or raw TCP connection forwarded through the tunnel.
 type TunnelRequest struct {
 	Method  string            `json:"method"`
 	Path    string            `json:"path"`
 	Headers map[string]string `json:"headers"`
 	Body    string            `json:"body,omitempty"` // base64-encoded for binary safety
+	TCPData string            `json:"tcp_data,omitempty"` // Base64 raw TCP payload chunk
 }
 
-// TunnelResponse represents the local service's HTTP response sent back through the tunnel.
+// TunnelResponse represents the local service's response sent back through the tunnel.
 type TunnelResponse struct {
 	StatusCode int               `json:"status_code"`
 	Headers    map[string]string `json:"headers"`
 	Body       string            `json:"body,omitempty"` // base64-encoded for binary safety
 	Trailers   map[string]string `json:"trailers,omitempty"`
+	TCPData    string            `json:"tcp_data,omitempty"` // Base64 raw TCP response chunk
 }
