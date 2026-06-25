@@ -423,6 +423,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			g.handleInitiateMultipart(w, r, bucket, key)
 		} else if query.Has("uploadId") {
 			g.handleCompleteMultipart(w, r, bucket, key)
+		} else if query.Has("select") || query.Get("select-type") != "" {
+			g.handleSelectObjectContent(w, r, bucket, key)
 		} else {
 			g.writeError(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "Method not allowed on object level")
 		}
