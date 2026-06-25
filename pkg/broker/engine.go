@@ -62,6 +62,8 @@ type BrokerEngine struct {
 	producerSequences map[string]int64
 	schemasMu         sync.RWMutex
 	schemas           map[string]map[string]string
+	compactedTopicsMu sync.RWMutex
+	compactedTopics   map[string]bool
 }
 
 func NewBrokerEngine() *BrokerEngine {
@@ -92,6 +94,7 @@ func NewBrokerEngine() *BrokerEngine {
 		topicCancel:       make(map[string]context.CancelFunc),
 		producerSequences: make(map[string]int64),
 		schemas:           make(map[string]map[string]string),
+		compactedTopics:   make(map[string]bool),
 	}
 	engine.timeWheel.Start()
 
@@ -341,6 +344,24 @@ func (e *BrokerEngine) ListTopics() []TopicInfo {
 		}
 	}
 
+	for name := range e.topicQueues {
+		if !seen[name] {
+			info := TopicInfo{Name: name}
+			topics = append(topics, info)
+			seen[name] = true
+		}
+	}
+
+	e.schemasMu.RLock()
+	for name := range e.schemas {
+		if !seen[name] {
+			info := TopicInfo{Name: name}
+			topics = append(topics, info)
+			seen[name] = true
+		}
+	}
+	e.schemasMu.RUnlock()
+
 	return topics
 }
 
@@ -364,6 +385,21 @@ func (e *BrokerEngine) GetSchema(topic string) (map[string]string, bool) {
 	defer e.schemasMu.RUnlock()
 	schema, ok := e.schemas[topic]
 	return schema, ok
+}
+
+func (e *BrokerEngine) SetCompacted(topic string, compacted bool) {
+	e.compactedTopicsMu.Lock()
+	defer e.compactedTopicsMu.Unlock()
+	if e.compactedTopics == nil {
+		e.compactedTopics = make(map[string]bool)
+	}
+	e.compactedTopics[topic] = compacted
+}
+
+func (e *BrokerEngine) IsCompacted(topic string) bool {
+	e.compactedTopicsMu.RLock()
+	defer e.compactedTopicsMu.RUnlock()
+	return e.compactedTopics[topic]
 }
 
 // SetDLQ registers a dead letter queue topic for a source topic.
@@ -606,7 +642,12 @@ func (e *BrokerEngine) PublishPartition(ctx context.Context, topic string, key s
 	}
 
 	expiry := getExpiryFromContext(ctx)
-	pq.Push(processed, priority, partitionId, expiry)
+	if e.IsCompacted(topic) && key != "" {
+		pq.PushWithKey(processed, key, priority, partitionId, expiry)
+		pq.Compact()
+	} else {
+		pq.Push(processed, priority, partitionId, expiry)
+	}
 
 	otel.EndSpan(span, nil, map[string]interface{}{})
 	return processed, nil
@@ -754,7 +795,13 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 	}
 
 	expiry := getExpiryFromContext(ctx)
-	pq.Push(processed, priority, 0, expiry)
+	msgKey, _ := ctx.Value("message-key").(string)
+	if e.IsCompacted(topic) && msgKey != "" {
+		pq.PushWithKey(processed, msgKey, priority, 0, expiry)
+		pq.Compact()
+	} else {
+		pq.Push(processed, priority, 0, expiry)
+	}
 
 	otel.EndSpan(span, nil, map[string]interface{}{
 		"messaging.system":      "servqueue",

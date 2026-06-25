@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -77,10 +78,51 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+func (s *Server) getTenant(r *http.Request) string {
+	// 1. Check X-Tenant-ID header
+	if tID := r.Header.Get("X-Tenant-ID"); tID != "" {
+		return tID
+	}
+	// 2. Check JWT claims if Authorization header exists and has JWT
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+			if claims, ok := parseJWTClaims(token, []byte(jwtSec)); ok {
+				if tenant, ok := claims["tenant"].(string); ok && tenant != "" {
+					return tenant
+				}
+				if username, ok := claims["username"].(string); ok && username != "" {
+					return username
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Server) namespaceTopic(topic string, tenant string) (string, error) {
+	if tenant == "" {
+		return topic, nil
+	}
+	// If the topic is already namespaced with this tenant, or starts with a different tenant, validate/format
+	if strings.Contains(topic, ":") {
+		parts := strings.SplitN(topic, ":", 2)
+		if parts[0] != tenant {
+			return "", fmt.Errorf("forbidden: topic namespace %q does not match tenant %q", parts[0], tenant)
+		}
+		return topic, nil
+	}
+	return tenant + ":" + topic, nil
+}
+
 func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.authToken == "" {
-			next(w, r)
+			// Even if no auth token is required, we can still extract tenant from X-Tenant-ID
+			tenant := s.getTenant(r)
+			ctx := context.WithValue(r.Context(), "tenant-id", tenant)
+			next(w, r.WithContext(ctx))
 			return
 		}
 
@@ -93,11 +135,17 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		
 		authenticated := false
+		var tenant string
 		if token == s.authToken {
 			authenticated = true
 		} else if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-			if _, ok := validateJWT(token, []byte(jwtSec)); ok {
+			if claims, ok := parseJWTClaims(token, []byte(jwtSec)); ok {
 				authenticated = true
+				if t, ok := claims["tenant"].(string); ok && t != "" {
+					tenant = t
+				} else if u, ok := claims["username"].(string); ok && u != "" {
+					tenant = u
+				}
 			}
 		}
 
@@ -106,7 +154,13 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next(w, r)
+		// Header override takes precedence if tenant was empty
+		if tenant == "" {
+			tenant = r.Header.Get("X-Tenant-ID")
+		}
+
+		ctx := context.WithValue(r.Context(), "tenant-id", tenant)
+		next(w, r.WithContext(ctx))
 	}
 }
 
@@ -115,7 +169,21 @@ func (s *Server) handleListTopics(w http.ResponseWriter, r *http.Request) {
 		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return
 	}
-	topics := s.engine.ListTopics()
+	tenant, _ := r.Context().Value("tenant-id").(string)
+	allTopics := s.engine.ListTopics()
+	var topics []broker.TopicInfo
+	if tenant == "" {
+		topics = allTopics
+	} else {
+		// Only return topics matching tenant prefix (tenant + ":") or return without prefix to client?
+		// Usually we return namespaced topics, but filter only theirs.
+		prefix := tenant + ":"
+		for _, t := range allTopics {
+			if strings.HasPrefix(t.Name, prefix) {
+				topics = append(topics, t)
+			}
+		}
+	}
 	if topics == nil {
 		topics = []broker.TopicInfo{}
 	}
@@ -140,13 +208,20 @@ func (s *Server) handleTopics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tenant, _ := r.Context().Value("tenant-id").(string)
+	namespacedTopic, err := s.namespaceTopic(topic, tenant)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
+
 	switch action {
 	case "transform":
-		s.handleRegisterTransform(w, r, topic)
+		s.handleRegisterTransform(w, r, namespacedTopic)
 	case "dlq":
-		s.handleRegisterDLQ(w, r, topic)
+		s.handleRegisterDLQ(w, r, namespacedTopic)
 	case "schema":
-		s.handleRegisterSchema(w, r, topic)
+		s.handleRegisterSchema(w, r, namespacedTopic)
 	default:
 		WriteJSONError(w, r, "Not found", "ERR_NOT_FOUND", http.StatusNotFound)
 	}
@@ -217,9 +292,16 @@ func (s *Server) handleRegisterDLQ(w http.ResponseWriter, r *http.Request, topic
 		return
 	}
 
-	s.engine.SetDLQ(topic, req.DLQTopic)
+	tenant, _ := r.Context().Value("tenant-id").(string)
+	namespacedDLQ, err := s.namespaceTopic(req.DLQTopic, tenant)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
+
+	s.engine.SetDLQ(topic, namespacedDLQ)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("DLQ " + req.DLQTopic + " registered for topic " + topic))
+	w.Write([]byte("DLQ " + namespacedDLQ + " registered for topic " + topic))
 }
 
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +321,13 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tenant, _ := r.Context().Value("tenant-id").(string)
+	namespacedTopic, err := s.namespaceTopic(req.Topic, tenant)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
+
 	// Propagate traceparent header if received
 	ctx := r.Context()
 	if tp := r.Header.Get("traceparent"); tp != "" {
@@ -249,8 +338,17 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	} else if msgID := r.Header.Get("Message-Id"); msgID != "" {
 		ctx = context.WithValue(ctx, "message-id", msgID)
 	}
+	if msgKey := r.Header.Get("Message-Key"); msgKey != "" {
+		ctx = context.WithValue(ctx, "message-key", msgKey)
+	}
+	if priority := r.Header.Get("Priority"); priority != "" {
+		ctx = context.WithValue(ctx, "priority", priority)
+	}
+	if ttl := r.Header.Get("TTL"); ttl != "" {
+		ctx = context.WithValue(ctx, "ttl", ttl)
+	}
 
-	res, err := s.engine.Publish(ctx, req.Topic, req.Payload)
+	res, err := s.engine.Publish(ctx, namespacedTopic, req.Payload)
 	if err != nil {
 		if err.Error() == "rate limit exceeded" {
 			WriteJSONError(w, r, "Rate limit exceeded", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
@@ -320,7 +418,14 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	records, err := s.engine.ReplayMessages(r.Context(), req.Topic, req.Offset, req.Group)
+	tenant, _ := r.Context().Value("tenant-id").(string)
+	namespacedTopic, err := s.namespaceTopic(req.Topic, tenant)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
+
+	records, err := s.engine.ReplayMessages(r.Context(), namespacedTopic, req.Offset, req.Group)
 	if err != nil {
 		WriteJSONError(w, r, "Replay failed: "+err.Error(), "ERR_REPLAY_FAILED", http.StatusInternalServerError)
 		return
@@ -335,6 +440,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOffsets(w http.ResponseWriter, r *http.Request) {
+	tenant, _ := r.Context().Value("tenant-id").(string)
 	switch r.Method {
 	case http.MethodGet:
 		group := r.URL.Query().Get("group")
@@ -343,7 +449,12 @@ func (s *Server) handleOffsets(w http.ResponseWriter, r *http.Request) {
 			WriteJSONError(w, r, "Missing group or topic query parameters", "ERR_MISSING_PARAMETERS", http.StatusBadRequest)
 			return
 		}
-		offset := s.engine.GetOffset(group, topic)
+		namespacedTopic, err := s.namespaceTopic(topic, tenant)
+		if err != nil {
+			WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
+			return
+		}
+		offset := s.engine.GetOffset(group, namespacedTopic)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"group":  group,
@@ -364,7 +475,12 @@ func (s *Server) handleOffsets(w http.ResponseWriter, r *http.Request) {
 			WriteJSONError(w, r, "Missing group or topic in JSON body", "ERR_MISSING_PARAMETERS", http.StatusBadRequest)
 			return
 		}
-		s.engine.CommitOffset(req.Group, req.Topic, req.Offset)
+		namespacedTopic, err := s.namespaceTopic(req.Topic, tenant)
+		if err != nil {
+			WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
+			return
+		}
+		s.engine.CommitOffset(req.Group, namespacedTopic, req.Offset)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "success",
@@ -375,10 +491,10 @@ func (s *Server) handleOffsets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validateJWT(tokenStr string, secret []byte) (string, bool) {
+func parseJWTClaims(tokenStr string, secret []byte) (map[string]interface{}, bool) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
-		return "", false
+		return nil, false
 	}
 
 	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
@@ -391,29 +507,46 @@ func validateJWT(tokenStr string, secret []byte) (string, bool) {
 	// Base64Url decode signaturePart
 	sigBytes, err := base64UrlDecode(signaturePart)
 	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
-		return "", false
+		return nil, false
 	}
 
-	// Base64Url decode payloadPart and extract username, exp
+	// Base64Url decode payloadPart
 	payloadBytes, err := base64UrlDecode(payloadPart)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 
-	var claims struct {
-		Username string `json:"username"`
-		Exp      int64  `json:"exp"`
-	}
+	var claims map[string]interface{}
 	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return "", false
+		return nil, false
 	}
 
 	// Check expiration
-	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
-		return "", false
+	if expVal, exists := claims["exp"]; exists {
+		var exp int64
+		switch ev := expVal.(type) {
+		case float64:
+			exp = int64(ev)
+		case int64:
+			exp = ev
+		case string:
+			exp, _ = strconv.ParseInt(ev, 10, 64)
+		}
+		if exp > 0 && time.Now().Unix() > exp {
+			return nil, false
+		}
 	}
 
-	return claims.Username, true
+	return claims, true
+}
+
+func validateJWT(tokenStr string, secret []byte) (string, bool) {
+	claims, ok := parseJWTClaims(tokenStr, secret)
+	if !ok {
+		return "", false
+	}
+	username, _ := claims["username"].(string)
+	return username, true
 }
 
 func base64UrlDecode(s string) ([]byte, error) {

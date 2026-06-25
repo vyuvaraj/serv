@@ -14,7 +14,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
 
 	"servqueue/pkg/broker"
 )
@@ -136,6 +135,71 @@ func writeFrame(writer io.Writer, command string, headers map[string]string, bod
 	return err
 }
 
+func parseJWTClaims(tokenStr string, secret []byte) (map[string]interface{}, bool) {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 3 {
+		return nil, false
+	}
+
+	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
+	
+	// Validate signature
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(headerPart + "." + payloadPart))
+	expectedMac := mac.Sum(nil)
+	
+	// Base64Url decode signaturePart
+	sigBytes, err := base64UrlDecode(signaturePart)
+	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
+		return nil, false
+	}
+
+	// Base64Url decode payloadPart
+	payloadBytes, err := base64UrlDecode(payloadPart)
+	if err != nil {
+		return nil, false
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return nil, false
+	}
+
+	return claims, true
+}
+
+func validateJWT(tokenStr string, secret []byte) (string, bool) {
+	claims, ok := parseJWTClaims(tokenStr, secret)
+	if !ok {
+		return "", false
+	}
+	username, _ := claims["username"].(string)
+	return username, true
+}
+
+func base64UrlDecode(s string) ([]byte, error) {
+	if l := len(s) % 4; l > 0 {
+		s += strings.Repeat("=", 4-l)
+	}
+	s = strings.ReplaceAll(s, "-", "+")
+	s = strings.ReplaceAll(s, "_", "/")
+	return base64.URLEncoding.DecodeString(s)
+}
+
+func namespaceTopic(topic string, tenant string) (string, error) {
+	if tenant == "" {
+		return topic, nil
+	}
+	if strings.Contains(topic, ":") {
+		parts := strings.SplitN(topic, ":", 2)
+		if parts[0] != tenant {
+			return "", fmt.Errorf("forbidden: topic namespace %q does not match tenant %q", parts[0], tenant)
+		}
+		return topic, nil
+	}
+	return tenant + ":" + topic, nil
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
@@ -159,6 +223,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}()
 
 	authenticated := false
+	var tenant string
 
 	// If no username/passcode is required, default to authenticated
 	if s.username == "" && s.passcode == "" {
@@ -174,16 +239,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if frame.Command == "CONNECT" {
 			login := frame.Headers["login"]
 			passcode := frame.Headers["passcode"]
+			tID := frame.Headers["tenant"]
 
 			if !authenticated {
 				isValid := false
+				var claims map[string]interface{}
 				if login == s.username && passcode == s.passcode {
 					isValid = true
 				} else if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-					if _, ok := validateJWT(passcode, []byte(jwtSec)); ok {
+					if c, ok := parseJWTClaims(passcode, []byte(jwtSec)); ok {
 						isValid = true
-					} else if _, ok := validateJWT(login, []byte(jwtSec)); ok {
+						claims = c
+					} else if c, ok := parseJWTClaims(login, []byte(jwtSec)); ok {
 						isValid = true
+						claims = c
 					}
 				}
 
@@ -192,6 +261,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 					writer.Flush()
 					return
 				}
+
+				if claims != nil {
+					if t, ok := claims["tenant"].(string); ok && t != "" {
+						tenant = t
+					} else if u, ok := claims["username"].(string); ok && u != "" {
+						tenant = u
+					}
+				}
+			}
+
+			if tID != "" {
+				tenant = tID
 			}
 
 			authenticated = true
@@ -211,6 +292,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 			destination := frame.Headers["destination"]
 			if destination == "" {
 				continue
+			}
+
+			namespacedTopic, err := namespaceTopic(destination, tenant)
+			if err != nil {
+				_ = writeFrame(writer, "ERROR", map[string]string{"message": err.Error()}, "Forbidden")
+				writer.Flush()
+				return
 			}
 
 			ctx := context.Background()
@@ -236,7 +324,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 			if txID != "" {
 				if buf, exists := txBuffers[txID]; exists {
 					txBuffers[txID] = append(buf, txPublish{
-						topic:   destination,
+						topic:   namespacedTopic,
 						payload: frame.Body,
 						ctx:     ctx,
 					})
@@ -247,7 +335,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				continue
 			}
 
-			_, _ = s.engine.Publish(ctx, destination, frame.Body)
+			_, _ = s.engine.Publish(ctx, namespacedTopic, frame.Body)
 
 		case "BEGIN":
 			txID := frame.Headers["transaction"]
@@ -280,13 +368,20 @@ func (s *Server) handleConnection(conn net.Conn) {
 				continue
 			}
 
+			namespacedTopic, err := namespaceTopic(destination, tenant)
+			if err != nil {
+				_ = writeFrame(writer, "ERROR", map[string]string{"message": err.Error()}, "Forbidden")
+				writer.Flush()
+				return
+			}
+
 			var ch chan string
 			if group != "" {
-				ch = s.engine.SubscribeGroup(destination, group)
+				ch = s.engine.SubscribeGroup(namespacedTopic, group)
 			} else {
-				ch = s.engine.Subscribe(destination)
+				ch = s.engine.Subscribe(namespacedTopic)
 			}
-			activeSubs[subID] = subInfo{topic: destination, ch: ch}
+			activeSubs[subID] = subInfo{topic: namespacedTopic, ch: ch}
 
 			go func(topic string, id string, subChan chan string) {
 				for msg := range subChan {
@@ -301,7 +396,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 					}
 					_ = writeFrame(conn, "MESSAGE", hdrs, msg)
 				}
-			}(destination, subID, ch)
+			}(namespacedTopic, subID, ch)
 
 		case "DISCONNECT":
 			writeFrame(writer, "RECEIPT", map[string]string{"receipt-id": frame.Headers["receipt"]}, "")
@@ -309,54 +404,4 @@ func (s *Server) handleConnection(conn net.Conn) {
 			return
 		}
 	}
-}
-
-func validateJWT(tokenStr string, secret []byte) (string, bool) {
-	parts := strings.Split(tokenStr, ".")
-	if len(parts) != 3 {
-		return "", false
-	}
-
-	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
-	
-	// Validate signature
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(headerPart + "." + payloadPart))
-	expectedMac := mac.Sum(nil)
-	
-	// Base64Url decode signaturePart
-	sigBytes, err := base64UrlDecode(signaturePart)
-	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
-		return "", false
-	}
-
-	// Base64Url decode payloadPart and extract username, exp
-	payloadBytes, err := base64UrlDecode(payloadPart)
-	if err != nil {
-		return "", false
-	}
-
-	var claims struct {
-		Username string `json:"username"`
-		Exp      int64  `json:"exp"`
-	}
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return "", false
-	}
-
-	// Check expiration
-	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
-		return "", false
-	}
-
-	return claims.Username, true
-}
-
-func base64UrlDecode(s string) ([]byte, error) {
-	if l := len(s) % 4; l > 0 {
-		s += strings.Repeat("=", 4-l)
-	}
-	s = strings.ReplaceAll(s, "-", "+")
-	s = strings.ReplaceAll(s, "_", "/")
-	return base64.URLEncoding.DecodeString(s)
 }

@@ -14,6 +14,7 @@ type PriorityMessage struct {
 	PartitionId int
 	Index       int // Index of the item in the heap; maintained by heap.Interface
 	Expiry      time.Time
+	Key         string
 }
 
 type messageHeap []*PriorityMessage
@@ -67,6 +68,11 @@ func NewPriorityQueue() *PriorityQueue {
 
 // Push adds a message to the priority queue with the given priority and expiry.
 func (pq *PriorityQueue) Push(payload string, priority int, partitionId int, expiry time.Time) {
+	pq.PushWithKey(payload, "", priority, partitionId, expiry)
+}
+
+// PushWithKey adds a message to the priority queue with a deduplication key, priority, partition and expiry.
+func (pq *PriorityQueue) PushWithKey(payload string, key string, priority int, partitionId int, expiry time.Time) {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
 
@@ -77,9 +83,43 @@ func (pq *PriorityQueue) Push(payload string, priority int, partitionId int, exp
 		Sequence:    pq.sequence,
 		PartitionId: partitionId,
 		Expiry:      expiry,
+		Key:         key,
 	}
 	heap.Push(&pq.h, msg)
 	pq.cond.Signal()
+}
+
+// Compact removes duplicate older messages, keeping only the latest message (largest Sequence) per non-empty Key.
+func (pq *PriorityQueue) Compact() {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+
+	// Find the latest message per key
+	latest := make(map[string]*PriorityMessage)
+	for _, msg := range pq.h {
+		if msg.Key == "" {
+			continue
+		}
+		existing, ok := latest[msg.Key]
+		if !ok || msg.Sequence > existing.Sequence {
+			latest[msg.Key] = msg
+		}
+	}
+
+	// Rebuild the heap
+	newHeap := make(messageHeap, 0)
+	for _, msg := range pq.h {
+		if msg.Key == "" {
+			newHeap = append(newHeap, msg)
+			continue
+		}
+		if latest[msg.Key] == msg {
+			newHeap = append(newHeap, msg)
+		}
+	}
+
+	pq.h = newHeap
+	heap.Init(&pq.h)
 }
 
 // Pop blocks until a message is available, then removes and returns the highest priority message.

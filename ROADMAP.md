@@ -81,9 +81,9 @@ These items take ServQueue from a lightweight broker to a **category-defining ev
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 9.1 | **Exactly-once delivery semantics** | Large | Idempotent producer IDs + transactional message batches. Guarantees no duplicates and no loss even across broker restarts. The gold standard for financial/ordering systems. | [x] |
-| 9.2 | **Schema registry & validation** | Medium | Attach Avro/JSON Schema to topics. Reject non-conforming publishes at the broker. Auto-evolve schemas with compatibility checks. | [ ] |
-| 9.3 | **Topic compaction** | Medium | Retain only the latest message per key within a topic — useful for changelog/state topics. Similar to Kafka log compaction. | [ ] |
-| 9.4 | **Multi-tenant topic isolation** | Medium | Namespace-scoped topics with independent quotas, rate limits, and RBAC policies per tenant. Enables shared cluster deployment. | [ ] |
+| 9.2 | **Schema registry & validation** | Medium | Attach Avro/JSON Schema to topics. Reject non-conforming publishes at the broker. Auto-evolve schemas with compatibility checks. | [x] |
+| 9.3 | **Topic compaction** | Medium | Retain only the latest message per key within a topic — useful for changelog/state topics. Similar to Kafka log compaction. | [x] |
+| 9.4 | **Multi-tenant topic isolation** | Medium | Namespace-scoped topics with independent quotas, rate limits, and RBAC policies per tenant. Enables shared cluster deployment. | [x] |
 | 9.5 | **Stream processing DSL** | Large | Built-in windowed aggregations, joins, and filters expressed in `.srv` syntax: `stream "orders" |> filter(o => o.total > 100) |> window(5m) |> count() |> publish("high-value-orders")`. | [ ] |
 | 9.6 | **Message replay with offset management** | Medium | Named consumer offsets with commit/seek semantics. Replay from any point in the WAL by offset or timestamp without re-creating subscriptions. | [x] |
 | 9.7 | **Fan-out patterns (broadcast + routing keys)** | Medium | Support topic routing patterns: `orders.*` (wildcard), `orders.us.#` (multi-level). Enables flexible pub/sub topologies without multiple topics. | [x] |
@@ -92,7 +92,7 @@ These items take ServQueue from a lightweight broker to a **category-defining ev
 | 9.10 | **Message tracing (end-to-end)** | Medium | Track a message from publish through every WASM transform, DLQ redirect, and consumer ack — visualizable in ServConsole as a message journey timeline. | [ ] |
 | 9.11 | **WASM transform marketplace** | Medium | Install community or private transforms via `servqueue install <name>` resolving from ServRegistry. Pre-built transforms: JSON→Protobuf, PII masking, enrichment. | [ ] |
 | 9.12 | **Message TTL & expiration** | Small | Per-topic or per-message TTL. Expired messages are automatically moved to DLQ or purged. Essential for time-sensitive event processing. | [x] |
-| 9.13 | **Admin CLI (`servqueue` binary)** | Medium | Terminal client supporting `topics list`, `topics create`, `publish`, `consume`, `offsets`, `transforms list/upload`, and cluster management. | [ ] |
+| 9.13 | **Admin CLI (`servqueue` binary)** | Medium | Terminal client supporting `topics list`, `topics create`, `publish`, `consume`, `offsets`, `transforms list/upload`, and cluster management. | [x] |
 | 9.14 | **Observability dashboard (built-in)** | Medium | Embedded lightweight web UI (like ServStore's console) showing topic throughput, consumer lag, WASM execution stats, and DLQ depth without needing ServConsole. | [ ] |
 
 ---

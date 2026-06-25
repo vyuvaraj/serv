@@ -39,10 +39,12 @@ func TestServQueueWasmTransformIntegration(t *testing.T) {
 	// 2. Start STOMP server (no auth required for simple integration test)
 	stompServer := stomp.NewServer("127.0.0.1:61614", engine, "", "", "", "")
 	go stompServer.Start()
+	defer stompServer.Stop()
 
 	// 3. Start Web server (no auth required here)
 	webServer := web.NewServer("127.0.0.1:8083", engine, "", "", "")
 	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
 
 	// Wait for servers to spin up
 	time.Sleep(200 * time.Millisecond)
@@ -84,6 +86,7 @@ func TestHTTPPublish(t *testing.T) {
 	token := "test-token"
 	webServer := web.NewServer("127.0.0.1:8084", engine, token, "", "")
 	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
 	time.Sleep(200 * time.Millisecond)
 
 	subChan := engine.Subscribe("test-http")
@@ -400,6 +403,7 @@ func TestReplayAndOffsets(t *testing.T) {
 	engine := broker.NewBrokerEngine()
 	webServer := web.NewServer("127.0.0.1:8085", engine, "", "", "")
 	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
 	time.Sleep(200 * time.Millisecond)
 
 	// 1. Commit and get offsets
@@ -536,6 +540,7 @@ func TestStatsWebSocketStream(t *testing.T) {
 	token := "ws-test-token"
 	webServer := web.NewServer("127.0.0.1:8086", engine, token, "", "")
 	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
 	time.Sleep(200 * time.Millisecond)
 
 	// Dial WebSocket connection
@@ -771,6 +776,7 @@ func TestSchemaValidation(t *testing.T) {
 
 	webServer := web.NewServer("127.0.0.1:8087", engine, "", "", "")
 	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
 	time.Sleep(200 * time.Millisecond)
 
 	topic := "schema-test-topic"
@@ -953,6 +959,215 @@ func TestWildcardSubscriptions(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		// Success
 	}
+}
+
+func TestTopicCompaction(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	topic := "compacted-test"
+	engine.SetCompacted(topic, true)
+
+	// Publish multiple messages with the same key
+	ctx1 := context.WithValue(context.Background(), "message-key", "key-a")
+	_, _ = engine.Publish(ctx1, topic, "val1")
+
+	ctx2 := context.WithValue(context.Background(), "message-key", "key-b")
+	_, _ = engine.Publish(ctx2, topic, "val2")
+
+	ctx3 := context.WithValue(context.Background(), "message-key", "key-a")
+	_, _ = engine.Publish(ctx3, topic, "val3") // overwrites key-a
+
+	// Since compaction runs, the queue for "compacted-test" should hold only 2 items (key-b with val2, key-a with val3)
+	pq := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, pq)
+
+	// Sleep to let dispatcher trigger if any (though dispatch checks subscribers. Let's inspect the queue length or pop)
+	// We can check engine queue state or verify what was delivered.
+	// Since dispatch loop pops messages to active subscribers, let's verify what comes out.
+	// But dispatch loop starts *after* queue is created, and it processes messages immediately if there are subscribers.
+	// In our case, we published *before* creating the subscriber (so they are queued in PriorityQueue).
+	// Once we subscribe, the dispatch loop begins delivering the remaining queued messages.
+	var received []string
+	timeout := time.After(500 * time.Millisecond)
+	for len(received) < 2 {
+		select {
+		case msg := <-pq:
+			received = append(received, msg)
+		case <-timeout:
+			break
+		}
+	}
+
+	if len(received) != 2 {
+		t.Fatalf("Expected exactly 2 messages after compaction, got %d: %v", len(received), received)
+	}
+
+	// The latest message for key-a is val3, and key-b is val2
+	if (received[0] == "val1" || received[1] == "val1") {
+		t.Errorf("Compacted older message val1 was unexpectedly delivered")
+	}
+}
+
+func TestMultiTenantIsolationHTTP(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	token := "secret-token"
+	webServer := web.NewServer("127.0.0.1:8085", engine, token, "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	// Publish as Tenant A
+	reqBody := []byte(`{"topic":"orders","payload":"tenant-a-order"}`)
+	req, _ := http.NewRequest("POST", "http://127.0.0.1:8085/api/publish", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Tenant A publish failed: %v, status: %d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Check that the topic in the broker was actually namespace-prefixed as tenant-a:orders
+	topics := engine.ListTopics()
+	found := false
+	for _, tInfo := range topics {
+		if tInfo.Name == "tenant-a:orders" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected topic 'tenant-a:orders' to be created, but was not found in: %v", topics)
+	}
+
+	// Try to register schema for "orders" without tenant namespace matching or crossing tenants
+	schemaReq := []byte(`{"order_id":"string"}`)
+	reqSchema, _ := http.NewRequest("POST", "http://127.0.0.1:8085/api/v1/topics/tenant-b:orders/schema", bytes.NewReader(schemaReq))
+	reqSchema.Header.Set("Content-Type", "application/json")
+	reqSchema.Header.Set("Authorization", "Bearer "+token)
+	reqSchema.Header.Set("X-Tenant-ID", "tenant-a") // mismatch!
+
+	respSchema, err := http.DefaultClient.Do(reqSchema)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer respSchema.Body.Close()
+	if respSchema.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for mismatched tenant override, got %d", respSchema.StatusCode)
+	}
+}
+
+func TestMultiTenantIsolationSTOMP(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	stompServer := stomp.NewServer("127.0.0.1:61615", engine, "admin", "secret", "", "")
+	go stompServer.Start()
+	defer stompServer.Stop()
+	time.Sleep(200 * time.Millisecond)
+
+	// Connect to STOMP specifying tenant-a
+	conn, err := net.Dial("tcp", "127.0.0.1:61615")
+	if err != nil {
+		t.Fatalf("Failed to connect to STOMP: %v", err)
+	}
+	defer conn.Close()
+
+	// Send CONNECT frame
+	connectFrame := "CONNECT\nlogin:admin\npasscode:secret\ntenant:tenant-a\n\n\x00"
+	_, _ = conn.Write([]byte(connectFrame))
+
+	buf := make([]byte, 1024)
+	n, _ := conn.Read(buf)
+	if !strings.Contains(string(buf[:n]), "CONNECTED") {
+		t.Fatalf("Expected CONNECTED response, got: %s", string(buf[:n]))
+	}
+
+	// Send SEND frame
+	sendFrame := "SEND\ndestination:alerts\n\ninfo-msg\x00"
+	_, _ = conn.Write([]byte(sendFrame))
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify topic was created with tenant namespace
+	topics := engine.ListTopics()
+	found := false
+	for _, tInfo := range topics {
+		if tInfo.Name == "tenant-a:alerts" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected namespaced topic 'tenant-a:alerts' to be created under STOMP tenant execution")
+	}
+}
+
+func TestAdminCLI(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	// Start management HTTP server
+	token := "secret-token"
+	webServer := web.NewServer("127.0.0.1:8086", engine, token, "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	// Simulating CLI 'topics create my-cli-topic' with tenant 'tenant-cli'
+	createURL := "http://127.0.0.1:8086/api/v1/topics/my-cli-topic/schema"
+	req, _ := http.NewRequest("POST", createURL, bytes.NewBuffer([]byte("{}")))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-cli")
+	
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to simulate CLI create topic: %v, status: %v", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify topic exists
+	topics := engine.ListTopics()
+	found := false
+	for _, t := range topics {
+		if t.Name == "tenant-cli:my-cli-topic" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Topic tenant-cli:my-cli-topic was not created by simulated CLI action")
+	}
+
+	// Simulating CLI 'publish my-cli-topic payload'
+	publishURL := "http://127.0.0.1:8086/api/v1/publish"
+	pubBody := []byte(`{"topic":"my-cli-topic","payload":"cli-payload"}`)
+	reqPub, _ := http.NewRequest("POST", publishURL, bytes.NewBuffer(pubBody))
+	reqPub.Header.Set("Authorization", "Bearer "+token)
+	reqPub.Header.Set("Content-Type", "application/json")
+	reqPub.Header.Set("X-Tenant-ID", "tenant-cli")
+	reqPub.Header.Set("Message-Key", "key123")
+	reqPub.Header.Set("Priority", "1")
+
+	respPub, err := http.DefaultClient.Do(reqPub)
+	if err != nil || respPub.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to simulate CLI publish: %v, status: %v", err, respPub.StatusCode)
+	}
+	respPub.Body.Close()
 }
 
 
