@@ -49,6 +49,13 @@ type Gateway struct {
 	notificationStompTopic string
 	consoleSessionMap      map[string]storage.ConsoleSession
 	sessionMutex           sync.RWMutex
+	federationRules        []FederationRule
+	fedMutex               sync.RWMutex
+}
+
+type FederationRule struct {
+	Pattern string `json:"pattern"`
+	Target  string `json:"target"`
 }
 
 func (g *Gateway) WithNotificationWebhook(url string) *Gateway {
@@ -73,6 +80,23 @@ func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *
 	if parityShards <= 0 {
 		parityShards = 1
 	}
+	var rules []FederationRule
+	if fedMap := os.Getenv("SERVSTORE_FEDERATION_MAP"); fedMap != "" {
+		for _, part := range strings.Split(fedMap, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			subParts := strings.SplitN(part, "=", 2)
+			if len(subParts) == 2 {
+				rules = append(rules, FederationRule{
+					Pattern: strings.TrimSpace(subParts[0]),
+					Target:  strings.TrimSpace(subParts[1]),
+				})
+			}
+		}
+	}
+
 	return &Gateway{
 		store:             store,
 		auth:              auth,
@@ -83,6 +107,7 @@ func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *
 		dataShards:        dataShards,
 		parityShards:      parityShards,
 		consoleSessionMap: make(map[string]storage.ConsoleSession),
+		federationRules:   rules,
 	}
 }
 
@@ -148,6 +173,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/admin/backup/restore" && r.Method == http.MethodPost {
 		g.handleBackupRestore(w, r)
+		return
+	}
+	if r.URL.Path == "/admin/federation" && r.Method == http.MethodPost {
+		g.handleRegisterFederation(w, r)
 		return
 	}
 
@@ -271,6 +300,14 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Parse bucket and key
 	bucket, key := parsePath(r.URL.Path)
+
+	if bucket != "" {
+		if remoteClusterAddr, isFederated := g.resolveFederatedBucket(bucket); isFederated {
+			slog.Info("Federation: routing request to remote cluster", "bucket", bucket, "target", remoteClusterAddr)
+			g.proxyRequest(w, r, remoteClusterAddr)
+			return
+		}
+	}
 
 	if r.Header.Get("X-ServStore-Shard-Index") != "" {
 		shardIdx := r.Header.Get("X-ServStore-Shard-Index")
@@ -755,6 +792,58 @@ func (g *Gateway) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Bucket restored successfully to " + timeStr))
+}
+
+func (g *Gateway) handleRegisterFederation(w http.ResponseWriter, r *http.Request) {
+	var rule FederationRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		g.writeErrorCtx(w, r, http.StatusBadRequest, "InvalidJSON", "Failed to decode federation rule.")
+		return
+	}
+
+	if rule.Pattern == "" || rule.Target == "" {
+		g.writeErrorCtx(w, r, http.StatusBadRequest, "InvalidArgument", "pattern and target fields are required")
+		return
+	}
+
+	g.fedMutex.Lock()
+	g.federationRules = append(g.federationRules, rule)
+	g.fedMutex.Unlock()
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("Federation rule registered successfully"))
+}
+
+func (g *Gateway) resolveFederatedBucket(bucket string) (string, bool) {
+	if bucket == "system-access-logs" {
+		return "", false
+	}
+	g.fedMutex.RLock()
+	defer g.fedMutex.RUnlock()
+
+	for _, rule := range g.federationRules {
+		if matchPattern(bucket, rule.Pattern) {
+			if g.cluster != nil {
+				localAddr, ok := g.cluster.GetNodeAddress(g.cluster.LocalNodeID())
+				if ok && (rule.Target == localAddr || strings.Contains(rule.Target, localAddr)) {
+					continue
+				}
+			}
+			return rule.Target, true
+		}
+	}
+	return "", false
+}
+
+func matchPattern(bucket, pattern string) bool {
+	if pattern == "*" {
+		return true
+	}
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(bucket, prefix)
+	}
+	return bucket == pattern
 }
 
 func (g *Gateway) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {

@@ -142,7 +142,7 @@ These items take ServStore from a production-ready S3-compatible engine to a **c
 | 9.11 | **S3 batch operations** | Large | `POST /batch` API for bulk copy, delete, tagging, and metadata updates across thousands of objects. Job-based with progress tracking. Enterprise-scale operations. | [ ] |
 | 9.12 | **Content-type aware compression** | Medium | Automatically compress text, JSON, and log objects with zstd on write; decompress transparently on read. Storage reduction with zero client changes. | [x] |
 | 9.13 | **Multi-user web console** | Medium | Support multiple console users with independent sessions, per-user bucket visibility, and activity history. Currently single-user embedded UI. | [x] |
-| 9.14 | **Federation (cross-cluster namespace)** | Large | Federate multiple ServStore clusters under a single namespace. Global bucket names resolve to the owning cluster transparently — like DNS for objects. | [ ] |
+| 9.14 | **Federation (cross-cluster namespace)** | Large | Federate multiple ServStore clusters under a single namespace. Global bucket names resolve to the owning cluster transparently — like DNS for objects. | [x] |
 
 ---
 
