@@ -8,6 +8,7 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/go-logr/logr v1.4.3
 	github.com/go-stomp/stomp/v3 v3.1.5
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/raft v1.7.3
 	github.com/klauspost/compress v1.16.0
 	github.com/klauspost/reedsolomon v1.14.0
