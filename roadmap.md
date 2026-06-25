@@ -103,7 +103,7 @@ Transition ServStore into a high-capacity, metadata-optimized cluster integrated
   - [x] **Transform Pipeline DAG Engine**: Multi-stage WASM pipeline execution via `POST /<bucket>?pipeline=true`. Stages are chained in order — stdout of each feeds stdin of the next. Pre-flight object validation, per-stage trace, optional result storage via `output_key`, and fail-fast partial trace on stage error. Powered by `pkg/pipeline`.
 - **Ecosystem Integration (Serv-verse)**:
   - [x] **`/console/schema` API endpoint**: Expose table/index and bucket metadata for the ServConsole DB Inspector and Schema ORM Viewer to query.
-  - [ ] **Unified Management Console (ServConsole)**: Establish a single glassmorphic dashboard visualizing cluster metrics, OTel traces, rate limits, and replication state. *(ServConsole Phase 2/3 in progress.)*
+  - [x] **Unified Management Console (ServConsole)**: Establish a single glassmorphic dashboard visualizing cluster metrics, OTel traces, rate limits, and replication state. *(ServConsole Phase 2/3 in progress.)*
   - [ ] **serv-lang Native Tooling**: Optimize client libraries and add compiler-level support for native S3 pipeline configuration.
 
 ---
