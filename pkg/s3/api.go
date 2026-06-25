@@ -241,13 +241,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Verify authentication
 	if !g.auth.VerifyRequest(r) {
-		g.writeError(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		g.writeErrorCtx(w, r, http.StatusForbidden, "AccessDenied", "Access Denied")
 		return
 	}
 
 	// Verify RBAC Authorization
 	if !g.checkAuthorization(r) {
-		g.writeError(w, http.StatusForbidden, "AccessDenied", "Access Denied by RBAC Policy")
+		g.writeErrorCtx(w, r, http.StatusForbidden, "AccessDenied", "Access Denied by RBAC Policy")
 		return
 	}
 
@@ -260,7 +260,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !g.rateLimiter.Allow(tenant) {
 			retryAfter := g.rateLimiter.RetryAfterSec(tenant)
 			w.Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
-			g.writeError(w, http.StatusTooManyRequests, "SlowDown", "Request rate limit exceeded. Please retry after "+strconv.FormatInt(retryAfter, 10)+"s.")
+			g.writeErrorCtx(w, r, http.StatusTooManyRequests, "SlowDown", "Request rate limit exceeded. Please retry after "+strconv.FormatInt(retryAfter, 10)+"s.")
 			return
 		}
 	}
@@ -467,6 +467,48 @@ func (g *Gateway) writeError(w http.ResponseWriter, status int, code, message st
 	g.writeXML(w, status, ErrorResponse{
 		Code:    code,
 		Message: message,
+	})
+}
+
+func (g *Gateway) writeErrorCtx(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	traceID := ""
+	if r != nil {
+		// Fetch trace ID from context if otel tracer has run and context contains span
+		if spanVal := r.Context().Value(otel.Traceparent(r.Context())); spanVal != nil {
+			if parts := strings.Split(spanVal.(string), "-"); len(parts) >= 3 {
+				traceID = parts[1]
+			}
+		}
+		if traceID == "" {
+			if tp := r.Header.Get("traceparent"); tp != "" {
+				traceID, _ = otel.ExtractTraceparent(tp)
+			}
+		}
+	}
+
+	accept := ""
+	if r != nil {
+		accept = r.Header.Get("Accept")
+	}
+
+	// Non-S3 endpoints (like /console/ or request asking for JSON)
+	if strings.Contains(accept, "application/json") || (r != nil && strings.HasPrefix(r.URL.Path, "/console/")) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		res := map[string]string{
+			"error":    message,
+			"code":     code,
+			"trace_id": traceID,
+		}
+		_ = json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	// Standard S3 XML error
+	g.writeXML(w, status, ErrorResponse{
+		Code:      code,
+		Message:   message,
+		RequestID: traceID,
 	})
 }
 
@@ -692,14 +734,14 @@ func (g *Gateway) handleConsoleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
-		g.writeError(w, http.StatusBadRequest, "InvalidJSON", "Failed to decode credentials.")
+		g.writeErrorCtx(w, r, http.StatusBadRequest, "InvalidJSON", "Failed to decode credentials.")
 		return
 	}
 
 	// Retrieve correct credentials using Gateway Auth Provider
 	adminUser, adminPass := g.auth.GetAdminCredentials()
 	if credentials.Username != adminUser || credentials.Password != adminPass {
-		g.writeError(w, http.StatusForbidden, "AccessDenied", "Invalid username or password.")
+		g.writeErrorCtx(w, r, http.StatusForbidden, "AccessDenied", "Invalid username or password.")
 		return
 	}
 
