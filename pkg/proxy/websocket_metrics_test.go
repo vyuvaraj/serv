@@ -93,14 +93,15 @@ func TestWebSocketMetricsFeed(t *testing.T) {
 			return nil, fmt.Errorf("unexpected opcode: %d", header[0]&0x0F)
 		}
 		length := int(header[1] & 0x7F)
-		if length == 126 {
+		switch length {
+		case 126:
 			lenBytes := make([]byte, 2)
 			_, err = conn.Read(lenBytes)
 			if err != nil {
 				return nil, err
 			}
 			length = int(lenBytes[0])<<8 | int(lenBytes[1])
-		} else if length == 127 {
+		case 127:
 			return nil, fmt.Errorf("large payloads not supported in test")
 		}
 

@@ -60,6 +60,10 @@ type Route struct {
 	MaxQueueSize       int               `json:"max_queue_size,omitempty"`      // Max requests allowed to queue
 	QueueTimeoutMs     int               `json:"queue_timeout_ms,omitempty"`    // Timeout for queueing in milliseconds
 	GoMiddleware       string            `json:"go_middleware,omitempty"`       // Name of native Go middleware plugin
+	RequireAPIKey      bool              `json:"require_api_key,omitempty"`     // Require client API key
+	AllowedTenants     []string          `json:"allowed_tenants,omitempty"`     // Tenants allowed on this route
+	RequestTransform   map[string]string `json:"request_transform,omitempty"`   // Declarative request JSON transformations
+	ResponseTransform  map[string]string `json:"response_transform,omitempty"`  // Declarative response JSON transformations
 }
 
 type MetricsTracker struct {
@@ -174,6 +178,8 @@ type GatewayHandler struct {
 	transportsMu   sync.RWMutex
 	limiters       map[string]*BackpressureLimiter // route prefix -> backpressure limiter
 	limitersMu     sync.RWMutex
+	apiKeys        map[string]APIKey
+	apiKeysMu      sync.RWMutex
 }
 
 func createMTLSTransport(clientCertPath, clientKeyPath, rootCAPath string) (http.RoundTripper, error) {
@@ -276,6 +282,16 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		metricsTracker: tracker,
 		transports:     transports,
 		limiters:       limiters,
+		apiKeys:        make(map[string]APIKey),
+	}
+}
+
+func (h *GatewayHandler) SetAPIKeys(keys []APIKey) {
+	h.apiKeysMu.Lock()
+	defer h.apiKeysMu.Unlock()
+	h.apiKeys = make(map[string]APIKey)
+	for _, k := range keys {
+		h.apiKeys[k.Key] = k
 	}
 }
 
@@ -509,6 +525,65 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteJSONError(w, r, "Bad gateway: route match not found", "ERR_ROUTE_NOT_FOUND", http.StatusBadGateway)
 		h.metricsTracker.IncError()
 		return
+	}
+
+	// Multi-tenant API Key Check
+	if matchedRoute.RequireAPIKey {
+		apiKeyVal := r.Header.Get("X-API-Key")
+		if apiKeyVal == "" {
+			WriteJSONError(w, r, "Unauthorized: Missing API Key", "ERR_MISSING_API_KEY", http.StatusUnauthorized)
+			return
+		}
+
+		h.apiKeysMu.RLock()
+		keyInfo, keyExists := h.apiKeys[apiKeyVal]
+		h.apiKeysMu.RUnlock()
+
+		if !keyExists {
+			WriteJSONError(w, r, "Unauthorized: Invalid API Key", "ERR_INVALID_API_KEY", http.StatusUnauthorized)
+			return
+		}
+
+		// Check if route is in AllowedRoutes
+		if len(keyInfo.AllowedRoutes) > 0 {
+			allowed := false
+			for _, routePattern := range keyInfo.AllowedRoutes {
+				if strings.HasPrefix(r.URL.Path, routePattern) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				WriteJSONError(w, r, "Forbidden: API Key not allowed on this path", "ERR_FORBIDDEN_ROUTE", http.StatusForbidden)
+				return
+			}
+		}
+
+		// Check if tenant is allowed on this route
+		if len(matchedRoute.AllowedTenants) > 0 {
+			tenantAllowed := false
+			for _, t := range matchedRoute.AllowedTenants {
+				if t == keyInfo.Tenant {
+					tenantAllowed = true
+					break
+				}
+			}
+			if !tenantAllowed {
+				WriteJSONError(w, r, "Forbidden: Tenant access denied", "ERR_TENANT_ACCESS_DENIED", http.StatusForbidden)
+				return
+			}
+		}
+
+		// Apply key-specific rate limiting
+		if keyInfo.RateLimitRPM > 0 {
+			if h.isRateLimited("apikey:"+apiKeyVal, matchedRoute.Prefix, keyInfo.RateLimitRPM) {
+				WriteJSONError(w, r, "Too Many Requests: API Key rate limit exceeded", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
+				return
+			}
+		}
+
+		// Inject tenant into request context
+		r = r.WithContext(context.WithValue(r.Context(), "tenant", keyInfo.Tenant))
 	}
 
 	// IP Allowlisting & Blocklisting Check
@@ -850,6 +925,20 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Declarative Request JSON Transformation
+	if len(matchedRoute.RequestTransform) > 0 {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err == nil {
+			r.Body.Close()
+			if transformedBody, err := transformJSON(bodyBytes, matchedRoute.RequestTransform); err == nil {
+				r.Body = io.NopCloser(bytes.NewReader(transformedBody))
+				r.ContentLength = int64(len(transformedBody))
+			} else {
+				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			}
+		}
+	}
+
 	// gRPC-to-REST Transpiling (Direction B - incoming request unpacking)
 	if matchedRoute.TranspileType == "grpc_to_rest" {
 		bodyBytes, _ := io.ReadAll(r.Body)
@@ -934,6 +1023,13 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			otel.EndSpan(wasmSpan, wasmErr, map[string]interface{}{})
 			if wasmErr != nil {
 				return fmt.Errorf("response middleware execution failed: %w", wasmErr)
+			}
+		}
+
+		// Declarative Response JSON Transformation
+		if len(matchedRoute.ResponseTransform) > 0 {
+			if transformedBody, err := transformJSON(bodyBytes, matchedRoute.ResponseTransform); err == nil {
+				bodyBytes = transformedBody
 			}
 		}
 
@@ -1188,6 +1284,7 @@ func base64UrlDecode(s string) ([]byte, error) {
 }
 
 func (h *GatewayHandler) serveOpenAPIDocs(w http.ResponseWriter, r *http.Request) {
+	_ = r
 	h.routesMu.RLock()
 	routes := h.routes
 	h.routesMu.RUnlock()
@@ -1260,15 +1357,16 @@ func (h *GatewayHandler) serveOpenAPIDocs(w http.ResponseWriter, r *http.Request
 					parts := strings.Split(fieldType, ",")
 					for _, part := range parts {
 						p := strings.TrimSpace(part)
-						if p == "required" {
+						switch p {
+						case "required":
 							req = true
-						} else if p == "int" || p == "integer" {
+						case "int", "integer":
 							pType = "integer"
-						} else if p == "float" || p == "number" {
+						case "float", "number":
 							pType = "number"
-						} else if p == "bool" || p == "boolean" {
+						case "bool", "boolean":
 							pType = "boolean"
-						} else if p == "string" {
+						case "string":
 							pType = "string"
 						}
 					}
@@ -1350,6 +1448,48 @@ func checkIPAccess(clientIP string, allowlist, blocklist []string) bool {
 	}
 
 	return true
+}
+
+func transformJSON(body []byte, mapping map[string]string) ([]byte, error) {
+	if len(body) == 0 || len(mapping) == 0 {
+		return body, nil
+	}
+
+	var data interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	transformed := transformValue(data, mapping)
+
+	out, err := json.Marshal(transformed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	return out, nil
+}
+
+func transformValue(val interface{}, mapping map[string]string) interface{} {
+	switch v := val.(type) {
+	case map[string]interface{}:
+		res := make(map[string]interface{})
+		for key, value := range v {
+			newKey := key
+			if mapped, ok := mapping[key]; ok {
+				newKey = mapped
+			}
+			res[newKey] = transformValue(value, mapping)
+		}
+		return res
+	case []interface{}:
+		res := make([]interface{}, len(v))
+		for i, value := range v {
+			res[i] = transformValue(value, mapping)
+		}
+		return res
+	default:
+		return val
+	}
 }
 
 const docsHTML = `<!DOCTYPE html>

@@ -14,13 +14,21 @@ import (
 	"time"
 )
 
+type APIKey struct {
+	Key           string   `json:"key"`
+	Tenant        string   `json:"tenant"`
+	RateLimitRPM  int      `json:"rate_limit_rpm"`
+	AllowedRoutes []string `json:"allowed_routes"`
+}
+
 type GatewayConfig struct {
-	Addr      string  `json:"addr"`
-	AuthToken string  `json:"auth_token"`
-	TlsCert   string  `json:"tls_cert"`
-	TlsKey    string  `json:"tls_key"`
-	Routes    []Route `json:"routes"`
-	Signature string  `json:"signature,omitempty"`
+	Addr      string   `json:"addr"`
+	AuthToken string   `json:"auth_token"`
+	TlsCert   string   `json:"tls_cert"`
+	TlsKey    string   `json:"tls_key"`
+	Routes    []Route  `json:"routes"`
+	APIKeys   []APIKey `json:"api_keys,omitempty"`
+	Signature string   `json:"signature,omitempty"`
 }
 
 type ConfigProvider interface {

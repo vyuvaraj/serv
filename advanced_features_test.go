@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -346,5 +347,130 @@ func TestGoPluginSDK(t *testing.T) {
 
 	if string(body2) != "shortcircuited" {
 		t.Fatalf("expected 'shortcircuited', got %q", string(body2))
+	}
+}
+
+func TestAPIKeyManagement(t *testing.T) {
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("success"))
+	}))
+	defer backendServer.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:         "/secure",
+			Target:         backendServer.URL,
+			RequireAPIKey:  true,
+			AllowedTenants: []string{"tenant-a"},
+		},
+	}
+
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+	defer handler.Close()
+
+	// Configure API Keys
+	apiKeys := []proxy.APIKey{
+		{
+			Key:           "key-a",
+			Tenant:        "tenant-a",
+			RateLimitRPM:  1000,
+			AllowedRoutes: []string{"/secure/ok"},
+		},
+		{
+			Key:           "key-b",
+			Tenant:        "tenant-b", // not allowed tenant on route
+			RateLimitRPM:  1000,
+			AllowedRoutes: []string{"/secure"},
+		},
+	}
+	handler.SetAPIKeys(apiKeys)
+
+	// 1. Missing API Key -> 401 Unauthorized
+	req1 := httptest.NewRequest("GET", "/secure/ok", nil)
+	w1 := httptest.NewRecorder()
+	handler.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for missing key, got %d", w1.Code)
+	}
+
+	// 2. Invalid API Key -> 401 Unauthorized
+	req2 := httptest.NewRequest("GET", "/secure/ok", nil)
+	req2.Header.Set("X-API-Key", "invalid-key")
+	w2 := httptest.NewRecorder()
+	handler.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for invalid key, got %d", w2.Code)
+	}
+
+	// 3. Valid API Key (key-a), Correct Tenant, Allowed Path -> 200 OK
+	req3 := httptest.NewRequest("GET", "/secure/ok", nil)
+	req3.Header.Set("X-API-Key", "key-a")
+	w3 := httptest.NewRecorder()
+	handler.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid key, got %d", w3.Code)
+	}
+
+	// 4. Valid API Key (key-a), Path Not Allowed -> 403 Forbidden
+	req4 := httptest.NewRequest("GET", "/secure/blocked-path", nil)
+	req4.Header.Set("X-API-Key", "key-a")
+	w4 := httptest.NewRecorder()
+	handler.ServeHTTP(w4, req4)
+	if w4.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for disallowed path, got %d", w4.Code)
+	}
+
+	// 5. Valid API Key (key-b), Tenant Not Allowed -> 403 Forbidden
+	req5 := httptest.NewRequest("GET", "/secure/ok", nil)
+	req5.Header.Set("X-API-Key", "key-b")
+	w5 := httptest.NewRecorder()
+	handler.ServeHTTP(w5, req5)
+	if w5.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for disallowed tenant, got %d", w5.Code)
+	}
+}
+
+func TestJSONTransformations(t *testing.T) {
+	// Backend echoes transformed request body back
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer backendServer.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix: "/transform",
+			Target: backendServer.URL,
+			RequestTransform: map[string]string{
+				"client_name": "backend_name",
+				"version":     "apiVersion",
+			},
+			ResponseTransform: map[string]string{
+				"backend_name": "final_name",
+				"apiVersion":   "version",
+			},
+		},
+	}
+
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+	defer handler.Close()
+
+	reqBody := `{"client_name":"ServClient","version":"v1.2","unaffected":"keep-me"}`
+	req := httptest.NewRequest("POST", "/transform/data", bytes.NewReader([]byte(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	body, _ := io.ReadAll(resp.Body)
+
+	expected := `{"final_name":"ServClient","unaffected":"keep-me","version":"v1.2"}`
+	if strings.TrimSpace(string(body)) != expected {
+		t.Errorf("expected transformed JSON %s, got %s", expected, string(body))
 	}
 }

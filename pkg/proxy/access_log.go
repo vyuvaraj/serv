@@ -28,6 +28,7 @@ type LogEntry struct {
 	TraceID      string `json:"trace_id,omitempty"`
 	Target       string `json:"target"`
 	Error        string `json:"error,omitempty"`
+	Tenant       string `json:"tenant,omitempty"`
 }
 
 // AccessLogger writes structured JSONL access logs to a file.
@@ -143,6 +144,7 @@ func (rw *StatusRecordingResponseWriter) Flush() {
 
 // BuildLogEntry creates a LogEntry from the current request context and recorded response.
 func BuildLogEntry(r *http.Request, rec *StatusRecordingResponseWriter, route, target, traceID string, start time.Time, errMsg string) LogEntry {
+	tenant, _ := r.Context().Value("tenant").(string)
 	return LogEntry{
 		Timestamp:    start.UTC().Format(time.RFC3339),
 		Method:       r.Method,
@@ -157,6 +159,7 @@ func BuildLogEntry(r *http.Request, rec *StatusRecordingResponseWriter, route, t
 		TraceID:      traceID,
 		Target:       target,
 		Error:        errMsg,
+		Tenant:       tenant,
 	}
 }
 

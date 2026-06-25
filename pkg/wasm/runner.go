@@ -60,7 +60,10 @@ func (m *MiddlewareManager) Register(ctx context.Context, name string, wasmBytes
 	}
 
 	if old, exists := m.cache[name]; exists {
-		_ = old.Close(ctx)
+		go func(c wazero.CompiledModule) {
+			time.Sleep(5 * time.Second)
+			_ = c.Close(context.Background())
+		}(old)
 	}
 
 	m.cache[name] = compiled
