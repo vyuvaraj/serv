@@ -104,7 +104,7 @@ Transition ServStore into a high-capacity, metadata-optimized cluster integrated
 - **Ecosystem Integration (Serv-verse)**:
   - [x] **`/console/schema` API endpoint**: Expose table/index and bucket metadata for the ServConsole DB Inspector and Schema ORM Viewer to query.
   - [x] **Unified Management Console (ServConsole)**: Establish a single glassmorphic dashboard visualizing cluster metrics, OTel traces, rate limits, and replication state. *(ServConsole Phase 2/3 in progress.)*
-  - [ ] **serv-lang Native Tooling**: Optimize client libraries and add compiler-level support for native S3 pipeline configuration.
+  - [x] **serv-lang Native Tooling**: Optimize client libraries and add compiler-level support for native S3 pipeline configuration.
 
 ---
 
