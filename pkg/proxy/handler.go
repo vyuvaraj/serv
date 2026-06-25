@@ -33,6 +33,27 @@ type WeightedTarget struct {
 	Weight int    `json:"weight"`
 }
 
+type LLMTarget struct {
+	URL   string `json:"url"`
+	Model string `json:"model"`
+}
+
+type LLMRoutingConfig struct {
+	Primary          LLMTarget `json:"primary"`
+	Fallback         LLMTarget `json:"fallback"`
+	ConfidenceHeader string    `json:"confidence_header"` // Header to inspect for confidence or quality score
+	MinConfidence    float64   `json:"min_confidence"`     // Trigger fallback if confidence is below this
+}
+
+type WASMTarget struct {
+	MiddlewareName string `json:"middleware_name"`
+	Weight         int    `json:"weight"`
+}
+
+type WASMSplitConfig struct {
+	Targets []WASMTarget `json:"targets"`
+}
+
 type Route struct {
 	Prefix             string            `json:"prefix"`
 	Target             string            `json:"target"`
@@ -65,6 +86,9 @@ type Route struct {
 	RequestTransform   map[string]string `json:"request_transform,omitempty"`   // Declarative request JSON transformations
 	ResponseTransform  map[string]string `json:"response_transform,omitempty"`  // Declarative response JSON transformations
 	GraphQLFederation  map[string]string `json:"graphql_federation,omitempty"`  // GraphQL Query-to-backend routing mappings
+	MCPEnabled         bool              `json:"mcp_enabled,omitempty"`         // Enable MCP tool call parsing and tracking
+	LLMRouting         *LLMRoutingConfig `json:"llm_routing,omitempty"`         // LLM primary and fallback cost-routing configuration
+	WASMSplit          *WASMSplitConfig  `json:"wasm_split,omitempty"`          // A/B test split for WASM middlewares
 }
 
 type MetricsTracker struct {
@@ -353,6 +377,72 @@ func (h *GatewayHandler) UpdateRoutes(newRoutes []Route) {
 	}
 }
 
+func (h *GatewayHandler) RegisterRoute(route Route) {
+	h.routesMu.Lock()
+	defer h.routesMu.Unlock()
+
+	found := false
+	for i, r := range h.routes {
+		if r.Prefix == route.Prefix {
+			h.routes[i] = route
+			found = true
+			break
+		}
+	}
+	if !found {
+		h.routes = append(h.routes, route)
+	}
+
+	h.balancerMu.Lock()
+	defer h.balancerMu.Unlock()
+
+	h.transportsMu.Lock()
+	defer h.transportsMu.Unlock()
+
+	h.limitersMu.Lock()
+	defer h.limitersMu.Unlock()
+
+	if route.SemanticCache {
+		if _, exists := h.semanticCaches[route.Prefix]; !exists {
+			h.semanticCaches[route.Prefix] = NewSemanticCache(0.85)
+		}
+	}
+	if route.CacheTTLSeconds > 0 {
+		if _, exists := h.responseCaches[route.Prefix]; !exists {
+			h.responseCaches[route.Prefix] = NewResponseCache(time.Duration(route.CacheTTLSeconds) * time.Second)
+		}
+	}
+	if route.AccessLog {
+		if _, exists := h.accessLoggers[route.Prefix]; !exists {
+			logPath := route.AccessLogPath
+			if logPath == "" {
+				logPath = "./logs/access.jsonl"
+			}
+			logger, err := NewAccessLogger(logPath)
+			if err != nil {
+				log.Printf("Gateway: failed to create access logger for %s: %v", route.Prefix, err)
+			} else {
+				h.accessLoggers[route.Prefix] = logger
+			}
+		}
+	}
+	if route.ClientCertPath != "" || route.RootCAPath != "" {
+		if _, exists := h.transports[route.Prefix]; !exists {
+			tr, err := createMTLSTransport(route.ClientCertPath, route.ClientKeyPath, route.RootCAPath)
+			if err != nil {
+				log.Printf("Gateway: failed to create mTLS transport for %s: %v", route.Prefix, err)
+			} else {
+				h.transports[route.Prefix] = tr
+			}
+		}
+	}
+	if route.MaxConcurrentRequests > 0 {
+		if _, exists := h.limiters[route.Prefix]; !exists {
+			h.limiters[route.Prefix] = NewBackpressureLimiter(route.MaxConcurrentRequests, route.MaxQueueSize, route.QueueTimeoutMs)
+		}
+	}
+}
+
 func (h *GatewayHandler) GetRoutes() []Route {
 	h.routesMu.RLock()
 	defer h.routesMu.RUnlock()
@@ -587,6 +677,50 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(context.WithValue(r.Context(), "tenant", keyInfo.Tenant))
 	}
 
+	// MCP (Model Context Protocol) handler
+	if matchedRoute.MCPEnabled && r.Method == http.MethodPost {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err == nil {
+			r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			var jsonRpc struct {
+				Jsonrpc string `json:"jsonrpc"`
+				Method  string `json:"method"`
+				Id      interface{} `json:"id"`
+				Params  struct {
+					Name string `json:"name"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(bodyBytes, &jsonRpc) == nil && jsonRpc.Method == "tools/call" {
+				toolName := jsonRpc.Params.Name
+				agentID := r.Header.Get("X-Agent-ID")
+				if agentID == "" {
+					agentID = "default-agent"
+				}
+
+				log.Printf("MCP Gateway: Routing tool call '%s' for agent '%s'", toolName, agentID)
+
+				if h.isRateLimited("mcp-agent:"+agentID, matchedRoute.Prefix, 5) {
+					errResp := map[string]interface{}{
+						"jsonrpc": "2.0",
+						"id":      jsonRpc.Id,
+						"error": map[string]interface{}{
+							"code":    -32001,
+							"message": "Agent rate limit exceeded for tool calls",
+						},
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusTooManyRequests)
+					json.NewEncoder(w).Encode(errResp)
+					return
+				}
+				w.Header().Set("X-MCP-Tool", toolName)
+				w.Header().Set("X-MCP-Agent", agentID)
+			}
+		}
+	}
+
 	// IP Allowlisting & Blocklisting Check
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if clientIP == "" {
@@ -753,9 +887,10 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// WASM Request Middleware execution if registered
-	if matchedRoute.Middleware != "" {
+	wasmMiddleware := h.selectWASMMiddleware(&matchedRoute)
+	if wasmMiddleware != "" {
 		var inputBytes []byte
-		isPolicy := strings.Contains(strings.ToLower(matchedRoute.Middleware), "policy")
+		isPolicy := strings.Contains(strings.ToLower(wasmMiddleware), "policy")
 
 		if isPolicy {
 			// Construct metadata JSON
@@ -777,8 +912,8 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			inputBytes = bodyBytes
 		}
 
-		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Middleware %s", matchedRoute.Middleware), traceparent)
-		outputBytes, err := h.wasm.Run(r.Context(), matchedRoute.Middleware, inputBytes)
+		wasmSpan := otel.StartSpan(fmt.Sprintf("WASM Middleware %s", wasmMiddleware), traceparent)
+		outputBytes, err := h.wasm.Run(r.Context(), wasmMiddleware, inputBytes)
 		otel.EndSpan(wasmSpan, err, map[string]interface{}{})
 
 		if err != nil {
@@ -917,6 +1052,113 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		otel.EndSpan(span, err, map[string]interface{}{})
 		WriteJSONError(w, r, "Bad Gateway Target", "ERR_BAD_GATEWAY_TARGET", http.StatusBadGateway)
 		h.metricsTracker.IncError()
+		return
+	}
+
+	// Cost-Aware LLM Routing check
+	if matchedRoute.LLMRouting != nil {
+		h.transportsMu.RLock()
+		customTransport, hasTransport := h.transports[matchedRoute.Prefix]
+		h.transportsMu.RUnlock()
+
+		baseTransport := http.DefaultTransport
+		if hasTransport {
+			baseTransport = customTransport
+		}
+
+		llmConf := matchedRoute.LLMRouting
+		bodyBytes, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+
+		// 1. Primary request to cheaper model
+		primaryURL, _ := url.Parse(llmConf.Primary.URL)
+		req, _ := http.NewRequestWithContext(r.Context(), r.Method, primaryURL.String(), bytes.NewReader(bodyBytes))
+		for k, vs := range r.Header {
+			for _, v := range vs {
+				req.Header.Add(k, v)
+			}
+		}
+		if llmConf.Primary.Model != "" {
+			req.Header.Set("X-LLM-Model", llmConf.Primary.Model)
+		}
+
+		client := &http.Client{Transport: baseTransport}
+		resp, err := client.Do(req)
+
+		var respBody []byte
+		shouldFallback := false
+		if err != nil {
+			shouldFallback = true
+		} else {
+			respBody, _ = io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if llmConf.ConfidenceHeader != "" {
+				confStr := resp.Header.Get(llmConf.ConfidenceHeader)
+				var confVal float64
+				fmt.Sscanf(confStr, "%f", &confVal)
+				if confVal < llmConf.MinConfidence {
+					shouldFallback = true
+				}
+			}
+			if resp.StatusCode >= 500 {
+				shouldFallback = true
+			}
+		}
+
+		if shouldFallback {
+			// 2. Fallback request to premium model
+			fallbackURL, _ := url.Parse(llmConf.Fallback.URL)
+			reqFb, _ := http.NewRequestWithContext(r.Context(), r.Method, fallbackURL.String(), bytes.NewReader(bodyBytes))
+			for k, vs := range r.Header {
+				for _, v := range vs {
+					reqFb.Header.Add(k, v)
+				}
+			}
+			if llmConf.Fallback.Model != "" {
+				reqFb.Header.Set("X-LLM-Model", llmConf.Fallback.Model)
+			}
+			respFb, errFb := client.Do(reqFb)
+			if errFb != nil {
+				WriteJSONError(w, r, "Bad Gateway: Fallback failed", "ERR_BAD_GATEWAY_LLM", http.StatusBadGateway)
+				h.metricsTracker.IncError()
+				return
+			}
+			defer respFb.Body.Close()
+			respBody, _ = io.ReadAll(respFb.Body)
+
+			for k, vs := range respFb.Header {
+				w.Header().Del(k)
+				for _, v := range vs {
+					w.Header().Add(k, v)
+				}
+			}
+			w.Header().Set("X-LLM-Fallback", "true")
+			w.WriteHeader(respFb.StatusCode)
+			w.Write(respBody)
+
+			otel.EndSpan(span, nil, map[string]interface{}{
+				"http.route":         matchedRoute.Prefix,
+				"llm.fallback":       true,
+				"llm.fallback_model": llmConf.Fallback.Model,
+			})
+			return
+		}
+
+		for k, vs := range resp.Header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.Header().Set("X-LLM-Fallback", "false")
+		w.WriteHeader(resp.StatusCode)
+		w.Write(respBody)
+
+		otel.EndSpan(span, nil, map[string]interface{}{
+			"http.route":        matchedRoute.Prefix,
+			"llm.fallback":      false,
+			"llm.primary_model": llmConf.Primary.Model,
+		})
 		return
 	}
 
@@ -1156,6 +1398,33 @@ func (h *GatewayHandler) selectTarget(route *Route) string {
 	h.rrIndices[route.Prefix] = (idx + 1) % len(route.Targets)
 	return selected
 }
+
+func (h *GatewayHandler) selectWASMMiddleware(route *Route) string {
+	if route.WASMSplit == nil || len(route.WASMSplit.Targets) == 0 {
+		return route.Middleware
+	}
+	totalWeight := 0
+	for _, target := range route.WASMSplit.Targets {
+		totalWeight += target.Weight
+	}
+	if totalWeight <= 0 {
+		return route.Middleware
+	}
+	val := rand.Intn(totalWeight)
+	accum := 0
+	for _, target := range route.WASMSplit.Targets {
+		accum += target.Weight
+		if val < accum {
+			return target.MiddlewareName
+		}
+	}
+	return route.WASMSplit.Targets[0].MiddlewareName
+}
+
+func (h *GatewayHandler) SelectWASMMiddlewareForTest(route *Route) string {
+	return h.selectWASMMiddleware(route)
+}
+
 
 func (h *GatewayHandler) handleGraphQLFederation(w http.ResponseWriter, r *http.Request, route *Route) {
 	bodyBytes, err := io.ReadAll(r.Body)

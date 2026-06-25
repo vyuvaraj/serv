@@ -260,6 +260,44 @@ func main() {
 		json.NewEncoder(w).Encode(handler.GetRoutes())
 	}
 
+	handleRouteRegister := func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthToken != "" {
+			authHeader := r.Header.Get("Authorization")
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			authenticated := false
+			if token == cfg.AuthToken {
+				authenticated = true
+			} else if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+				if _, ok := proxy.ValidateJWT(token, []byte(jwtSec)); ok {
+					authenticated = true
+				}
+			}
+
+			if !authenticated {
+				proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		if r.Method != http.MethodPost {
+			proxy.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var newRoute proxy.Route
+		if err := json.NewDecoder(r.Body).Decode(&newRoute); err != nil {
+			proxy.WriteJSONError(w, r, "Invalid route payload", "ERR_INVALID_ROUTE_PAYLOAD", http.StatusBadRequest)
+			return
+		}
+
+		handler.RegisterRoute(newRoute)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"Route registered successfully via compiler connector"}`))
+	}
+
+	mux.HandleFunc("/api/v1/routes/register", withAdminRateLimit(60, handleRouteRegister))
 	mux.HandleFunc("/api/admin/middleware/", withAdminRateLimit(60, handleMiddleware))
 	mux.HandleFunc("/api/v1/admin/middleware/", withAdminRateLimit(60, handleMiddleware))
 	mux.HandleFunc("/api/routes", withAdminRateLimit(60, handleRoutes))

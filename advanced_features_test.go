@@ -595,3 +595,217 @@ func TestOIDCConfigSync(t *testing.T) {
 		t.Errorf("Expected 1 route, got %d", len(loaded.Routes))
 	}
 }
+
+func TestMCPGateway(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"jsonrpc":"2.0","result":"mock-tool-result","id":1}`))
+	}))
+	defer backend.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:     "/mcp",
+			Target:     backend.URL,
+			MCPEnabled: true,
+		},
+	}
+
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+	defer handler.Close()
+
+	// 1. Test normal JSON-RPC tools/call request
+	reqBody := `{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_weather"},"id":1}`
+	req := httptest.NewRequest("POST", "/mcp/tool", strings.NewReader(reqBody))
+	req.Header.Set("X-Agent-ID", "agent-x")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	// 2. Test Agent Rate Limiting
+	// The limit in handler is 5 calls per minute. Let's make 6 requests.
+	rateLimitedOccurred := false
+	for i := 0; i < 10; i++ {
+		reqLoop := httptest.NewRequest("POST", "/mcp/tool", strings.NewReader(reqBody))
+		reqLoop.Header.Set("X-Agent-ID", "agent-x")
+		wLoop := httptest.NewRecorder()
+		handler.ServeHTTP(wLoop, reqLoop)
+		if wLoop.Code == http.StatusTooManyRequests {
+			rateLimitedOccurred = true
+			break
+		}
+	}
+	if !rateLimitedOccurred {
+		t.Errorf("Expected agent tool calls to be rate limited (429 status code)")
+	}
+}
+
+func TestCompilerRouteRegistration(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("dynamic-backend-response"))
+	}))
+	defer backend.Close()
+
+	// Initialize gateway with 0 routes
+	handler := proxy.NewGatewayHandler([]proxy.Route{}, nil, "my-admin-token")
+	defer handler.Close()
+
+	// Register new route via the main.go handler path simulator
+	newRoute := proxy.Route{
+		Prefix: "/dynamic-announced",
+		Target: backend.URL,
+	}
+
+	routePayload, _ := json.Marshal(newRoute)
+	regReq := httptest.NewRequest("POST", "/api/v1/routes/register", bytes.NewReader(routePayload))
+	regReq.Header.Set("Authorization", "Bearer my-admin-token")
+	
+	// Create a multiplexer simulating main.go registry setup
+	mux := http.NewServeMux()
+	handleRouteRegister := func(w http.ResponseWriter, r *http.Request) {
+		var rt proxy.Route
+		json.NewDecoder(r.Body).Decode(&rt)
+		handler.RegisterRoute(rt)
+		w.WriteHeader(http.StatusOK)
+	}
+	mux.HandleFunc("/api/v1/routes/register", handleRouteRegister)
+	mux.Handle("/", handler)
+
+	regRec := httptest.NewRecorder()
+	mux.ServeHTTP(regRec, regReq)
+
+	if regRec.Code != http.StatusOK {
+		t.Fatalf("Failed to register route dynamically: status %d", regRec.Code)
+	}
+
+	// Make request to the newly registered route path
+	testReq := httptest.NewRequest("GET", "/dynamic-announced/test", nil)
+	testReq.Header.Set("Authorization", "Bearer my-admin-token")
+	testRec := httptest.NewRecorder()
+	mux.ServeHTTP(testRec, testReq)
+
+	if testRec.Code != http.StatusOK {
+		t.Errorf("Expected 200 for newly announced route, got %d", testRec.Code)
+	}
+	if testRec.Body.String() != "dynamic-backend-response" {
+		t.Errorf("Expected dynamic response, got %s", testRec.Body.String())
+	}
+}
+
+func TestCostAwareLLMRouting(t *testing.T) {
+	// Cheaper LLM backend (Primary)
+	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Expect model header
+		if r.Header.Get("X-LLM-Model") != "gpt-4o-mini" {
+			t.Errorf("Expected primary model, got %s", r.Header.Get("X-LLM-Model"))
+		}
+		// Return confidence score
+		w.Header().Set("X-Confidence-Score", r.Header.Get("X-Requested-Confidence"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("primary-cheap-response"))
+	}))
+	defer primaryServer.Close()
+
+	// Premium LLM backend (Fallback)
+	fallbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-LLM-Model") != "gpt-4" {
+			t.Errorf("Expected fallback model, got %s", r.Header.Get("X-LLM-Model"))
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("fallback-premium-response"))
+	}))
+	defer fallbackServer.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix: "/llm",
+			LLMRouting: &proxy.LLMRoutingConfig{
+				Primary: proxy.LLMTarget{
+					URL:   primaryServer.URL,
+					Model: "gpt-4o-mini",
+				},
+				Fallback: proxy.LLMTarget{
+					URL:   fallbackServer.URL,
+					Model: "gpt-4",
+				},
+				ConfidenceHeader: "X-Confidence-Score",
+				MinConfidence:    0.80,
+			},
+		},
+	}
+
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+	defer handler.Close()
+
+	// 1. High confidence request -> Should stay on primary model
+	reqHigh := httptest.NewRequest("POST", "/llm/chat", strings.NewReader("hello"))
+	reqHigh.Header.Set("X-Requested-Confidence", "0.95")
+	recHigh := httptest.NewRecorder()
+
+	handler.ServeHTTP(recHigh, reqHigh)
+	if recHigh.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", recHigh.Code)
+	}
+	if recHigh.Body.String() != "primary-cheap-response" {
+		t.Errorf("Expected primary response, got %s", recHigh.Body.String())
+	}
+	if recHigh.Header().Get("X-LLM-Fallback") != "false" {
+		t.Errorf("Expected fallback header to be false, got %s", recHigh.Header().Get("X-LLM-Fallback"))
+	}
+
+	// 2. Low confidence request -> Should trigger fallback to premium model
+	reqLow := httptest.NewRequest("POST", "/llm/chat", strings.NewReader("hello"))
+	reqLow.Header.Set("X-Requested-Confidence", "0.60")
+	recLow := httptest.NewRecorder()
+
+	handler.ServeHTTP(recLow, reqLow)
+	if recLow.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", recLow.Code)
+	}
+	if recLow.Body.String() != "fallback-premium-response" {
+		t.Errorf("Expected fallback response, got %s", recLow.Body.String())
+	}
+	if recLow.Header().Get("X-LLM-Fallback") != "true" {
+		t.Errorf("Expected fallback header to be true, got %s", recLow.Header().Get("X-LLM-Fallback"))
+	}
+}
+
+func TestWasmABTesting(t *testing.T) {
+	// Verify selectWASMMiddleware traffic split logic directly
+	route := proxy.Route{
+		Prefix: "/ab-test",
+		WASMSplit: &proxy.WASMSplitConfig{
+			Targets: []proxy.WASMTarget{
+				{MiddlewareName: "wasm-v1", Weight: 70},
+				{MiddlewareName: "wasm-v2", Weight: 30},
+			},
+		},
+	}
+
+	handler := proxy.NewGatewayHandler([]proxy.Route{route}, nil, "")
+	defer handler.Close()
+
+	// Call selectWASMMiddleware 1000 times and verify stats
+	v1Count := 0
+	v2Count := 0
+	for i := 0; i < 1000; i++ {
+		selected := handler.SelectWASMMiddlewareForTest(&route)
+		if selected == "wasm-v1" {
+			v1Count++
+		} else if selected == "wasm-v2" {
+			v2Count++
+		}
+	}
+
+	// Assert statistical bounds (70% and 30%)
+	if v1Count < 600 || v1Count > 800 {
+		t.Errorf("Expected v1 count to be around 700, got %d", v1Count)
+	}
+	if v2Count < 200 || v2Count > 400 {
+		t.Errorf("Expected v2 count to be around 300, got %d", v2Count)
+	}
+}
+
