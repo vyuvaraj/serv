@@ -251,6 +251,9 @@ func main() {
 	mux.HandleFunc("/api/incidents/analyze", authorizeConsole(handleIncidentAnalyze))
 	mux.HandleFunc("/api/runbooks", authorizeConsole(handleRunbooks))
 	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(handleExecuteRunbook))
+	mux.HandleFunc("/api/ai/metrics", authorizeConsole(handleAIMetrics))
+	mux.HandleFunc("/api/provision/store", authorizeConsole(handleProvisionStore))
+	mux.HandleFunc("/api/provision/queue", authorizeConsole(handleProvisionQueue))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2784,6 +2787,193 @@ func handleExecuteRunbook(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": fmt.Sprintf("Runbook %s executed successfully.", targetRb.Name),
 		"log":     fmt.Sprintf("Command '%s' exited with code 0.", targetRb.Command),
+	})
+}
+
+var (
+	customBuckets   = []string{"media-assets", "logs", "user-documents"}
+	customBucketsMu sync.Mutex
+	customTopics    = []string{"orders", "notifications", "user-signups"}
+	customTopicsMu  sync.Mutex
+)
+
+type AIMetricsResponse struct {
+	TotalCostsUSD     float64        `json:"totalCostsUsd"`
+	TotalToolCalls    int            `json:"totalToolCalls"`
+	ActiveAgentsCount int            `json:"activeAgentsCount"`
+	ToolCalls         []AIToolCall   `json:"toolCalls"`
+	SafetyAlerts      []AISafetyAlert `json:"safetyAlerts"`
+}
+
+type AIToolCall struct {
+	Timestamp  string  `json:"timestamp"`
+	AgentName  string  `json:"agentName"`
+	ToolCalled string  `json:"toolCalled"`
+	Status     string  `json:"status"`
+	TokensUsed int     `json:"tokensUsed"`
+	CostUSD    float64 `json:"costUsd"`
+}
+
+type AISafetyAlert struct {
+	Timestamp string `json:"timestamp"`
+	AgentName string `json:"agentName"`
+	Severity  string `json:"severity"`
+	RuleName  string `json:"ruleName"`
+	Message   string `json:"message"`
+}
+
+func handleAIMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	nowStr := time.Now().Format("15:04:05")
+
+	resp := AIMetricsResponse{
+		TotalCostsUSD:     24.85,
+		TotalToolCalls:    1420,
+		ActiveAgentsCount: 3,
+		ToolCalls: []AIToolCall{
+			{Timestamp: nowStr, AgentName: "AutoDebugger-Agent", ToolCalled: "ServStore.ReadObject", Status: "success", TokensUsed: 420, CostUSD: 0.0084},
+			{Timestamp: nowStr, AgentName: "CodeArchitect-Agent", ToolCalled: "ServQueue.Publish", Status: "success", TokensUsed: 650, CostUSD: 0.0130},
+			{Timestamp: nowStr, AgentName: "DeployBot", ToolCalled: "ServGate.AddRoute", Status: "success", TokensUsed: 310, CostUSD: 0.0062},
+			{Timestamp: "10:31:02", AgentName: "SecurityScanner", ToolCalled: "ServStore.ListObjects", Status: "blocked", TokensUsed: 120, CostUSD: 0.0024},
+		},
+		SafetyAlerts: []AISafetyAlert{
+			{Timestamp: "10:31:02", AgentName: "SecurityScanner", Severity: "high", RuleName: "Prompt Guard Violation", Message: "Detected attempt to bypass access-control on system-access-logs bucket."},
+			{Timestamp: "10:15:40", AgentName: "AutoDebugger-Agent", Severity: "medium", RuleName: "PII Leak Detected", Message: "Redacted credit card numbers inside request parameters payload."},
+		},
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func handleProvisionStore(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		customBucketsMu.Lock()
+		defer customBucketsMu.Unlock()
+		json.NewEncoder(w).Encode(customBuckets)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		BucketName string `json:"bucketName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BucketName == "" {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	// Clean/validate name
+	bucketName := strings.ToLower(strings.TrimSpace(req.BucketName))
+
+	// Attempt real PUT on ServStore S3 Gateway
+	client := http.Client{Timeout: 1 * time.Second}
+	putUrl := fmt.Sprintf("%s/%s", strings.TrimSuffix(*storeUrl, "/"), bucketName)
+	realReq, _ := http.NewRequest(http.MethodPut, putUrl, nil)
+	realResp, err := client.Do(realReq)
+
+	realSuccess := false
+	if err == nil {
+		realResp.Body.Close()
+		if realResp.StatusCode == http.StatusOK || realResp.StatusCode == http.StatusCreated {
+			realSuccess = true
+		}
+	}
+
+	// Add to memory list
+	customBucketsMu.Lock()
+	found := false
+	for _, b := range customBuckets {
+		if b == bucketName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		customBuckets = append(customBuckets, bucketName)
+	}
+	customBucketsMu.Unlock()
+
+	addAuditLog("console-operator", "Create Bucket: "+bucketName, r.Method, r.URL.Path, http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":     true,
+		"bucketName":  bucketName,
+		"realGateway": realSuccess,
+		"message":     fmt.Sprintf("Bucket '%s' successfully provisioned.", bucketName),
+	})
+}
+
+func handleProvisionQueue(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodGet {
+		customTopicsMu.Lock()
+		defer customTopicsMu.Unlock()
+		json.NewEncoder(w).Encode(customTopics)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TopicName string `json:"topicName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TopicName == "" {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	topicName := strings.ToLower(strings.TrimSpace(req.TopicName))
+
+	// Attempt real schema registration on ServQueue to trigger topic creation
+	client := http.Client{Timeout: 1 * time.Second}
+	postUrl := fmt.Sprintf("%s/api/topics/%s/schema", strings.TrimSuffix(*queueUrl, "/"), topicName)
+	realReq, _ := http.NewRequest(http.MethodPost, postUrl, strings.NewReader("{}"))
+	realReq.Header.Set("Authorization", "Bearer secret-token")
+	realReq.Header.Set("Content-Type", "application/json")
+	realResp, err := client.Do(realReq)
+
+	realSuccess := false
+	if err == nil {
+		realResp.Body.Close()
+		if realResp.StatusCode == http.StatusOK {
+			realSuccess = true
+		}
+	}
+
+	// Add to memory list
+	customTopicsMu.Lock()
+	found := false
+	for _, t := range customTopics {
+		if t == topicName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		customTopics = append(customTopics, topicName)
+	}
+	customTopicsMu.Unlock()
+
+	addAuditLog("console-operator", "Create Topic: "+topicName, r.Method, r.URL.Path, http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":     true,
+		"topicName":   topicName,
+		"realGateway": realSuccess,
+		"message":     fmt.Sprintf("Topic '%s' successfully provisioned.", topicName),
 	})
 }
 

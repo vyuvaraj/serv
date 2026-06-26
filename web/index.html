@@ -224,6 +224,10 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
           Deployments
         </button>
+        <button class="tab-btn" data-tab="ai-observatory">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l2.79-2.79C10.09 18.72 11.03 19 12 19c4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/></svg>
+          AI Observatory
+        </button>
       </nav>
 
       <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -404,6 +408,7 @@
 
             <div class="card-header mt-4">
               <h2>Topic Administration</h2>
+              <button class="btn btn-primary" id="btn-create-topic">+ Create Topic</button>
             </div>
             <div class="table-container">
               <table id="topic-admin-table">
@@ -1101,7 +1106,72 @@
                   <span style="color:var(--text-secondary);">Committed At:</span>
                   <strong id="active-env-time">1 hour ago</strong>
                 </div>
-              </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: AI OBSERVATORY -->
+      <div class="tab-pane" id="tab-ai-observatory">
+        <div class="pane-grid">
+          <!-- Left: Summary Metrics -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>LLM Budget Consumption</h3>
+            </div>
+            <div class="card-value" id="ai-total-costs">$24.85</div>
+            <div class="card-desc">Calculated tokens cost forecast</div>
+          </div>
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>MCP Tool Executions</h3>
+            </div>
+            <div class="card-value" id="ai-total-tool-calls">1,420</div>
+            <div class="card-desc">Successful tool calls across services</div>
+          </div>
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>Active Autonomous Agents</h3>
+            </div>
+            <div class="card-value" id="ai-active-agents">3</div>
+            <div class="card-desc">Active MCP clients recorded</div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Left: Tool Calls Table -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>MCP Tool Call Logs</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-ai">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Audit trail of autonomous AI agents invoking MCP tools via ServGate router.</p>
+            <div class="table-container">
+              <table id="ai-tool-calls-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Agent Name</th>
+                    <th>Tool Invoked</th>
+                    <th>Status</th>
+                    <th>Tokens</th>
+                    <th>Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Safety Guard alerts -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Prompt Guard & PII Safety Alerts</h2>
+            </div>
+            <p class="section-desc">Active security alerts triggered by prompt injection filters or sensitive data leak blockers.</p>
+            <div id="ai-safety-alerts-container" style="display:flex; flex-direction:column; gap:0.75rem;">
+              <!-- Filled dynamically -->
             </div>
           </div>
         </div>
@@ -1198,6 +1268,41 @@
       <h2>SSO Authentication Required</h2>
       <p class="section-desc" style="text-align: center; margin-bottom: 2rem;">Please authenticate via your configured OpenID Connect (OIDC) identity provider to access the administration dashboard.</p>
       <button id="btn-sso-login" class="btn btn-primary w-100" style="padding: 1rem; font-weight: 600;">🔑 Login with SSO</button>
+    </div>
+  </div>
+
+  <!-- Create Bucket Modal -->
+  <div class="modal-backdrop" id="create-bucket-modal" style="display: none;">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Provision New Storage Bucket</h3>
+        <button class="modal-close" id="btn-close-bucket-modal">&times;</button>
+      </div>
+      <form id="create-bucket-form">
+        <div class="form-group">
+          <label for="new-bucket-name">Bucket Name</label>
+          <input type="text" id="new-bucket-name" placeholder="e.g. static-assets" required>
+          <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Must be lowercase, alphanumeric, and start with a letter.</span>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">⚡ Provision Bucket</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Topic Modal -->
+  <div class="modal-backdrop" id="create-topic-modal" style="display: none;">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Provision New Messaging Topic</h3>
+        <button class="modal-close" id="btn-close-topic-modal">&times;</button>
+      </div>
+      <form id="create-topic-form">
+        <div class="form-group">
+          <label for="new-topic-name">Topic Name</label>
+          <input type="text" id="new-topic-name" placeholder="e.g. email-delivery" required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">⚡ Provision Topic</button>
+      </form>
     </div>
   </div>
 </body>

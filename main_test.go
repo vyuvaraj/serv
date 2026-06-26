@@ -590,3 +590,99 @@ func TestHandleRunbookExecution(t *testing.T) {
 	}
 }
 
+func TestHandleAIMetrics(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/ai/metrics", nil)
+	w := httptest.NewRecorder()
+	handleAIMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var metrics AIMetricsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&metrics); err != nil {
+		t.Fatalf("failed to decode AI metrics response: %v", err)
+	}
+
+	if metrics.TotalToolCalls <= 0 {
+		t.Errorf("expected positive tool calls, got %d", metrics.TotalToolCalls)
+	}
+	if len(metrics.ToolCalls) == 0 {
+		t.Errorf("expected tool calls array to be populated")
+	}
+	if len(metrics.SafetyAlerts) == 0 {
+		t.Errorf("expected safety alerts array to be populated")
+	}
+}
+
+func TestHandleProvisioning(t *testing.T) {
+	// 1. Storage provisioning
+	storePayload := `{"bucketName":"test-new-bucket"}`
+	req1 := httptest.NewRequest("POST", "/api/provision/store", strings.NewReader(storePayload))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	handleProvisionStore(w1, req1)
+
+	if w1.Result().StatusCode != http.StatusOK {
+		t.Fatalf("provision store failed with status %d", w1.Result().StatusCode)
+	}
+
+	var storeResult map[string]any
+	json.NewDecoder(w1.Result().Body).Decode(&storeResult)
+	if storeResult["bucketName"].(string) != "test-new-bucket" {
+		t.Errorf("expected bucket 'test-new-bucket', got %s", storeResult["bucketName"])
+	}
+
+	// GET storage provisioning
+	reqGetStore := httptest.NewRequest("GET", "/api/provision/store", nil)
+	wGetStore := httptest.NewRecorder()
+	handleProvisionStore(wGetStore, reqGetStore)
+	var buckets []string
+	json.NewDecoder(wGetStore.Result().Body).Decode(&buckets)
+	foundBucket := false
+	for _, b := range buckets {
+		if b == "test-new-bucket" {
+			foundBucket = true
+			break
+		}
+	}
+	if !foundBucket {
+		t.Errorf("newly provisioned bucket not found in list")
+	}
+
+	// 2. Queue provisioning
+	queuePayload := `{"topicName":"test-new-topic"}`
+	req2 := httptest.NewRequest("POST", "/api/provision/queue", strings.NewReader(queuePayload))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handleProvisionQueue(w2, req2)
+
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("provision queue failed with status %d", w2.Result().StatusCode)
+	}
+
+	var queueResult map[string]any
+	json.NewDecoder(w2.Result().Body).Decode(&queueResult)
+	if queueResult["topicName"].(string) != "test-new-topic" {
+		t.Errorf("expected topic 'test-new-topic', got %s", queueResult["topicName"])
+	}
+
+	// GET queue provisioning
+	reqGetQueue := httptest.NewRequest("GET", "/api/provision/queue", nil)
+	wGetQueue := httptest.NewRecorder()
+	handleProvisionQueue(wGetQueue, reqGetQueue)
+	var topics []string
+	json.NewDecoder(wGetQueue.Result().Body).Decode(&topics)
+	foundTopic := false
+	for _, t := range topics {
+		if t == "test-new-topic" {
+			foundTopic = true
+			break
+		}
+	}
+	if !foundTopic {
+		t.Errorf("newly provisioned topic not found in list")
+	}
+}
+

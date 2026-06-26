@@ -95,6 +95,8 @@ function initTabs() {
         fetchSLOTargets();
       } else if (tabId === 'deployments') {
         fetchDeployments();
+      } else if (tabId === 'ai-observatory') {
+        fetchAIMetrics();
       }
     });
   });
@@ -303,13 +305,32 @@ function refreshQueuesList() {
 async function fetchTopicAdmin() {
   const tbody = document.querySelector('#topic-admin-table tbody');
   try {
-    const res = await fetch('/api/proxy/queue/api/topics');
-    if (!res.ok) {
-      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Unable to fetch topic list</td></tr>`;
-      return;
+    // Fetch custom provisioned topics
+    const provRes = await fetch('/api/provision/queue');
+    let customTopicsList = [];
+    if (provRes.ok) {
+      customTopicsList = await provRes.json();
     }
-    const data = await res.json();
-    const topics = data.topics || [];
+
+    const res = await fetch('/api/proxy/queue/api/topics');
+    let topics = [];
+    if (res.ok) {
+      const data = await res.json();
+      topics = data.topics || [];
+    }
+
+    // Merge topics
+    const existingNames = new Set(topics.map(t => t.name));
+    customTopicsList.forEach(tName => {
+      if (!existingNames.has(tName)) {
+        topics.push({
+          name: tName,
+          subscribers: 0,
+          partitions: 1,
+          has_transform: false
+        });
+      }
+    });
 
     if (topics.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No topics registered yet</td></tr>`;
@@ -403,23 +424,25 @@ async function fetchBuckets() {
   try {
     // S3 client bucket listing fallback
     const res = await fetch('/api/proxy/store/console/metrics');
-    if (!res.ok) return;
-    const metrics = await res.json();
+    let bucketsCount = 0;
+    if (res.ok) {
+      const metrics = await res.json();
+      bucketsCount = metrics.BucketsCount || 0;
+    }
     
     // In our simplified mock or local store, let's render buckets
     const containers = document.getElementById('buckets-container');
     containers.innerHTML = '';
     
-    const bucketsCount = metrics.BucketsCount || 0;
-    if (bucketsCount === 0) {
-      containers.innerHTML = `<span class="text-muted p-2">No buckets</span>`;
-      return;
+    // Fetch custom provisioned buckets
+    const provRes = await fetch('/api/provision/store');
+    let dummyBuckets = ['media-assets', 'logs', 'user-documents'];
+    if (provRes.ok) {
+      dummyBuckets = await provRes.json();
+    } else {
+      dummyBuckets = dummyBuckets.slice(0, bucketsCount);
+      if (dummyBuckets.length === 0) dummyBuckets.push('default-bucket');
     }
-    
-    // If there are buckets, fetch/render names
-    // For local convenience, let's load dummy buckets based on count or mock
-    const dummyBuckets = ['media-assets', 'logs', 'user-documents'].slice(0, bucketsCount);
-    if (dummyBuckets.length === 0) dummyBuckets.push('default-bucket');
     
     dummyBuckets.forEach(b => {
       const div = document.createElement('div');
@@ -786,6 +809,80 @@ function initForms() {
   // Queue WAL & Delayed triggers
   document.getElementById('btn-refresh-wal').addEventListener('click', fetchWAL);
   document.getElementById('btn-refresh-delayed').addEventListener('click', fetchDelayedMessages);
+
+  // Create Bucket Modal
+  const bucketModal = document.getElementById('create-bucket-modal');
+  const openBucketBtn = document.getElementById('btn-create-bucket');
+  const closeBucketBtn = document.getElementById('btn-close-bucket-modal');
+  if (openBucketBtn && bucketModal) {
+    openBucketBtn.addEventListener('click', () => { bucketModal.style.display = 'flex'; });
+    closeBucketBtn.addEventListener('click', () => { bucketModal.style.display = 'none'; });
+    bucketModal.addEventListener('click', (e) => { if (e.target === bucketModal) bucketModal.style.display = 'none'; });
+  }
+
+  const bucketForm = document.getElementById('create-bucket-form');
+  if (bucketForm) {
+    bucketForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const bucketName = document.getElementById('new-bucket-name').value;
+      try {
+        const res = await fetch('/api/provision/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bucketName })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          logEvent('store', `Provisioned Bucket: ${data.bucketName} (Gateway Link: ${data.realGateway})`);
+          bucketModal.style.display = 'none';
+          bucketForm.reset();
+          fetchBuckets();
+        } else {
+          alert('Failed to provision bucket.');
+        }
+      } catch (err) {
+        logEvent('error', `Bucket provisioning error: ${err.message}`);
+      }
+    });
+  }
+
+  // Create Topic Modal
+  const topicModal = document.getElementById('create-topic-modal');
+  const openTopicBtn = document.getElementById('btn-create-topic');
+  const closeTopicBtn = document.getElementById('btn-close-topic-modal');
+  if (openTopicBtn && topicModal) {
+    openTopicBtn.addEventListener('click', () => { topicModal.style.display = 'flex'; });
+    closeTopicBtn.addEventListener('click', () => { topicModal.style.display = 'none'; });
+    topicModal.addEventListener('click', (e) => { if (e.target === topicModal) topicModal.style.display = 'none'; });
+  }
+
+  const topicForm = document.getElementById('create-topic-form');
+  if (topicForm) {
+    topicForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const topicName = document.getElementById('new-topic-name').value;
+      try {
+        const res = await fetch('/api/provision/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicName })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          logEvent('queue', `Provisioned Topic: ${data.topicName} (Gateway Link: ${data.realGateway})`);
+          topicModal.style.display = 'none';
+          topicForm.reset();
+          if (typeof fetchTopicAdmin === 'function') {
+            fetchTopicAdmin();
+          }
+        } else {
+          alert('Failed to provision topic.');
+        }
+      } catch (err) {
+        logEvent('error', `Topic provisioning error: ${err.message}`);
+      }
+    });
+  }
 }
 
 async function fetchWAL() {
@@ -3202,4 +3299,69 @@ async function executeRunbook(runbookId, alertId, btn) {
     alert(`Failed to execute runbook: ${err.message}`);
   }
 }
+
+async function fetchAIMetrics() {
+  try {
+    const res = await fetch('/api/ai/metrics');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    document.getElementById('ai-total-costs').textContent = `$${data.totalCostsUsd.toFixed(2)}`;
+    document.getElementById('ai-total-tool-calls').textContent = data.totalToolCalls.toLocaleString();
+    document.getElementById('ai-active-agents').textContent = data.activeAgentsCount;
+
+    // Render tool calls table
+    const tbody = document.querySelector('#ai-tool-calls-table tbody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      data.toolCalls.forEach(call => {
+        const tr = document.createElement('tr');
+        const badgeClass = call.status === 'success' ? 'badge online' : 'badge offline';
+        tr.innerHTML = `
+          <td style="font-family:var(--font-mono); font-size:0.8rem;">${call.timestamp}</td>
+          <td><strong>${call.agentName}</strong></td>
+          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--secondary);">${call.toolCalled}</td>
+          <td><span class="${badgeClass}">${call.status.toUpperCase()}</span></td>
+          <td>${call.tokensUsed}</td>
+          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--primary);">$${call.costUsd.toFixed(4)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Render safety alerts
+    const alertsContainer = document.getElementById('ai-safety-alerts-container');
+    if (alertsContainer) {
+      alertsContainer.innerHTML = '';
+      if (data.safetyAlerts.length === 0) {
+        alertsContainer.innerHTML = `<div class="text-center text-muted" style="padding:1rem;">No safety violations detected.</div>`;
+        return;
+      }
+      data.safetyAlerts.forEach(alert => {
+        const item = document.createElement('div');
+        item.className = 'alert-item critical';
+        item.style.padding = '0.75rem';
+        item.style.background = 'rgba(239, 68, 68, 0.05)';
+        item.style.border = '1px solid rgba(239, 68, 68, 0.15)';
+        item.style.borderLeft = '3px solid var(--danger)';
+        item.style.borderRadius = '6px';
+        
+        item.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:0.8rem; margin-bottom:0.25rem;">
+            <span style="color:var(--danger);">${alert.ruleName.toUpperCase()}</span>
+            <span style="font-size:0.7rem; color:var(--text-muted);">${alert.timestamp}</span>
+          </div>
+          <div style="font-size:0.85rem; color:#fff; font-weight:500;">Agent: ${alert.agentName}</div>
+          <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.2rem;">${alert.message}</div>
+        `;
+        alertsContainer.appendChild(item);
+      });
+    }
+
+  } catch (err) {
+    console.error('Failed to fetch AI metrics:', err);
+  }
+}
+
+document.getElementById('btn-refresh-ai')?.addEventListener('click', fetchAIMetrics);
 
