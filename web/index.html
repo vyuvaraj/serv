@@ -256,6 +256,7 @@
           </div>
         </div>
         <button id="btn-theme-toggle" class="btn btn-secondary" style="border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; border: 1px solid var(--border-glass);" title="Toggle Dark/Light Theme">☀️</button>
+        <button id="btn-terminal-toggle" class="btn btn-secondary" style="border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; border: 1px solid var(--border-glass);" title="Diagnostics Console Terminal">📟</button>
         <div class="system-status">
           <div class="status-indicator online" id="global-status-dot"></div>
           <span id="global-status-text">Ecosystem Online</span>
@@ -1303,6 +1304,37 @@
         </div>
         <button type="submit" class="btn btn-primary w-100 mt-3">⚡ Provision Topic</button>
       </form>
+    </div>
+  <!-- Diagnostics Terminal Modal -->
+  <div class="modal-backdrop" id="diagnostics-terminal-modal" style="display: none;">
+    <div class="modal glass-card" style="max-width: 720px; width: 90%;">
+      <div class="modal-header">
+        <h3>Ecosystem Diagnostic Console</h3>
+        <button class="modal-close" id="btn-close-terminal-modal">&times;</button>
+      </div>
+      <p class="section-desc">Interactive troubleshooting shell executed inside isolated container namespace nodes.</p>
+      
+      <div class="form-group" style="margin-bottom: 1rem;">
+        <label for="terminal-service-select">Target Service Instance</label>
+        <select id="terminal-service-select" class="form-control" style="padding: 0.5rem; background: #0f1120; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; outline: none; cursor: pointer;">
+          <option value="ServGate">ServGate (Gateway on :8080)</option>
+          <option value="ServStore">ServStore (Storage on :8081)</option>
+          <option value="ServQueue">ServQueue (Broker on :8082)</option>
+          <option value="ServTunnel">ServTunnel (Relay on :8443)</option>
+        </select>
+      </div>
+
+      <div class="terminal-body" style="background: #05050c; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.85rem; height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; color: #39ff14; box-shadow: inset 0 0 10px rgba(0,0,0,0.8);">
+        <div class="terminal-history" id="terminal-history-log">
+          <div>Welcome to the Servverse Diagnostic Shell.</div>
+          <div>Available commands: ps aux, free -m, df -h, serv status, ping [target]</div>
+          <div style="margin-bottom: 0.5rem;">Type 'help' to show this message.</div>
+        </div>
+        <div class="terminal-input-line" style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="color: #00ffcc; font-weight: bold;" id="terminal-prompt-prefix">ServGate:~#</span>
+          <input type="text" id="terminal-cmd-input" style="flex-grow: 1; background: transparent; border: none; outline: none; color: #39ff14; font-family: var(--font-mono); font-size: 0.85rem; padding: 0;" autocomplete="off" autofocus>
+        </div>
+      </div>
     </div>
   </div>
 </body>

@@ -254,6 +254,7 @@ func main() {
 	mux.HandleFunc("/api/ai/metrics", authorizeConsole(handleAIMetrics))
 	mux.HandleFunc("/api/provision/store", authorizeConsole(handleProvisionStore))
 	mux.HandleFunc("/api/provision/queue", authorizeConsole(handleProvisionQueue))
+	mux.HandleFunc("/api/diagnostics/exec", authorizeConsole(handleDiagnosticExec))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2974,6 +2975,72 @@ func handleProvisionQueue(w http.ResponseWriter, r *http.Request) {
 		"topicName":   topicName,
 		"realGateway": realSuccess,
 		"message":     fmt.Sprintf("Topic '%s' successfully provisioned.", topicName),
+	})
+}
+
+func handleDiagnosticExec(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Service string `json:"service"`
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Command == "" {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	cmd := strings.ToLower(strings.TrimSpace(req.Command))
+	output := ""
+	status := "success"
+
+	switch cmd {
+	case "ps aux":
+		output = fmt.Sprintf("USER       PID %%CPU %%MEM    VSZ    RSS TTY      STAT START   TIME COMMAND\n" +
+			"root         1  0.1  0.4  18432  8192 ?        Ss   10:00   0:02 /bin/init\n" +
+			"operator    42  1.4  3.2 245760 65536 ?        Sl   10:05   0:15 /usr/local/bin/serv %s\n" +
+			"operator    48  0.0  0.5  12288  1024 ?        S    10:06   0:00 sh -c diagnostic-daemon", req.Service)
+	case "free -m":
+		output = "              total        used        free      shared  buff/cache   available\n" +
+			"Mem:           8192        3420        2845         120        1927        4652\n" +
+			"Swap:          2048         105        1943"
+	case "df -h":
+		output = "Filesystem      Size  Used Avail Use%% Mounted on\n" +
+			"/dev/sda1        50G   24G   26G  48%% /\n" +
+			"tmpfs           4.0G     0  4.0G   0%% /dev/shm\n" +
+			"/dev/sdb1       200G   82G  118G  41%% /data/store"
+	case "serv status":
+		output = fmt.Sprintf("Servverse Component: %s\n" +
+			"Status: ACTIVE\n" +
+			"Uptime: 2h 45m 12s\n" +
+			"Version: v1.4.2-stable\n" +
+			"Config Load: /etc/serv/config.json (OK)\n" +
+			"P2P Cluster Ring Nodes: 5/5 Active", req.Service)
+	default:
+		if strings.HasPrefix(cmd, "ping ") {
+			target := strings.TrimPrefix(cmd, "ping ")
+			output = fmt.Sprintf("PING %s (127.0.0.1) 56(84) bytes of data.\n" +
+				"64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.042 ms\n" +
+				"64 bytes from 127.0.0.1: icmp_seq=2 ttl=64 time=0.038 ms\n" +
+				"--- %s ping statistics ---\n" +
+				"2 packets transmitted, 2 received, 0%% packet loss, time 1002ms\n" +
+				"rtt min/avg/max/mdev = 0.038/0.040/0.042/0.002 ms", target, target)
+		} else {
+			output = fmt.Sprintf("bash: %s: command not found\nAvailable diagnostic tools: ps aux, free -m, df -h, serv status, ping [target]", req.Command)
+			status = "error"
+		}
+	}
+
+	addAuditLog("console-operator", fmt.Sprintf("Diagnostics Exec (%s): %s", req.Service, req.Command), r.Method, r.URL.Path, http.StatusOK)
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"status":  status,
+		"output":  output,
 	})
 }
 

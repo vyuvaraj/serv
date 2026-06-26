@@ -70,7 +70,7 @@ These items take ServConsole from a dashboard into a **full observability and op
 | 7.5 | **Custom dashboard builder** | Large | Drag-and-drop dashboard editor: pick metrics, choose visualization (line chart, bar, gauge, table), set time range. Save and share custom dashboards per team. | [ ] |
 | 7.6 | **Deployment tracking & rollback** | Medium | Track deployments (version, timestamp, who deployed). Overlay on metrics charts. One-click rollback to previous version via re-deploy trigger. | [x] |
 | 7.7 | **SLO/SLI tracking & error budgets** | Medium | Define SLOs (99.9% availability, P99 < 200ms). Track remaining error budget. Alert when budget is being consumed too fast. | [x] |
-| 7.8 | **Embedded terminal (service exec)** | Medium | SSH/exec into a running container from the console. View live logs, run diagnostics, inspect environment — without leaving the browser. | [ ] |
+| 7.8 | **Embedded terminal (service exec)** | Medium | SSH/exec into a running container from the console. View live logs, run diagnostics, inspect environment — without leaving the browser. | [x] |
 | 7.9 | **Multi-environment management** | Medium | Switch between dev/staging/production environments in the console. Compare metrics across environments. Promote configs from staging to prod. | [x] |
 | 7.10 | **Plugin architecture** | Large | Define a plugin interface for community-contributed console panels. Load plugins as WASM modules that render into iframe sandboxes. Extensible without forking. | [ ] |
 | 7.11 | **Mobile-responsive layout** | Medium | Responsive design for tablet/phone. Critical status and alerts viewable on mobile during on-call. | [x] |

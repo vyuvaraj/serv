@@ -686,3 +686,25 @@ func TestHandleProvisioning(t *testing.T) {
 	}
 }
 
+func TestHandleDiagnosticExec(t *testing.T) {
+	payload := `{"service":"ServGate","command":"ps aux"}`
+	req := httptest.NewRequest("POST", "/api/diagnostics/exec", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleDiagnosticExec(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var res map[string]any
+	json.NewDecoder(resp.Body).Decode(&res)
+	if !res["success"].(bool) {
+		t.Errorf("expected success to be true")
+	}
+	if !strings.Contains(res["output"].(string), "serv ServGate") {
+		t.Errorf("expected output to contain command result, got: %s", res["output"])
+	}
+}
+

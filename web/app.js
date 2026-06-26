@@ -883,6 +883,41 @@ function initForms() {
       }
     });
   }
+
+  // Diagnostics Terminal Modal
+  const termModal = document.getElementById('diagnostics-terminal-modal');
+  const termToggle = document.getElementById('btn-terminal-toggle');
+  const termClose = document.getElementById('btn-close-terminal-modal');
+  const termInput = document.getElementById('terminal-cmd-input');
+  const termSelect = document.getElementById('terminal-service-select');
+  const termPrompt = document.getElementById('terminal-prompt-prefix');
+
+  if (termToggle && termModal) {
+    termToggle.addEventListener('click', () => {
+      termModal.style.display = 'flex';
+      setTimeout(() => { termInput.focus(); }, 100);
+    });
+    termClose.addEventListener('click', () => { termModal.style.display = 'none'; });
+    termModal.addEventListener('click', (e) => { if (e.target === termModal) termModal.style.display = 'none'; });
+  }
+
+  if (termSelect && termPrompt) {
+    termSelect.addEventListener('change', () => {
+      termPrompt.textContent = `${termSelect.value}:~#`;
+      termInput.focus();
+    });
+  }
+
+  if (termInput) {
+    termInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        const cmd = termInput.value.trim();
+        if (!cmd) return;
+        termInput.value = '';
+        await executeTerminalCommand(cmd);
+      }
+    });
+  }
 }
 
 async function fetchWAL() {
@@ -3364,4 +3399,77 @@ async function fetchAIMetrics() {
 }
 
 document.getElementById('btn-refresh-ai')?.addEventListener('click', fetchAIMetrics);
+
+async function executeTerminalCommand(cmd) {
+  const service = document.getElementById('terminal-service-select').value;
+  const historyLog = document.getElementById('terminal-history-log');
+  const termBody = document.querySelector('.terminal-body');
+  if (!historyLog) return;
+
+  // Render input echo
+  const promptText = `${service}:~# ${cmd}`;
+  const echoDiv = document.createElement('div');
+  echoDiv.style.color = '#00ffcc';
+  echoDiv.style.fontWeight = 'bold';
+  echoDiv.textContent = promptText;
+  historyLog.appendChild(echoDiv);
+
+  if (cmd === 'clear') {
+    historyLog.innerHTML = '<div>Console cleared.</div>';
+    return;
+  }
+
+  if (cmd === 'help') {
+    const helpDiv = document.createElement('div');
+    helpDiv.innerHTML = `Welcome to the Servverse Diagnostic Shell.<br>Available commands: ps aux, free -m, df -h, serv status, ping [target]`;
+    historyLog.appendChild(helpDiv);
+    termBody.scrollTop = termBody.scrollHeight;
+    return;
+  }
+
+  // Spinner logic
+  const spinnerDiv = document.createElement('div');
+  spinnerDiv.style.color = 'var(--text-muted)';
+  spinnerDiv.textContent = 'Executing diagnostics on cluster namespace...';
+  historyLog.appendChild(spinnerDiv);
+  termBody.scrollTop = termBody.scrollHeight;
+
+  try {
+    const res = await fetch('/api/diagnostics/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service, command: cmd })
+    });
+    if (historyLog.contains(spinnerDiv)) {
+      historyLog.removeChild(spinnerDiv);
+    }
+
+    if (res.ok) {
+      const data = await res.json();
+      const outputDiv = document.createElement('pre');
+      outputDiv.style.color = data.status === 'success' ? '#39ff14' : 'var(--danger)';
+      outputDiv.style.whiteSpace = 'pre-wrap';
+      outputDiv.style.margin = '0.25rem 0 0.5rem 0';
+      outputDiv.style.fontFamily = 'var(--font-mono)';
+      outputDiv.textContent = data.output;
+      historyLog.appendChild(outputDiv);
+    } else {
+      const errText = await res.text();
+      const errDiv = document.createElement('div');
+      errDiv.style.color = 'var(--danger)';
+      errDiv.textContent = `Error: ${errText}`;
+      historyLog.appendChild(errDiv);
+    }
+  } catch (err) {
+    if (historyLog.contains(spinnerDiv)) {
+      historyLog.removeChild(spinnerDiv);
+    }
+    const errDiv = document.createElement('div');
+    errDiv.style.color = 'var(--danger)';
+    errDiv.textContent = `Network Error: ${err.message}`;
+    historyLog.appendChild(errDiv);
+  }
+
+  termBody.scrollTop = termBody.scrollHeight;
+}
 
