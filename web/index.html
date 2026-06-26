@@ -220,9 +220,20 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
           SLO Tracker
         </button>
+        <button class="tab-btn" data-tab="deployments">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+          Deployments
+        </button>
       </nav>
 
       <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <!-- Environment Selector -->
+        <div class="env-selector-wrapper" style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-glass); padding: 0.25rem 0.5rem; border-radius: 8px;">
+          <span style="font-size:0.75rem; color:var(--text-secondary); font-weight:500;">Env:</span>
+          <select id="env-selector" style="background:transparent; border:none; color:#fff; font-size:0.8rem; font-weight:600; outline:none; cursor:pointer;">
+            <!-- Loaded dynamically -->
+          </select>
+        </div>
         <!-- Alerts Dropdown Trigger -->
         <div class="alerts-dropdown-wrapper" style="position: relative;">
           <button id="btn-alerts-toggle" class="btn btn-secondary" style="border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; border: 1px solid var(--border-glass); position: relative;" title="System Alerts">
@@ -1031,6 +1042,64 @@
                 <span style="font-weight:600; font-size:0.9rem;">SLO Action Items & Advice</span>
                 <div id="slo-recs-container" style="display:flex; flex-direction:column; gap:0.50rem;">
                   <!-- Dynamically filled -->
+                </div>
+              </div>
+            </div>
+          </div>
+      <!-- TAB: DEPLOYMENTS -->
+      <div class="tab-pane" id="tab-deployments">
+        <div class="pane-grid">
+          <!-- Left: Deployment Log & Status -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Deployment Version History & Control</h2>
+            </div>
+            <p class="section-desc">Track and audit compiler-generated deployments. Rollback runtime services to previous versions in one click.</p>
+            
+            <div style="overflow-x: auto; margin-top: 1rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="deployments-history-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Version</th>
+                    <th style="padding: 0.75rem;">Timestamp</th>
+                    <th style="padding: 0.75rem;">Author</th>
+                    <th style="padding: 0.75rem;">Changelog</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="deployments-list" style="font-size: 0.85rem;">
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Active Version Details -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Active Environment Info</h2>
+            </div>
+            <p class="section-desc">Details of the current active system binary and compilation properties.</p>
+            
+            <div id="active-version-info" style="display:flex; flex-direction:column; gap:1.25rem; margin-top:1rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <div style="font-size:0.8rem; color:var(--text-secondary);">Active Release Version</div>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--primary);" id="active-deployment-version">v1.4.2</h3>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.85rem;">
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-secondary);">Active Environment:</span>
+                  <strong id="active-env-display">Development</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-secondary);">Deployer Account:</span>
+                  <strong id="active-env-author">alice</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-secondary);">Committed At:</span>
+                  <strong id="active-env-time">1 hour ago</strong>
                 </div>
               </div>
             </div>

@@ -1262,3 +1262,24 @@ tr:hover td {
   }
 }
 
+/* Env Selector Styling override */
+.env-selector-wrapper {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#env-selector option {
+  background: #0f1120;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+#deployments-history-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+#deployments-history-table tr:hover td {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+

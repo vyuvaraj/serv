@@ -68,10 +68,10 @@ These items take ServConsole from a dashboard into a **full observability and op
 | 7.3 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to automatically build a service dependency graph. Show which services call which, latency between them, and error rates on edges. | [ ] |
 | 7.4 | **Log aggregation & search** | Large | Collect structured JSON logs from all services (via stdout scraping or push API). Full-text search, filter by service/level/trace_id, and live tail. | [x] |
 | 7.5 | **Custom dashboard builder** | Large | Drag-and-drop dashboard editor: pick metrics, choose visualization (line chart, bar, gauge, table), set time range. Save and share custom dashboards per team. | [ ] |
-| 7.6 | **Deployment tracking & rollback** | Medium | Track deployments (version, timestamp, who deployed). Overlay on metrics charts. One-click rollback to previous version via re-deploy trigger. | [ ] |
+| 7.6 | **Deployment tracking & rollback** | Medium | Track deployments (version, timestamp, who deployed). Overlay on metrics charts. One-click rollback to previous version via re-deploy trigger. | [x] |
 | 7.7 | **SLO/SLI tracking & error budgets** | Medium | Define SLOs (99.9% availability, P99 < 200ms). Track remaining error budget. Alert when budget is being consumed too fast. | [x] |
 | 7.8 | **Embedded terminal (service exec)** | Medium | SSH/exec into a running container from the console. View live logs, run diagnostics, inspect environment — without leaving the browser. | [ ] |
-| 7.9 | **Multi-environment management** | Medium | Switch between dev/staging/production environments in the console. Compare metrics across environments. Promote configs from staging to prod. | [ ] |
+| 7.9 | **Multi-environment management** | Medium | Switch between dev/staging/production environments in the console. Compare metrics across environments. Promote configs from staging to prod. | [x] |
 | 7.10 | **Plugin architecture** | Large | Define a plugin interface for community-contributed console panels. Load plugins as WASM modules that render into iframe sandboxes. Extensible without forking. | [ ] |
 | 7.11 | **Mobile-responsive layout** | Medium | Responsive design for tablet/phone. Critical status and alerts viewable on mobile during on-call. | [x] |
 | 7.12 | **Runbook automation** | Large | Attach runbook steps to alerts. When an alert fires, suggest or auto-execute remediation steps (restart service, scale up, clear cache). Guided incident response. | [ ] |

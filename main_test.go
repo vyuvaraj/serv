@@ -459,3 +459,66 @@ func TestHandleSLO(t *testing.T) {
 	}
 }
 
+func TestHandleDeployments(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/deployments", nil)
+	w := httptest.NewRecorder()
+	handleDeployments(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var deps []Deployment
+	json.NewDecoder(resp.Body).Decode(&deps)
+	if len(deps) < 1 {
+		t.Fatal("expected at least 1 deployment record")
+	}
+
+	// Rollback test
+	rollbackPayload := `{"targetId":"dep-2"}`
+	rReq := httptest.NewRequest("POST", "/api/deployments/rollback", strings.NewReader(rollbackPayload))
+	rReq.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handleRollback(w2, rReq)
+
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("rollback failed with status %d", w2.Result().StatusCode)
+	}
+}
+
+func TestHandleEnvironments(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/environments", nil)
+	w := httptest.NewRecorder()
+	handleEnvironments(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var envData map[string]any
+	json.NewDecoder(resp.Body).Decode(&envData)
+	if envData["active"].(string) != "development" {
+		t.Errorf("expected active env 'development', got %s", envData["active"])
+	}
+
+	// Switch environment test
+	selectPayload := `{"environmentId":"staging"}`
+	sReq := httptest.NewRequest("POST", "/api/environments/select", strings.NewReader(selectPayload))
+	sReq.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handleSelectEnvironment(w2, sReq)
+
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("select environment failed with status %d", w2.Result().StatusCode)
+	}
+
+	envMu.Lock()
+	currEnv := activeEnvironment
+	envMu.Unlock()
+	if currEnv != "staging" {
+		t.Errorf("expected environment to be 'staging', got %s", currEnv)
+	}
+}
+

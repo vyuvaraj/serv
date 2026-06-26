@@ -244,6 +244,10 @@ func main() {
 	mux.HandleFunc("/api/logs/ingest", handleIngestLog)
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
 	mux.HandleFunc("/api/slo", authorizeConsole(handleSLO))
+	mux.HandleFunc("/api/deployments", authorizeConsole(handleDeployments))
+	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(handleRollback))
+	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
+	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2174,6 +2178,26 @@ func handleCostEstimation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	baselineCost := 20.0
+	budgetLimit := 50.0
+
+	envMu.Lock()
+	switch activeEnvironment {
+	case "staging":
+		baselineCost = 80.0
+		budgetLimit = 150.0
+		gateRequests = gateRequests * 4
+		queueMessages = queueMessages * 4
+		storageBytes = storageBytes * 3
+	case "production":
+		baselineCost = 250.0
+		budgetLimit = 500.0
+		gateRequests = gateRequests * 25
+		queueMessages = queueMessages * 20
+		storageBytes = storageBytes * 15
+	}
+	envMu.Unlock()
+
 	storageGB := float64(storageBytes) / (1024 * 1024 * 1024)
 	storageCost := storageGB * 0.023
 	if storageCost < 0.01 && storageBytes > 0 {
@@ -2182,10 +2206,8 @@ func handleCostEstimation(w http.ResponseWriter, r *http.Request) {
 
 	gateCost := (float64(gateRequests) / 10000.0) * 0.005
 	queueCost := (float64(queueMessages) / 1000000.0) * 0.05
-	baselineCost := 20.0
 
 	totalCost := storageCost + gateCost + queueCost + baselineCost
-	budgetLimit := 50.0
 
 	recommendations := []string{}
 	if gateRequests > 500000 {
@@ -2372,5 +2394,167 @@ func handleSLO(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(slos)
 }
+
+type Deployment struct {
+	ID        string    `json:"id"`
+	Version   string    `json:"version"`
+	Timestamp time.Time `json:"timestamp"`
+	Author    string    `json:"author"`
+	Status    string    `json:"status"` // active, rolled_back, historical
+	Changelog string    `json:"changelog"`
+}
+
+var (
+	deployments = []Deployment{
+		{ID: "dep-1", Version: "v1.4.2", Timestamp: time.Now().Add(-1 * time.Hour), Author: "alice", Status: "active", Changelog: "Merge branch 'auth-fix' - Add validation to session tokens"},
+		{ID: "dep-2", Version: "v1.4.1", Timestamp: time.Now().Add(-24 * time.Hour), Author: "bob", Status: "historical", Changelog: "feat: implement cost estimator dashboard backend"},
+		{ID: "dep-3", Version: "v1.4.0", Timestamp: time.Now().Add(-3 * 24 * time.Hour), Author: "alice", Status: "historical", Changelog: "feat: add log aggregation and query filter APIs"},
+		{ID: "dep-4", Version: "v1.3.9", Timestamp: time.Now().Add(-7 * 24 * time.Hour), Author: "charlie", Status: "historical", Changelog: "fix: resolve memory leak in Otel trace span collector"},
+	}
+	deploymentsMu sync.Mutex
+)
+
+func handleDeployments(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	deploymentsMu.Lock()
+	defer deploymentsMu.Unlock()
+	json.NewEncoder(w).Encode(deployments)
+}
+
+func handleRollback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	deploymentsMu.Lock()
+	defer deploymentsMu.Unlock()
+
+	foundIndex := -1
+	for i, d := range deployments {
+		if d.ID == req.TargetID {
+			foundIndex = i
+			break
+		}
+	}
+
+	if foundIndex == -1 {
+		WriteJSONError(w, r, "Target deployment not found", "ERR_DEPLOYMENT_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+
+	// Make current active historical
+	for i, d := range deployments {
+		if d.Status == "active" {
+			deployments[i].Status = "historical"
+		}
+	}
+
+	targetDep := deployments[foundIndex]
+	newID := fmt.Sprintf("dep-%d", time.Now().UnixNano())
+	newVersion := targetDep.Version + "-rollback"
+	newDep := Deployment{
+		ID:        newID,
+		Version:   newVersion,
+		Timestamp: time.Now(),
+		Author:    "console-operator",
+		Status:    "active",
+		Changelog: fmt.Sprintf("Rollback to version %s (from %s)", targetDep.Version, targetDep.ID),
+	}
+
+	deployments = append([]Deployment{newDep}, deployments...)
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success":    true,
+		"deployment": newDep,
+	})
+}
+
+type EnvironmentInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	ThemeDot    string `json:"themeDot"`
+	Description string `json:"description"`
+}
+
+var (
+	environments = []EnvironmentInfo{
+		{ID: "development", Name: "Development", ThemeDot: "#06b6d4", Description: "Local testing and debugging playground"},
+		{ID: "staging", Name: "Staging", ThemeDot: "#f59e0b", Description: "Integration testing and candidate releases"},
+		{ID: "production", Name: "Production", ThemeDot: "#a855f7", Description: "Live user-facing ecosystem runtime"},
+	}
+	activeEnvironment = "development"
+	envMu             sync.Mutex
+)
+
+func handleEnvironments(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	envMu.Lock()
+	defer envMu.Unlock()
+	json.NewEncoder(w).Encode(map[string]any{
+		"active":       activeEnvironment,
+		"environments": environments,
+	})
+}
+
+func handleSelectEnvironment(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		EnvironmentID string `json:"environmentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	envMu.Lock()
+	defer envMu.Unlock()
+
+	valid := false
+	for _, env := range environments {
+		if env.ID == req.EnvironmentID {
+			valid = true
+			break
+		}
+	}
+
+	if !valid {
+		WriteJSONError(w, r, "Invalid environment ID", "ERR_INVALID_ENVIRONMENT", http.StatusBadRequest)
+		return
+	}
+
+	activeEnvironment = req.EnvironmentID
+	log.Printf("[environment] Switched active environment to: %s", activeEnvironment)
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"active":  activeEnvironment,
+	})
+}
+
 
 

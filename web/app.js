@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAlertsUI();
   initLogsUI();
   initMobileMenu();
+  initEnvironmentSelector();
 });
 
 function initTheme() {
@@ -92,6 +93,8 @@ function initTabs() {
         fetchCostEstimation();
       } else if (tabId === 'slo') {
         fetchSLOTargets();
+      } else if (tabId === 'deployments') {
+        fetchDeployments();
       }
     });
   });
@@ -127,6 +130,8 @@ function initPolling() {
         refreshQueuesList();
       } else if (STATE.activeTab === 'slo') {
         fetchSLOTargets();
+      } else if (STATE.activeTab === 'deployments') {
+        fetchDeployments();
       }
     } catch (err) {
       logEvent('error', `Status polling failed: ${err.message}`);
@@ -2889,4 +2894,139 @@ function initMobileMenu() {
       navTabs.classList.remove('mobile-active');
     });
   });
+}
+
+async function initEnvironmentSelector() {
+  const selector = document.getElementById('env-selector');
+  if (!selector) return;
+
+  try {
+    const res = await fetch('/api/environments');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    selector.innerHTML = '';
+    data.environments.forEach(env => {
+      const opt = document.createElement('option');
+      opt.value = env.id;
+      opt.textContent = env.name;
+      opt.selected = env.id === data.active;
+      selector.appendChild(opt);
+    });
+
+    updateEnvironmentTheme(data.active);
+
+    selector.addEventListener('change', async () => {
+      const selectedEnv = selector.value;
+      try {
+        const postRes = await fetch('/api/environments/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ environmentId: selectedEnv })
+        });
+        if (postRes.ok) {
+          logEvent('system', `Switched environment to: ${selectedEnv}`);
+          updateEnvironmentTheme(selectedEnv);
+          // Refresh cost metrics if active tab is cost
+          if (STATE.activeTab === 'cost') {
+            fetchCostEstimation();
+          } else if (STATE.activeTab === 'deployments') {
+            fetchDeployments();
+          }
+        }
+      } catch (err) {
+        console.error('Failed to change environment:', err);
+      }
+    });
+
+  } catch (err) {
+    console.error('Failed to initialize environment selector:', err);
+  }
+}
+
+function updateEnvironmentTheme(envId) {
+  const displayEl = document.getElementById('active-env-display');
+  if (displayEl) {
+    displayEl.textContent = envId.charAt(0).toUpperCase() + envId.slice(1);
+  }
+
+  // Set visual theme dot color based on active env
+  const wrapper = document.querySelector('.env-selector-wrapper');
+  if (wrapper) {
+    let dotColor = '#06b6d4'; // default dev
+    if (envId === 'staging') dotColor = '#f59e0b';
+    else if (envId === 'production') dotColor = '#a855f7';
+    wrapper.style.borderColor = dotColor + '40';
+    wrapper.style.boxShadow = `0 0 8px ${dotColor}20`;
+  }
+}
+
+async function fetchDeployments() {
+  const listContainer = document.getElementById('deployments-list');
+  const activeVerEl = document.getElementById('active-deployment-version');
+  const activeAuthorEl = document.getElementById('active-env-author');
+  const activeTimeEl = document.getElementById('active-env-time');
+  if (!listContainer) return;
+
+  try {
+    const res = await fetch('/api/deployments');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    listContainer.innerHTML = '';
+    data.forEach(dep => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.03)';
+      tr.style.transition = 'background-color 0.2s';
+      
+      let statusBadge = `<span class="badge" style="background:rgba(148, 163, 184, 0.1); color:#cbd5e1;">Historical</span>`;
+      let actionBtn = `<button class="btn btn-secondary btn-sm" onclick="triggerRollback('${dep.id}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Rollback</button>`;
+      
+      if (dep.status === 'active') {
+        statusBadge = `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">Active</span>`;
+        actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Current</span>`;
+        
+        if (activeVerEl) activeVerEl.textContent = dep.version;
+        if (activeAuthorEl) activeAuthorEl.textContent = dep.author;
+        if (activeTimeEl) activeTimeEl.textContent = new Date(dep.timestamp).toLocaleTimeString();
+      } else if (dep.status === 'rolled_back') {
+        statusBadge = `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">Rolled Back</span>`;
+      }
+
+      tr.innerHTML = `
+        <td style="padding: 0.75rem; font-weight:600; color:#fff;">${dep.version}</td>
+        <td style="padding: 0.75rem; color:var(--text-secondary);">${new Date(dep.timestamp).toLocaleTimeString()}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${dep.author}</td>
+        <td style="padding: 0.75rem; color:var(--text-secondary); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dep.changelog}</td>
+        <td style="padding: 0.75rem;">${statusBadge}</td>
+        <td style="padding: 0.75rem; text-align: right;">${actionBtn}</td>
+      `;
+      listContainer.appendChild(tr);
+    });
+
+  } catch (err) {
+    console.error('Failed to fetch deployments:', err);
+  }
+}
+
+async function triggerRollback(targetId) {
+  if (!confirm('Are you sure you want to rollback to this deployment version? This will compile and swap the active binary.')) {
+    return;
+  }
+  
+  try {
+    const res = await fetch('/api/deployments/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetId })
+    });
+    if (res.ok) {
+      logEvent('system', `Successfully triggered rollback to ${targetId}`);
+      fetchDeployments();
+    } else {
+      alert('Rollback failed. Verify authorization scopes.');
+    }
+  } catch (err) {
+    console.error('Error during rollback:', err);
+  }
 }
