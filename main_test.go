@@ -322,3 +322,92 @@ func TestHandleTraceReplay(t *testing.T) {
 	}
 }
 
+func TestHandleLogs(t *testing.T) {
+	logBufferMu.Lock()
+	logBuffer = make([]LogEntry, 0)
+	logBufferMu.Unlock()
+
+	// 1. Ingest Log
+	logPayload := `{"service":"TestSvc","level":"error","message":"Something went wrong","traceId":"test-trace-id"}`
+	ingestReq := httptest.NewRequest("POST", "/api/logs/ingest", strings.NewReader(logPayload))
+	ingestReq.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handleIngestLog(w, ingestReq)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("Ingest failed with status: %d", w.Result().StatusCode)
+	}
+
+	// 2. Query Logs (without filters)
+	getReq := httptest.NewRequest("GET", "/api/logs", nil)
+	w2 := httptest.NewRecorder()
+	handleGetLogs(w2, getReq)
+
+	var entries []LogEntry
+	json.NewDecoder(w2.Body).Decode(&entries)
+
+	if len(entries) != 1 || entries[0].Service != "TestSvc" || entries[0].Level != "error" || entries[0].Message != "Something went wrong" {
+		t.Errorf("unexpected logs returned: %+v", entries)
+	}
+
+	// 3. Query Logs with filtering
+	getFilteredReq := httptest.NewRequest("GET", "/api/logs?service=TestSvc&level=info", nil)
+	w3 := httptest.NewRecorder()
+	handleGetLogs(w3, getFilteredReq)
+
+	var filteredEntries []LogEntry
+	json.NewDecoder(w3.Body).Decode(&filteredEntries)
+
+	if len(filteredEntries) != 0 {
+		t.Errorf("expected 0 entries with level=info, got: %d", len(filteredEntries))
+	}
+}
+
+func TestHandleCostEstimation(t *testing.T) {
+	oldGate := *gateUrl
+	oldStore := *storeUrl
+	oldQueue := *queueUrl
+	defer func() {
+		*gateUrl = oldGate
+		*storeUrl = oldStore
+		*queueUrl = oldQueue
+	}()
+
+	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer mockSrv.Close()
+
+	*gateUrl = mockSrv.URL
+	*storeUrl = mockSrv.URL
+	*queueUrl = mockSrv.URL
+
+	req := httptest.NewRequest("GET", "/api/cost-estimation", nil)
+	w := httptest.NewRecorder()
+	handleCostEstimation(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var costData map[string]any
+	json.NewDecoder(resp.Body).Decode(&costData)
+
+	monthly := costData["monthly"].(map[string]any)
+	if _, ok := monthly["total"].(float64); !ok {
+		t.Errorf("expected monthly total cost float64 value")
+	}
+
+	breakdown := costData["breakdown"].([]any)
+	if len(breakdown) != 4 {
+		t.Errorf("expected 4 breakdown categories, got %d", len(breakdown))
+	}
+
+	recs := costData["recommendations"].([]any)
+	if len(recs) == 0 {
+		t.Errorf("expected recommendations to be returned")
+	}
+}
+

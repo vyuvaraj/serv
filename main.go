@@ -178,6 +178,12 @@ func main() {
 	loadAuditLogs()
 	loadMigrations()
 
+	// Seed initial logs
+	logBuffer = append(logBuffer, LogEntry{Timestamp: time.Now().Add(-10 * time.Minute), Service: "ServGate", Level: "info", Message: "Gateway listening on port :8080"})
+	logBuffer = append(logBuffer, LogEntry{Timestamp: time.Now().Add(-8 * time.Minute), Service: "ServStore", Level: "info", Message: "Consistent hash ring initialized with 3 nodes"})
+	logBuffer = append(logBuffer, LogEntry{Timestamp: time.Now().Add(-5 * time.Minute), Service: "ServQueue", Level: "info", Message: "STOMP TCP Broker listening on port :61613"})
+	logBuffer = append(logBuffer, LogEntry{Timestamp: time.Now().Add(-2 * time.Minute), Service: "ServTunnel", Level: "info", Message: "Tunnel connection established to relay pool"})
+
 	// Parse downstream URLs
 	gURL, err := url.Parse(*gateUrl)
 	if err != nil {
@@ -234,6 +240,9 @@ func main() {
 	mux.HandleFunc("/api/traces/replay", authorizeConsole(handleTraceReplay))
 	mux.HandleFunc("/api/alerts", authorizeConsole(handleAlerts))
 	mux.HandleFunc("/api/alerts/ack", authorizeConsole(handleAlertsAck))
+	mux.HandleFunc("/api/logs", authorizeConsole(handleGetLogs))
+	mux.HandleFunc("/api/logs/ingest", handleIngestLog)
+	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2040,6 +2049,181 @@ func handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		"username": username,
 		"role":     role,
 	})
+}
+
+type LogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Service   string    `json:"service"`
+	Level     string    `json:"level"`
+	Message   string    `json:"message"`
+	TraceID   string    `json:"traceId,omitempty"`
+}
+
+var (
+	logBuffer   = make([]LogEntry, 0)
+	logBufferMu sync.Mutex
+	maxLogLimit = 1000
+)
+
+func handleIngestLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var entry LogEntry
+	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now()
+	}
+	logBufferMu.Lock()
+	if len(logBuffer) >= maxLogLimit {
+		logBuffer = logBuffer[1:]
+	}
+	logBuffer = append(logBuffer, entry)
+	logBufferMu.Unlock()
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success":true}`))
+}
+
+func handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := r.URL.Query()
+	svcFilter := query.Get("service")
+	levelFilter := query.Get("level")
+	searchFilter := strings.ToLower(query.Get("search"))
+
+	logBufferMu.Lock()
+	defer logBufferMu.Unlock()
+
+	filtered := make([]LogEntry, 0)
+	for _, logEntry := range logBuffer {
+		if svcFilter != "" && !strings.EqualFold(logEntry.Service, svcFilter) {
+			continue
+		}
+		if levelFilter != "" && !strings.EqualFold(logEntry.Level, levelFilter) {
+			continue
+		}
+		if searchFilter != "" && !strings.Contains(strings.ToLower(logEntry.Message), searchFilter) {
+			continue
+		}
+		filtered = append(filtered, logEntry)
+	}
+
+	json.NewEncoder(w).Encode(filtered)
+}
+
+func handleCostEstimation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	gateStatus := checkStatus("ServGate", *gateUrl)
+	storeStatus := checkStatus("ServStore", *storeUrl)
+	queueStatus := checkStatus("ServQueue", *queueUrl)
+
+	var storageBytes int64 = 524288000
+	var bucketsCount int64 = 3
+	var gateRequests int64 = 150000
+	var queueMessages int64 = 85000
+
+	if storeStatus.Online && storeStatus.Details != nil {
+		if m, ok := storeStatus.Details.(map[string]any); ok {
+			if bytesVal, exists := m["TotalBytes"]; exists {
+				if f, ok := bytesVal.(float64); ok {
+					storageBytes = int64(f)
+				}
+			}
+			if bktVal, exists := m["BucketsCount"]; exists {
+				if f, ok := bktVal.(float64); ok {
+					bucketsCount = int64(f)
+				}
+			}
+		}
+	}
+
+	if gateStatus.Online && gateStatus.Details != nil {
+		if m, ok := gateStatus.Details.(map[string]any); ok {
+			if reqsVal, exists := m["requests_total"]; exists {
+				if f, ok := reqsVal.(float64); ok {
+					gateRequests = int64(f)
+				}
+			}
+		}
+	}
+
+	if queueStatus.Online && queueStatus.Details != nil {
+		if m, ok := queueStatus.Details.(map[string]any); ok {
+			if metrics, ok := m["metrics"].(map[string]any); ok {
+				if pubVal, exists := metrics["messages_published_total"]; exists {
+					if f, ok := pubVal.(float64); ok {
+						queueMessages = int64(f)
+					}
+				}
+			}
+		}
+	}
+
+	storageGB := float64(storageBytes) / (1024 * 1024 * 1024)
+	storageCost := storageGB * 0.023
+	if storageCost < 0.01 && storageBytes > 0 {
+		storageCost = 0.01
+	}
+
+	gateCost := (float64(gateRequests) / 10000.0) * 0.005
+	queueCost := (float64(queueMessages) / 1000000.0) * 0.05
+	baselineCost := 20.0
+
+	totalCost := storageCost + gateCost + queueCost + baselineCost
+	budgetLimit := 50.0
+
+	recommendations := []string{}
+	if gateRequests > 500000 {
+		recommendations = append(recommendations, "Enable route-level caching on ServGate to reduce CPU and baseline cost.")
+	}
+	if bucketsCount > 10 {
+		recommendations = append(recommendations, "Consolidate unused S3 buckets to reduce storage index overhead.")
+	}
+	if storageGB > 100 {
+		recommendations = append(recommendations, "Configure cold storage offloading policy in ServQueue to migrate historical logs to standard compression.")
+	}
+	if len(recommendations) == 0 {
+		recommendations = append(recommendations, "Ecosystem resources are optimized. No actions required.")
+	}
+
+	response := map[string]any{
+		"timestamp": time.Now().Format(time.RFC3339),
+		"monthly": map[string]any{
+			"total":   totalCost,
+			"budget":  budgetLimit,
+			"percent": (totalCost / budgetLimit) * 100,
+		},
+		"breakdown": []map[string]any{
+			{"name": "Compute (Baseline)", "value": baselineCost, "color": "#6366f1"},
+			{"name": "Storage (ServStore)", "value": storageCost, "color": "#10b981"},
+			{"name": "Gateway (ServGate)", "value": gateCost, "color": "#06b6d4"},
+			{"name": "Queue (ServQueue)", "value": queueCost, "color": "#f59e0b"},
+		},
+		"metrics": map[string]any{
+			"storage_bytes":  storageBytes,
+			"storage_gb":     storageGB,
+			"gate_requests":  gateRequests,
+			"queue_messages": queueMessages,
+			"buckets_count":  bucketsCount,
+		},
+		"recommendations": recommendations,
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 func checkProxyRBAC(next http.HandlerFunc) http.HandlerFunc {

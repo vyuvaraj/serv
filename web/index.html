@@ -204,6 +204,10 @@
           <svg class="icon" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
           Policies (RBAC)
         </button>
+        <button class="tab-btn" data-tab="cost">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          Cost Optimizer
+        </button>
       </nav>
 
       <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -659,9 +663,26 @@
         <div class="pane-grid vertical-stack mt-4">
           <!-- Bottom: Live Logs Console -->
           <div class="card glass-card">
-            <div class="card-header">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
               <h2>Ecosystem Live Console Logs</h2>
-              <button class="btn btn-secondary btn-sm" id="btn-clear-logs">Clear Screen</button>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <select id="log-filter-service" class="form-control form-control-sm" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem; border-radius:4px; font-size:0.8rem; outline:none; cursor:pointer;">
+                  <option value="">All Services</option>
+                  <option value="ServGate">ServGate</option>
+                  <option value="ServStore">ServStore</option>
+                  <option value="ServQueue">ServQueue</option>
+                  <option value="ServTunnel">ServTunnel</option>
+                  <option value="system">System</option>
+                </select>
+                <select id="log-filter-level" class="form-control form-control-sm" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem; border-radius:4px; font-size:0.8rem; outline:none; cursor:pointer;">
+                  <option value="">All Levels</option>
+                  <option value="info">Info</option>
+                  <option value="warn">Warn</option>
+                  <option value="error">Error</option>
+                </select>
+                <input type="text" id="log-search-text" placeholder="Search message..." style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; outline:none; width:150px;">
+                <button class="btn btn-secondary btn-sm" id="btn-clear-logs">Clear Screen</button>
+              </div>
             </div>
             <div class="console-logs-box" id="console-logs-screen">
               <div class="log-line system">[SYSTEM] ServConsole connected. Listening for events...</div>
@@ -911,7 +932,59 @@
               <div class="policy-actions" style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">
                 <button class="btn btn-danger" id="btn-delete-policy" disabled>Delete Policy</button>
                 <button class="btn btn-primary" id="btn-save-policy" disabled>Save Policy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: COST OPTIMIZER -->
+      <div class="tab-pane" id="tab-cost">
+        <div class="pane-grid">
+          <!-- Left: Cost Estimation -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Infrastructure Monthly Cost Estimation</h2>
+              <span class="badge online" id="cost-budget-badge">Within Budget</span>
+            </div>
+            <p class="section-desc">Real-time cost projection calculated from active service requests, storage size, and queue messages throughput.</p>
+            
+            <div class="cost-summary-flex" style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1.5rem; border-radius:8px; margin-top:1.5rem;">
+              <div>
+                <span style="font-size:0.85rem; color:var(--text-secondary);">Estimated Monthly Cost</span>
+                <h2 style="font-size:2.5rem; margin-top:0.25rem; color:var(--primary);" id="cost-estimated-total">$0.00</h2>
               </div>
+              <div style="text-align:right;">
+                <span style="font-size:0.85rem; color:var(--text-secondary);">Monthly Budget Limit</span>
+                <h3 style="font-size:1.5rem; margin-top:0.25rem; color:#fff;" id="cost-budget-limit">$0.00</h3>
+              </div>
+            </div>
+
+            <div style="margin-top:2rem;">
+              <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:0.5rem;">
+                <span>Budget Consumption</span>
+                <span id="cost-budget-percent">0%</span>
+              </div>
+              <div class="progress-bar-container" style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden;">
+                <div id="cost-budget-progress" style="background:var(--primary); width:0%; height:100%; transition:width 0.5s ease;"></div>
+              </div>
+            </div>
+
+            <div style="margin-top:2rem;">
+              <h3>Cost Breakdown by Service</h3>
+              <div id="cost-breakdown-list" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+                <!-- Filled dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Recommendations -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Cost Optimization Tips</h2>
+            </div>
+            <p class="section-desc">Automated recommendations compiled by the compiler-linked cost optimizer to reduce monthly spend.</p>
+            <div id="cost-recommendations-container" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1.5rem;">
+              <!-- Filled dynamically -->
             </div>
           </div>
         </div>

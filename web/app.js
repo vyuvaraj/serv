@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initRingCanvas();
   initAuditLogsUI();
   initAlertsUI();
+  initLogsUI();
 });
 
 function initTheme() {
@@ -86,6 +87,8 @@ function initTabs() {
         fetchMigrations();
       } else if (tabId === 'policies') {
         loadPoliciesView();
+      } else if (tabId === 'cost') {
+        fetchCostEstimation();
       }
     });
   });
@@ -2599,5 +2602,134 @@ async function replaySelectedTrace() {
       replayBtn.disabled = false;
       replayBtn.textContent = '⚡ Replay Request';
     }
+  }
+}
+
+// Logs UI & Cost Optimization Logic
+function initLogsUI() {
+  const svcFilter = document.getElementById('log-filter-service');
+  const lvlFilter = document.getElementById('log-filter-level');
+  const searchInput = document.getElementById('log-search-text');
+
+  if (svcFilter) svcFilter.addEventListener('change', fetchLogs);
+  if (lvlFilter) lvlFilter.addEventListener('change', fetchLogs);
+  if (searchInput) {
+    let debounce;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(fetchLogs, 300);
+    });
+  }
+
+  setInterval(fetchLogs, 4000);
+  fetchLogs();
+}
+
+async function fetchLogs() {
+  const svc = document.getElementById('log-filter-service')?.value || '';
+  const lvl = document.getElementById('log-filter-level')?.value || '';
+  const search = document.getElementById('log-search-text')?.value || '';
+
+  try {
+    const url = `/api/logs?service=${encodeURIComponent(svc)}&level=${encodeURIComponent(lvl)}&search=${encodeURIComponent(search)}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const logs = await res.json();
+    
+    const consoleScreen = document.getElementById('console-logs-screen');
+    if (!consoleScreen) return;
+    
+    consoleScreen.innerHTML = '';
+    
+    if (logs.length === 0) {
+      consoleScreen.innerHTML = '<div class="text-muted text-center" style="padding: 1rem 0;">No matching logs found</div>';
+      return;
+    }
+    
+    logs.forEach(log => {
+      const line = document.createElement('div');
+      const service = (log.service || 'unknown').toLowerCase();
+      line.className = `log-line ${service} ${log.level || 'info'}`;
+      
+      const time = new Date(log.timestamp).toLocaleTimeString();
+      const traceBadge = log.traceId ? ` <span style="font-family:var(--font-mono); font-size:0.7rem; opacity:0.6; cursor:pointer;" onclick="switchToTracesTab('${log.traceId}')">[trace:${log.traceId.slice(0,6)}]</span>` : '';
+      
+      line.innerHTML = `[${time}] <span class="tag">[${(log.service || 'unknown').toUpperCase()}]</span> <span class="level-tag">[${(log.level || 'info').toUpperCase()}]</span> ${escapeHtml(log.message)}${traceBadge}`;
+      consoleScreen.appendChild(line);
+    });
+    
+    consoleScreen.scrollTop = consoleScreen.scrollHeight;
+  } catch (err) {
+    console.error('Failed to fetch logs:', err);
+  }
+}
+
+async function fetchCostEstimation() {
+  const estTotal = document.getElementById('cost-estimated-total');
+  const limitLabel = document.getElementById('cost-budget-limit');
+  const percentLabel = document.getElementById('cost-budget-percent');
+  const progressBar = document.getElementById('cost-budget-progress');
+  const badge = document.getElementById('cost-budget-badge');
+  const breakdownList = document.getElementById('cost-breakdown-list');
+  const recContainer = document.getElementById('cost-recommendations-container');
+
+  if (!estTotal) return;
+
+  try {
+    const res = await fetch('/api/cost-estimation');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    estTotal.textContent = `$${data.monthly.total.toFixed(2)}`;
+    limitLabel.textContent = `$${data.monthly.budget.toFixed(2)}`;
+    percentLabel.textContent = `${data.monthly.percent.toFixed(1)}%`;
+    progressBar.style.width = `${Math.min(100, data.monthly.percent)}%`;
+
+    if (data.monthly.total > data.monthly.budget) {
+      badge.className = 'badge offline';
+      badge.textContent = 'Budget Exceeded';
+      progressBar.style.backgroundColor = 'var(--danger, #ef4444)';
+    } else {
+      badge.className = 'badge online';
+      badge.textContent = 'Within Budget';
+      progressBar.style.backgroundColor = 'var(--primary)';
+    }
+
+    breakdownList.innerHTML = '';
+    data.breakdown.forEach(item => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.padding = '0.5rem';
+      row.style.background = 'rgba(255,255,255,0.02)';
+      row.style.borderRadius = '4px';
+
+      row.innerHTML = `
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background-color:${item.color};"></span>
+          <span>${item.name}</span>
+        </div>
+        <strong>$${item.value.toFixed(2)}</strong>
+      `;
+      breakdownList.appendChild(row);
+    });
+
+    recContainer.innerHTML = '';
+    data.recommendations.forEach(rec => {
+      const item = document.createElement('div');
+      item.style.padding = '0.75rem';
+      item.style.background = 'rgba(255, 193, 7, 0.05)';
+      item.style.borderLeft = '3px solid var(--warning, #f59e0b)';
+      item.style.borderRadius = '4px';
+      item.style.fontSize = '0.85rem';
+      item.style.color = '#e2e8f0';
+
+      item.textContent = rec;
+      recContainer.appendChild(item);
+    });
+
+  } catch (err) {
+    console.error('Failed to fetch cost estimation:', err);
   }
 }
