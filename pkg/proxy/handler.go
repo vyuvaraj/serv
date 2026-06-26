@@ -774,6 +774,18 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		traceparent = fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID)
 		r.Header.Set("traceparent", traceparent)
 		traceID = span.TraceID
+
+		// Capture request details for replay
+		span.Attributes = make(map[string]interface{})
+		span.Attributes["http.request.header.content-type"] = r.Header.Get("Content-Type")
+		if r.Body != nil && (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" || r.ContentLength > 0) {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err == nil {
+				r.Body.Close()
+				r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				span.Attributes["http.request.body"] = string(bodyBytes)
+			}
+		}
 	}
 
 	// Response Cache — check for cache hit before proxying
