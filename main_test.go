@@ -708,3 +708,181 @@ func TestHandleDiagnosticExec(t *testing.T) {
 	}
 }
 
+func TestHandleTopologyLive(t *testing.T) {
+	// Start a mock ServStore that returns trace spans
+	mockStore := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/console/traces" {
+			spans := []map[string]any{
+				{
+					"Name":         "HTTP GET /api/data",
+					"TraceID":      "trace-001",
+					"SpanID":       "span-001",
+					"ParentSpanID": "",
+					"ServiceName":  "ServGate",
+					"DurationNs":   15000000,
+					"StatusCode":   "ok",
+					"StartTime":    time.Now().Add(-1 * time.Minute).Format(time.RFC3339Nano),
+				},
+				{
+					"Name":         "PUT /bucket/key",
+					"TraceID":      "trace-001",
+					"SpanID":       "span-002",
+					"ParentSpanID": "span-001",
+					"ServiceName":  "ServStore",
+					"DurationNs":   8000000,
+					"StatusCode":   "ok",
+					"StartTime":    time.Now().Add(-50 * time.Second).Format(time.RFC3339Nano),
+				},
+				{
+					"Name":         "publish order-events",
+					"TraceID":      "trace-002",
+					"SpanID":       "span-003",
+					"ParentSpanID": "span-001",
+					"ServiceName":  "ServQueue",
+					"DurationNs":   3000000,
+					"StatusCode":   "error",
+					"StartTime":    time.Now().Add(-40 * time.Second).Format(time.RFC3339Nano),
+				},
+			}
+			json.NewEncoder(w).Encode(spans)
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	defer mockStore.Close()
+
+	origStore := *storeUrl
+	*storeUrl = mockStore.URL
+	defer func() { *storeUrl = origStore }()
+
+	req := httptest.NewRequest("GET", "/api/topology/live", nil)
+	w := httptest.NewRecorder()
+	handleTopologyLive(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var result LiveTopologyResponse
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if result.SpanCount != 3 {
+		t.Errorf("expected 3 spans, got %d", result.SpanCount)
+	}
+	if result.DiscoveredAt == "" {
+		t.Error("expected discovered_at to be set")
+	}
+	if len(result.Nodes) == 0 {
+		t.Error("expected at least one node in topology")
+	}
+
+	// Verify ServGate and ServStore appear in nodes
+	foundGate, foundStore := false, false
+	for _, n := range result.Nodes {
+		if n.ID == "ServGate" {
+			foundGate = true
+			if n.HealthScore < 0 || n.HealthScore > 1 {
+				t.Errorf("health score out of range: %f", n.HealthScore)
+			}
+		}
+		if n.ID == "ServStore" {
+			foundStore = true
+		}
+	}
+	if !foundGate {
+		t.Error("expected ServGate node in topology")
+	}
+	if !foundStore {
+		t.Error("expected ServStore node in topology")
+	}
+
+	// Verify at least one edge exists
+	if len(result.Edges) == 0 {
+		t.Error("expected at least one edge in topology")
+	}
+}
+
+func TestHandleDashboards(t *testing.T) {
+	// Reset dashboards to default state for testing
+	dashboardsMu.Lock()
+	originalDashboards := make([]Dashboard, len(dashboards))
+	copy(originalDashboards, dashboards)
+	dashboardsMu.Unlock()
+	defer func() {
+		dashboardsMu.Lock()
+		dashboards = originalDashboards
+		dashboardsMu.Unlock()
+	}()
+
+	// 1. GET — list existing dashboards
+	req := httptest.NewRequest("GET", "/api/dashboards", nil)
+	w := httptest.NewRecorder()
+	handleDashboards(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET: expected status 200, got %d", resp.StatusCode)
+	}
+
+	var listed []Dashboard
+	json.NewDecoder(resp.Body).Decode(&listed)
+	if len(listed) == 0 {
+		t.Fatal("GET: expected at least one default dashboard")
+	}
+	if listed[0].ID != "default-overview" {
+		t.Errorf("GET: expected first dashboard ID 'default-overview', got %s", listed[0].ID)
+	}
+
+	// 2. POST — create new dashboard
+	payload := `{"name":"SRE Alerts Board","description":"Custom board for SRE team","widgets":[{"id":"w1","title":"Error Spike","metric":"error_rate","chart_type":"line","time_range":"1h","service":"ServGate","width":6,"height":4}],"shared_with":["sre-team"]}`
+	req = httptest.NewRequest("POST", "/api/dashboards", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handleDashboards(w, req)
+
+	resp = w.Result()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST: expected status 201, got %d — body: %s", resp.StatusCode, string(body))
+	}
+
+	var created Dashboard
+	json.NewDecoder(resp.Body).Decode(&created)
+	if created.Name != "SRE Alerts Board" {
+		t.Errorf("POST: expected name 'SRE Alerts Board', got %s", created.Name)
+	}
+	if created.ID == "" {
+		t.Error("POST: expected generated ID")
+	}
+	if len(created.Widgets) != 1 {
+		t.Errorf("POST: expected 1 widget, got %d", len(created.Widgets))
+	}
+
+	// 3. DELETE — remove the created dashboard
+	req = httptest.NewRequest("DELETE", "/api/dashboards?id="+created.ID, nil)
+	w = httptest.NewRecorder()
+	handleDashboards(w, req)
+
+	resp = w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE: expected status 200, got %d", resp.StatusCode)
+	}
+
+	var delRes map[string]any
+	json.NewDecoder(resp.Body).Decode(&delRes)
+	if !delRes["success"].(bool) {
+		t.Error("DELETE: expected success=true")
+	}
+
+	// 4. DELETE nonexistent — should 404
+	req = httptest.NewRequest("DELETE", "/api/dashboards?id=nonexistent-dash", nil)
+	w = httptest.NewRecorder()
+	handleDashboards(w, req)
+
+	resp = w.Result()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("DELETE nonexistent: expected 404, got %d", resp.StatusCode)
+	}
+}
+

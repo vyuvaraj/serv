@@ -255,6 +255,8 @@ func main() {
 	mux.HandleFunc("/api/provision/store", authorizeConsole(handleProvisionStore))
 	mux.HandleFunc("/api/provision/queue", authorizeConsole(handleProvisionQueue))
 	mux.HandleFunc("/api/diagnostics/exec", authorizeConsole(handleDiagnosticExec))
+	mux.HandleFunc("/api/topology/live", authorizeConsole(handleTopologyLive))
+	mux.HandleFunc("/api/dashboards", authorizeConsole(handleDashboards))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -3044,7 +3046,414 @@ func handleDiagnosticExec(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// --- 7.3/8.8: Service Topology Auto-Discovery from Live Traces ---
+// Enhances the existing /api/topology with real-time inferred topology
+// featuring request counts, computed error rates, health scores, and
+// throughput per edge — all derived from live OTel trace spans.
 
+type LiveTopologyNode struct {
+	ID           string  `json:"id"`
+	Label        string  `json:"label"`
+	Color        string  `json:"color"`
+	Online       bool    `json:"online"`
+	LatencyMs    int64   `json:"latency_ms"`
+	ErrorRate    float64 `json:"error_rate"`
+	RequestCount int64   `json:"request_count"`
+	HealthScore  float64 `json:"health_score"` // 0.0 to 1.0
+}
 
+type LiveTopologyEdge struct {
+	From        string  `json:"from"`
+	To          string  `json:"to"`
+	Label       string  `json:"label"`
+	LatencyMs   int64   `json:"latency_ms"`
+	ErrorRate   float64 `json:"error_rate"`
+	Throughput  int64   `json:"throughput"` // requests per interval
+}
 
+type LiveTopologyResponse struct {
+	Nodes        []LiveTopologyNode `json:"nodes"`
+	Edges        []LiveTopologyEdge `json:"edges"`
+	DiscoveredAt string             `json:"discovered_at"`
+	SpanCount    int                `json:"span_count"`
+}
 
+func handleTopologyLive(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(strings.TrimSuffix(*storeUrl, "/") + "/console/traces")
+	if err != nil {
+		json.NewEncoder(w).Encode(LiveTopologyResponse{
+			Nodes:        []LiveTopologyNode{},
+			Edges:        []LiveTopologyEdge{},
+			DiscoveredAt: time.Now().Format(time.RFC3339),
+			SpanCount:    0,
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	type rawSpan struct {
+		Name         string    `json:"Name"`
+		TraceID      string    `json:"TraceID"`
+		SpanID       string    `json:"SpanID"`
+		ParentSpanID string    `json:"ParentSpanID"`
+		ServiceName  string    `json:"ServiceName"`
+		DurationNs   int64     `json:"DurationNs"`
+		StatusCode   string    `json:"StatusCode"`
+		StartTime    time.Time `json:"StartTime"`
+	}
+
+	var spans []rawSpan
+	if err := json.NewDecoder(resp.Body).Decode(&spans); err != nil {
+		json.NewEncoder(w).Encode(LiveTopologyResponse{
+			Nodes:        []LiveTopologyNode{},
+			Edges:        []LiveTopologyEdge{},
+			DiscoveredAt: time.Now().Format(time.RFC3339),
+			SpanCount:    0,
+		})
+		return
+	}
+
+	type nodeStats struct {
+		totalLatency int64
+		requestCount int64
+		errorCount   int64
+	}
+
+	type edgeStats struct {
+		totalLatency int64
+		requestCount int64
+		errorCount   int64
+	}
+
+	nodeStatsMap := make(map[string]*nodeStats)
+	edgeStatsMap := make(map[string]*edgeStats)
+	nodesMap := make(map[string]*LiveTopologyNode)
+
+	serviceColors := map[string]string{
+		"ServGate":   "#06b6d4",
+		"ServStore":  "#10b981",
+		"ServQueue":  "#f59e0b",
+		"ServTunnel": "#6366f1",
+		"ServTrace":  "#a855f7",
+	}
+
+	// Pre-populate well-known Servverse nodes
+	for svc, color := range serviceColors {
+		nodesMap[svc] = &LiveTopologyNode{ID: svc, Label: svc, Color: color, Online: true}
+		nodeStatsMap[svc] = &nodeStats{}
+	}
+
+	spanToService := make(map[string]string)
+	for _, span := range spans {
+		svc := span.ServiceName
+		if svc == "" {
+			svc = "unknown-service"
+		}
+		spanToService[span.SpanID] = svc
+
+		if _, exists := nodesMap[svc]; !exists {
+			color := "#94a3b8"
+			if c, ok := serviceColors[svc]; ok {
+				color = c
+			}
+			nodesMap[svc] = &LiveTopologyNode{ID: svc, Label: svc, Color: color, Online: true}
+			nodeStatsMap[svc] = &nodeStats{}
+		}
+
+		latMs := span.DurationNs / 1e6
+		nodeStatsMap[svc].totalLatency += latMs
+		nodeStatsMap[svc].requestCount++
+		if span.StatusCode == "error" {
+			nodeStatsMap[svc].errorCount++
+		}
+	}
+
+	// Build edges from parent-child span relationships
+	for _, span := range spans {
+		if span.ParentSpanID == "" {
+			continue
+		}
+		svc := span.ServiceName
+		if svc == "" {
+			svc = "unknown-service"
+		}
+
+		parentSvc, parentExists := spanToService[span.ParentSpanID]
+		if !parentExists || parentSvc == svc {
+			continue
+		}
+
+		edgeKey := parentSvc + "->" + svc
+		latMs := span.DurationNs / 1e6
+
+		if _, exists := edgeStatsMap[edgeKey]; !exists {
+			edgeStatsMap[edgeKey] = &edgeStats{}
+		}
+		edgeStatsMap[edgeKey].totalLatency += latMs
+		edgeStatsMap[edgeKey].requestCount++
+		if span.StatusCode == "error" {
+			edgeStatsMap[edgeKey].errorCount++
+		}
+	}
+
+	// Infer additional edges from span operation names
+	for _, span := range spans {
+		svc := span.ServiceName
+		if svc == "" {
+			svc = "unknown-service"
+		}
+		latMs := span.DurationNs / 1e6
+
+		if strings.Contains(span.Name, "PUT") || strings.Contains(span.Name, "GET") || strings.Contains(span.Name, "DELETE") {
+			if svc != "ServStore" {
+				edgeKey := svc + "->ServStore"
+				if _, exists := edgeStatsMap[edgeKey]; !exists {
+					edgeStatsMap[edgeKey] = &edgeStats{totalLatency: latMs, requestCount: 1}
+				}
+			}
+		}
+		if strings.Contains(span.Name, "publish") || strings.Contains(span.Name, "subscribe") {
+			if svc != "ServQueue" {
+				edgeKey := svc + "->ServQueue"
+				if _, exists := edgeStatsMap[edgeKey]; !exists {
+					edgeStatsMap[edgeKey] = &edgeStats{totalLatency: latMs, requestCount: 1}
+				}
+			}
+		}
+	}
+
+	// Compute final node values
+	var nodes []LiveTopologyNode
+	for svcID, node := range nodesMap {
+		ns := nodeStatsMap[svcID]
+		if ns.requestCount > 0 {
+			node.LatencyMs = ns.totalLatency / ns.requestCount
+			node.ErrorRate = float64(ns.errorCount) / float64(ns.requestCount)
+			node.RequestCount = ns.requestCount
+		}
+		// Health score: 1.0 = perfect, degrades with error rate and high latency
+		health := 1.0 - node.ErrorRate
+		if node.LatencyMs > 500 {
+			health -= 0.15
+		} else if node.LatencyMs > 200 {
+			health -= 0.05
+		}
+		if health < 0 {
+			health = 0
+		}
+		node.HealthScore = health
+		nodes = append(nodes, *node)
+	}
+
+	// Compute final edge values
+	var edges []LiveTopologyEdge
+	for edgeKey, es := range edgeStatsMap {
+		parts := strings.SplitN(edgeKey, "->", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		avgLat := int64(0)
+		errRate := 0.0
+		if es.requestCount > 0 {
+			avgLat = es.totalLatency / es.requestCount
+			errRate = float64(es.errorCount) / float64(es.requestCount)
+		}
+
+		label := "Call"
+		if parts[1] == "ServStore" {
+			label = "S3"
+		} else if parts[1] == "ServQueue" {
+			label = "STOMP"
+		} else if parts[0] == "ServGate" {
+			label = "HTTP"
+		}
+
+		edges = append(edges, LiveTopologyEdge{
+			From:       parts[0],
+			To:         parts[1],
+			Label:      label,
+			LatencyMs:  avgLat,
+			ErrorRate:  errRate,
+			Throughput: es.requestCount,
+		})
+	}
+
+	json.NewEncoder(w).Encode(LiveTopologyResponse{
+		Nodes:        nodes,
+		Edges:        edges,
+		DiscoveredAt: time.Now().Format(time.RFC3339),
+		SpanCount:    len(spans),
+	})
+}
+
+// --- 7.5: Custom Dashboard Builder ---
+// Provides CRUD for user-defined dashboards with custom widgets.
+// Dashboards are stored in-memory and support chart type selection,
+// metric binding, and per-team sharing.
+
+type DashboardWidget struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Metric     string `json:"metric"`     // e.g. "latency", "error_rate", "throughput"
+	ChartType  string `json:"chart_type"` // "line", "bar", "gauge", "table"
+	TimeRange  string `json:"time_range"` // e.g. "1h", "6h", "24h", "7d"
+	Service    string `json:"service"`    // e.g. "ServGate", "ServStore"
+	PositionX  int    `json:"position_x"`
+	PositionY  int    `json:"position_y"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+}
+
+type Dashboard struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	CreatedBy   string            `json:"created_by"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
+	Widgets     []DashboardWidget `json:"widgets"`
+	SharedWith  []string          `json:"shared_with"` // team names
+}
+
+var (
+	dashboardsMu sync.Mutex
+	dashboards   = []Dashboard{
+		{
+			ID:          "default-overview",
+			Name:        "Ecosystem Overview",
+			Description: "Default overview dashboard for all Servverse components",
+			CreatedBy:   "system",
+			CreatedAt:   "2026-06-01T00:00:00Z",
+			UpdatedAt:   "2026-06-01T00:00:00Z",
+			Widgets: []DashboardWidget{
+				{ID: "w1", Title: "Gateway Latency", Metric: "latency", ChartType: "line", TimeRange: "1h", Service: "ServGate", PositionX: 0, PositionY: 0, Width: 6, Height: 4},
+				{ID: "w2", Title: "Queue Throughput", Metric: "throughput", ChartType: "bar", TimeRange: "1h", Service: "ServQueue", PositionX: 6, PositionY: 0, Width: 6, Height: 4},
+				{ID: "w3", Title: "Storage Error Rate", Metric: "error_rate", ChartType: "gauge", TimeRange: "6h", Service: "ServStore", PositionX: 0, PositionY: 4, Width: 4, Height: 3},
+				{ID: "w4", Title: "Active Connections", Metric: "connections", ChartType: "line", TimeRange: "24h", Service: "ServTunnel", PositionX: 4, PositionY: 4, Width: 4, Height: 3},
+				{ID: "w5", Title: "Service Health", Metric: "health", ChartType: "table", TimeRange: "1h", Service: "all", PositionX: 8, PositionY: 4, Width: 4, Height: 3},
+			},
+			SharedWith: []string{"platform-team", "sre-team"},
+		},
+	}
+)
+
+func handleDashboards(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		dashboardsMu.Lock()
+		result := make([]Dashboard, len(dashboards))
+		copy(result, dashboards)
+		dashboardsMu.Unlock()
+		json.NewEncoder(w).Encode(result)
+
+	case http.MethodPost:
+		var newDash Dashboard
+		if err := json.NewDecoder(r.Body).Decode(&newDash); err != nil || newDash.Name == "" {
+			WriteJSONError(w, r, "Invalid dashboard payload — name is required", "ERR_INVALID_BODY", http.StatusBadRequest)
+			return
+		}
+
+		now := time.Now().Format(time.RFC3339)
+		if newDash.ID == "" {
+			newDash.ID = fmt.Sprintf("dash-%d", time.Now().UnixNano())
+		}
+		newDash.CreatedAt = now
+		newDash.UpdatedAt = now
+		if newDash.CreatedBy == "" {
+			newDash.CreatedBy = "console-operator"
+		}
+		if newDash.Widgets == nil {
+			newDash.Widgets = []DashboardWidget{}
+		}
+		if newDash.SharedWith == nil {
+			newDash.SharedWith = []string{}
+		}
+
+		dashboardsMu.Lock()
+		dashboards = append(dashboards, newDash)
+		dashboardsMu.Unlock()
+
+		addAuditLog(newDash.CreatedBy, fmt.Sprintf("Created dashboard: %s", newDash.Name), r.Method, r.URL.Path, http.StatusCreated)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(newDash)
+
+	case http.MethodPut:
+		var updated Dashboard
+		if err := json.NewDecoder(r.Body).Decode(&updated); err != nil || updated.ID == "" {
+			WriteJSONError(w, r, "Invalid dashboard payload — id is required", "ERR_INVALID_BODY", http.StatusBadRequest)
+			return
+		}
+
+		updated.UpdatedAt = time.Now().Format(time.RFC3339)
+		if updated.Widgets == nil {
+			updated.Widgets = []DashboardWidget{}
+		}
+		if updated.SharedWith == nil {
+			updated.SharedWith = []string{}
+		}
+
+		dashboardsMu.Lock()
+		found := false
+		for i, d := range dashboards {
+			if d.ID == updated.ID {
+				// Preserve original creation metadata
+				if updated.CreatedAt == "" {
+					updated.CreatedAt = d.CreatedAt
+				}
+				if updated.CreatedBy == "" {
+					updated.CreatedBy = d.CreatedBy
+				}
+				dashboards[i] = updated
+				found = true
+				break
+			}
+		}
+		dashboardsMu.Unlock()
+
+		if !found {
+			WriteJSONError(w, r, "Dashboard not found", "ERR_NOT_FOUND", http.StatusNotFound)
+			return
+		}
+
+		addAuditLog("console-operator", fmt.Sprintf("Updated dashboard: %s", updated.Name), r.Method, r.URL.Path, http.StatusOK)
+		json.NewEncoder(w).Encode(updated)
+
+	case http.MethodDelete:
+		dashID := r.URL.Query().Get("id")
+		if dashID == "" {
+			WriteJSONError(w, r, "Query parameter 'id' is required", "ERR_MISSING_ID", http.StatusBadRequest)
+			return
+		}
+
+		dashboardsMu.Lock()
+		found := false
+		for i, d := range dashboards {
+			if d.ID == dashID {
+				dashboards = append(dashboards[:i], dashboards[i+1:]...)
+				found = true
+				break
+			}
+		}
+		dashboardsMu.Unlock()
+
+		if !found {
+			WriteJSONError(w, r, "Dashboard not found", "ERR_NOT_FOUND", http.StatusNotFound)
+			return
+		}
+
+		addAuditLog("console-operator", fmt.Sprintf("Deleted dashboard: %s", dashID), r.Method, r.URL.Path, http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{"success": true, "deleted_id": dashID})
+
+	default:
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+	}
+}
