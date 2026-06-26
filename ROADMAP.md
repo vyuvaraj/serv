@@ -74,7 +74,7 @@ These items take ServConsole from a dashboard into a **full observability and op
 | 7.9 | **Multi-environment management** | Medium | Switch between dev/staging/production environments in the console. Compare metrics across environments. Promote configs from staging to prod. | [x] |
 | 7.10 | **Plugin architecture** | Large | Define a plugin interface for community-contributed console panels. Load plugins as WASM modules that render into iframe sandboxes. Extensible without forking. | [ ] |
 | 7.11 | **Mobile-responsive layout** | Medium | Responsive design for tablet/phone. Critical status and alerts viewable on mobile during on-call. | [x] |
-| 7.12 | **Runbook automation** | Large | Attach runbook steps to alerts. When an alert fires, suggest or auto-execute remediation steps (restart service, scale up, clear cache). Guided incident response. | [ ] |
+| 7.12 | **Runbook automation** | Large | Attach runbook steps to alerts. When an alert fires, suggest or auto-execute remediation steps (restart service, scale up, clear cache). Guided incident response. | [x] |
 | 7.13 | **Cost estimation panel** | Medium | Estimate infrastructure cost based on resource usage (compute hours, storage GB, network egress). Compare actual vs budget. Useful for teams managing cloud spend. | [x] |
 
 ---

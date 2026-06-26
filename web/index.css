@@ -1306,5 +1306,43 @@ tr:hover td {
   border-color: rgba(255, 255, 255, 0.1) !important;
 }
 
+/* Runbook Remediations */
+.runbook-item {
+  transition: transform 0.2s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.runbook-item:hover {
+  transform: translateY(-1px);
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.btn-runbook-execute {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.btn-runbook-execute.loading {
+  pointer-events: none;
+  background: var(--bg-tertiary) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border-glass) !important;
+}
+
+.spinner-mini {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin-mini 0.8s linear infinite;
+}
+
+@keyframes spin-mini {
+  to { transform: rotate(360deg); }
+}
+
 
 

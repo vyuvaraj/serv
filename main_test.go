@@ -557,3 +557,36 @@ func TestHandleIncidentAnalysis(t *testing.T) {
 	}
 }
 
+func TestHandleRunbookExecution(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/runbooks?component=ServGate", nil)
+	w := httptest.NewRecorder()
+	handleRunbooks(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var actions []RunbookAction
+	json.NewDecoder(resp.Body).Decode(&actions)
+	if len(actions) < 1 {
+		t.Fatal("expected at least one runbook action for ServGate")
+	}
+
+	execPayload := `{"runbookId":"rb-gate-cache","alertId":"alert-mock-123"}`
+	eReq := httptest.NewRequest("POST", "/api/runbooks/execute", strings.NewReader(execPayload))
+	eReq.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handleExecuteRunbook(w2, eReq)
+
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("execution failed with status %d", w2.Result().StatusCode)
+	}
+
+	var execResult map[string]any
+	json.NewDecoder(w2.Result().Body).Decode(&execResult)
+	if !execResult["success"].(bool) {
+		t.Errorf("expected runbook execution success to be true")
+	}
+}
+

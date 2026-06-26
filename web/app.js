@@ -3103,8 +3103,103 @@ async function openIncidentTimeline(alertId) {
       eventsContainer.appendChild(card);
     });
 
+    await renderIncidentRunbooks(data.component, alertId);
+
   } catch (err) {
     eventsContainer.innerHTML = '<div class="text-center text-muted" style="padding: 2rem; color:var(--danger);">Failed to auto-generate incident timeline.</div>';
+    const section = document.getElementById('incident-runbook-section');
+    if (section) section.style.display = 'none';
+  }
+}
+
+async function renderIncidentRunbooks(component, alertId) {
+  const section = document.getElementById('incident-runbook-section');
+  const container = document.getElementById('incident-runbooks-list');
+  if (!section || !container) return;
+
+  section.style.display = 'none';
+  container.innerHTML = '';
+
+  try {
+    const res = await fetch(`/api/runbooks?component=${encodeURIComponent(component)}`);
+    if (!res.ok) return;
+    const list = await res.json();
+    if (!list || list.length === 0) return;
+
+    section.style.display = 'block';
+    list.forEach(rb => {
+      const div = document.createElement('div');
+      div.className = 'runbook-item';
+      div.style.display = 'flex';
+      div.style.justifyContent = 'space-between';
+      div.style.alignItems = 'center';
+      div.style.padding = '0.75rem';
+      div.style.background = 'rgba(255,255,255,0.03)';
+      div.style.border = '1px solid rgba(255,255,255,0.05)';
+      div.style.borderRadius = '6px';
+      
+      div.innerHTML = `
+        <div style="flex-grow: 1; margin-right: 1rem;">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #fff;">${rb.name}</div>
+          <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem;">${rb.description}</div>
+        </div>
+        <button class="btn btn-primary btn-sm btn-runbook-execute" data-id="${rb.id}" style="font-size: 0.75rem; padding: 0.35rem 0.75rem; display: flex; align-items: center; gap: 0.4rem; white-space: nowrap;">
+          <span>⚡ Run Remediation</span>
+        </button>
+      `;
+
+      const executeBtn = div.querySelector('.btn-runbook-execute');
+      executeBtn.addEventListener('click', async () => {
+        await executeRunbook(rb.id, alertId, executeBtn);
+      });
+
+      container.appendChild(div);
+    });
+  } catch (err) {
+    console.error('Failed to load runbooks:', err);
+  }
+}
+
+async function executeRunbook(runbookId, alertId, btn) {
+  if (btn.disabled) return;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.innerHTML = `<span class="spinner-mini"></span> Executing...`;
+
+  try {
+    const res = await fetch('/api/runbooks/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runbookId, alertId })
+    });
+    if (!res.ok) throw new Error('Execution failed');
+    const result = await res.json();
+    
+    btn.innerHTML = `✓ Done`;
+    btn.style.background = 'var(--success, #10b981)';
+    btn.style.borderColor = 'var(--success, #10b981)';
+
+    logEvent('system', `Runbook executed: ${result.message}`);
+    
+    if (typeof pollAlerts === 'function') {
+      await pollAlerts();
+    }
+    if (typeof fetchAuditLogs === 'function') {
+      fetchAuditLogs();
+    }
+
+    setTimeout(() => {
+      const modal = document.getElementById('incident-timeline-modal');
+      if (modal) modal.style.display = 'none';
+    }, 1200);
+
+  } catch (err) {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.innerHTML = originalText;
+    logEvent('error', `Runbook execution failed: ${err.message}`);
+    alert(`Failed to execute runbook: ${err.message}`);
   }
 }
 

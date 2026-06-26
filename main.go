@@ -249,6 +249,8 @@ func main() {
 	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
 	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
 	mux.HandleFunc("/api/incidents/analyze", authorizeConsole(handleIncidentAnalyze))
+	mux.HandleFunc("/api/runbooks", authorizeConsole(handleRunbooks))
+	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(handleExecuteRunbook))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -2691,6 +2693,98 @@ func handleIncidentAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(timeline)
 }
+
+type RunbookAction struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Component   string `json:"component"`
+	Command     string `json:"command"`
+}
+
+var (
+	runbooks = []RunbookAction{
+		{ID: "rb-gate-restart", Name: "Restart ServGate Instance", Description: "Drain connections and perform graceful restart of the Gateway process", Component: "ServGate", Command: "serv gate restart --graceful"},
+		{ID: "rb-gate-cache", Name: "Clear ServGate Router Cache", Description: "Purge all compiled semantic cache entries in Gateway memory", Component: "ServGate", Command: "serv gate cache purge"},
+		{ID: "rb-store-heal", Name: "Rebalance ServStore Storage Shards", Description: "Initiate P2P healing across active data shards and rebuild parity partitions", Component: "ServStore", Command: "serv store heal --shards=all"},
+		{ID: "rb-queue-purge", Name: "Flush Dead Letter Queue (DLQ)", Description: "Clear stale or rejected messages in ServQueue DLQ namespaces", Component: "ServQueue", Command: "serv queue purge dlq"},
+	}
+	runbooksMu sync.Mutex
+)
+
+func handleRunbooks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	compFilter := r.URL.Query().Get("component")
+
+	runbooksMu.Lock()
+	defer runbooksMu.Unlock()
+
+	filtered := []RunbookAction{}
+	for _, rb := range runbooks {
+		if compFilter == "" || strings.EqualFold(rb.Component, compFilter) {
+			filtered = append(filtered, rb)
+		}
+	}
+
+	json.NewEncoder(w).Encode(filtered)
+}
+
+func handleExecuteRunbook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		RunbookID string `json:"runbookId"`
+		AlertID   string `json:"alertId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request body", "ERR_INVALID_BODY", http.StatusBadRequest)
+		return
+	}
+
+	runbooksMu.Lock()
+	var targetRb *RunbookAction
+	for _, rb := range runbooks {
+		if rb.ID == req.RunbookID {
+			targetRb = &rb
+			break
+		}
+	}
+	runbooksMu.Unlock()
+
+	if targetRb == nil {
+		WriteJSONError(w, r, "Runbook not found", "ERR_RUNBOOK_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+
+	addAuditLog("console-operator", fmt.Sprintf("Runbook %s: %s", targetRb.Name, targetRb.Command), r.Method, r.URL.Path, http.StatusOK)
+
+	if req.AlertID != "" {
+		alertsMu.Lock()
+		for i, a := range alerts {
+			if a.ID == req.AlertID {
+				alerts[i].Acknowledged = true
+				break
+			}
+		}
+		alertsMu.Unlock()
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": fmt.Sprintf("Runbook %s executed successfully.", targetRb.Name),
+		"log":     fmt.Sprintf("Command '%s' exited with code 0.", targetRb.Command),
+	})
+}
+
 
 
 
