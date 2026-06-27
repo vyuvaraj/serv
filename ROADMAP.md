@@ -27,3 +27,13 @@ This roadmap outlines the planned development phases for the ServCron distribute
 ## Phase 3: ServStore Backing (Q4 2026)
 - [x] **Persistent Job Registry**: Back job state persistence to a `ServStore` S3 bucket, preventing scheduled task losses during server crashes or restarts.
 - [x] **Job Execution Audit History**: Logs execution logs, status results, and metrics directly to storage.
+
+
+## Phase 4: Workflow Orchestration (Next Level)
+- [ ] **DAG-based Job Pipelines**: Define multi-step workflows with dependencies (`job A → job B → job C`). Fan-out/fan-in support.
+- [ ] **Job Chaining via ServQueue**: Trigger next job by publishing to ServQueue topic on completion. Event-driven scheduling.
+- [ ] **Retry Policies & Dead Letter**: Configurable retry count with exponential backoff. Failed jobs route to DLQ topic.
+- [ ] **Time Zone Awareness**: Schedule jobs in specific timezones (not just UTC). Critical for business-hour triggers.
+- [ ] **Job Templating**: Parameterized job definitions that accept runtime variables (e.g., date ranges, partition IDs).
+- [ ] **Execution Resource Limits**: CPU/memory limits per job execution. Kill long-running jobs after timeout.
+- [ ] **Cron Expression Builder UI**: Visual cron builder in ServConsole with next-5-runs preview.
