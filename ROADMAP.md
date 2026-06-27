@@ -27,3 +27,13 @@ This roadmap outlines the planned development phases for the ServCache distribut
 - [x] **Multi-Region Replication**: Cache replication across geo-distributed nodes.
 - [x] **Read-Through/Write-Behind Cache**: Automatic synchronization wrappers between ServCache and ServDB.
 - [x] **Key Pattern Invalidations**: Flush caches dynamically using wildcard prefix matches.
+
+
+## Phase 4: Intelligent Caching & Ecosystem (Next Level)
+- [ ] **Predictive Pre-warming**: Analyze access patterns via OTel traces to pre-load hot keys before they're requested. ML-based hit-rate optimization.
+- [ ] **Cache-Aside Codegen in Serv-lang**: Compile `cached fn getData()` syntax directly to ServCache GET/SET calls with automatic invalidation.
+- [ ] **Distributed Cache Coherence (Gossip)**: Multi-node cache with gossip-based invalidation protocol. No single point of failure.
+- [ ] **Write-Coalescing**: Batch rapid writes to the same key into a single backend write (debounce pattern).
+- [ ] **Cache Analytics Dashboard**: Hit/miss ratios, latency percentiles, eviction rates, and memory pressure per namespace in ServConsole.
+- [ ] **Tag-based Invalidation**: Assign tags to keys (`user:123`, `product:*`), then invalidate by tag group in one call.
+- [ ] **Tiered Storage**: Hot keys in memory → warm keys in Redis → cold keys in ServStore. Automatic promotion/demotion.
