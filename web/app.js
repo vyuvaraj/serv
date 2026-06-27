@@ -432,21 +432,26 @@ async function fetchBuckets() {
       bucketsCount = metrics.BucketsCount || 0;
     }
     
-    // In our simplified mock or local store, let's render buckets
+    // Render bucket list from ServStore
     const containers = document.getElementById('buckets-container');
     containers.innerHTML = '';
     
-    // Fetch custom provisioned buckets
-    const provRes = await fetch('/api/provision/store');
-    let dummyBuckets = ['media-assets', 'logs', 'user-documents'];
+    // Fetch actual bucket list from ServStore
+    const provRes = await fetch('/api/proxy/store/');
+    let bucketList = [];
     if (provRes.ok) {
-      dummyBuckets = await provRes.json();
-    } else {
-      dummyBuckets = dummyBuckets.slice(0, bucketsCount);
-      if (dummyBuckets.length === 0) dummyBuckets.push('default-bucket');
+      const data = await provRes.json();
+      bucketList = data.Buckets || data.buckets || data || [];
+      if (Array.isArray(bucketList) && bucketList.length > 0 && typeof bucketList[0] === 'object') {
+        bucketList = bucketList.map(b => b.Name || b.name || b);
+      }
     }
     
-    dummyBuckets.forEach(b => {
+    if (bucketList.length === 0) {
+      containers.innerHTML = '<div class="text-muted" style="padding:1rem;font-size:0.85rem;">No buckets found. Create one using the button above.</div>';
+    }
+    
+    bucketList.forEach(b => {
       const div = document.createElement('div');
       div.className = `bucket-item ${STATE.selectedBucket === b ? 'active' : ''}`;
       div.innerHTML = `📁 ${b}`;
@@ -472,20 +477,29 @@ async function fetchObjects(bucket) {
   tbody.innerHTML = `<tr><td colspan="3" class="text-center">Loading objects...</td></tr>`;
   
   try {
-    // Simulate S3 object listing via proxy
-    const dummyObjects = [
-      { key: 'images/hero.png', size: '2.4 MB', modified: '2026-06-17 12:04' },
-      { key: 'docs/guide.pdf', size: '420 KB', modified: '2026-06-17 14:15' },
-      { key: 'backup.zip', size: '84.2 MB', modified: '2026-06-17 15:02' }
-    ];
+    const res = await fetch(`/api/proxy/store/${bucket}?list-type=2`);
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Bucket is empty or not accessible</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const objects = data.Contents || data.objects || [];
     
     tbody.innerHTML = '';
-    dummyObjects.forEach(obj => {
+    if (objects.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No objects in this bucket</td></tr>`;
+      return;
+    }
+    objects.forEach(obj => {
       const tr = document.createElement('tr');
+      const size = obj.Size || obj.size || 0;
+      const sizeStr = size > 1048576 ? `${(size / 1048576).toFixed(1)} MB` : size > 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`;
+      const modified = obj.LastModified || obj.last_modified || '';
+      const modStr = modified ? new Date(modified).toLocaleString() : '—';
       tr.innerHTML = `
-        <td style="font-family:var(--font-mono);">${obj.key}</td>
-        <td>${obj.size}</td>
-        <td>${obj.modified}</td>
+        <td style="font-family:var(--font-mono);">${obj.Key || obj.key || ''}</td>
+        <td>${sizeStr}</td>
+        <td>${modStr}</td>
       `;
       tbody.appendChild(tr);
     });
