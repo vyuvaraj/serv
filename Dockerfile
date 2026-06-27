@@ -1,10 +1,8 @@
-FROM golang:1.23-alpine AS builder
-
+FROM golang:1.24-alpine AS builder
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /servstore ./cmd/servstore
+RUN sed -i 's/go 1\.2[5-9]\.[0-9]*/go 1.24/g' go.mod vendor/modules.txt && \
+    CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /servstore ./cmd/servstore
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
