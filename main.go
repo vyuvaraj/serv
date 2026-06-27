@@ -13,6 +13,8 @@ import (
 	"servcron/pkg/cron"
 	"servcron/pkg/otel"
 	"servcron/pkg/server"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 func main() {
@@ -65,7 +67,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:    *addr,
-		Handler: mux,
+		Handler: ServShared.AuthMiddleware(mux),
 	}
 
 	go func() {
