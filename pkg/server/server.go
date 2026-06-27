@@ -170,7 +170,7 @@ func (s *Server) Start() error {
 
 	s.httpSrv = &http.Server{
 		Addr:    s.addr,
-		Handler: mux,
+		Handler: ServShared.AuthMiddleware(mux),
 	}
 
 	tlsCert := os.Getenv("SERVTUNNEL_TLS_CERT")
