@@ -82,7 +82,7 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 
-	return mux
+	return ServShared.AuthMiddleware(mux)
 }
 
 func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string) {

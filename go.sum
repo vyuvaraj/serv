@@ -10,5 +10,5 @@ github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63Y
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/redis/go-redis/v9 v9.5.1 h1:H1X4D3yHPaYrkL5X06Wh6xNVM/pX0Ft4RV0vMGvLBh8=
 github.com/redis/go-redis/v9 v9.5.1/go.mod h1:hdY0cQFCN4fnSYT6TkisLufl/4W5UIXyv0b/CLO2V2M=
-github.com/vyuvaraj/ServShared v0.0.0-20260622105040-a5e471152273 h1:QkWPMNUstHIeL5IpIas0wE8OrYVQbsndpz/yPvHHiA8=
-github.com/vyuvaraj/ServShared v0.0.0-20260622105040-a5e471152273/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
+github.com/vyuvaraj/ServShared v0.0.0-20260627072934-fdbc3a616721 h1:BkAtGcnWtkxfYqCSS0kxNdBZi5SwokAowbg5EOSqWEs=
+github.com/vyuvaraj/ServShared v0.0.0-20260627072934-fdbc3a616721/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
