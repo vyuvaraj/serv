@@ -1,9 +1,8 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum* ./
-RUN go mod download || true
 COPY . .
-RUN go build -o servtrace main.go
+RUN sed -i 's/go 1\.2[5-9]\.[0-9]*/go 1.24/g' go.mod vendor/modules.txt 2>/dev/null; \
+    CGO_ENABLED=0 go build -mod=vendor -o servtrace main.go
 
 FROM alpine:latest
 WORKDIR /app
