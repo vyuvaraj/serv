@@ -59,9 +59,11 @@ function initTheme() {
 
 // --- Tab Switching ---
 function initTabs() {
+  console.log('[ServConsole] initTabs: binding', document.querySelectorAll('.tab-btn').length, 'tab buttons');
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const tabId = btn.getAttribute('data-tab');
+      console.log('[ServConsole] Tab clicked:', tabId);
       
       // Update UI active states
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
