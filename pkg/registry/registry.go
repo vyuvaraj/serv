@@ -186,6 +186,8 @@ func (r *Registry) Handler() http.Handler {
 		return true
 	}
 
+	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
+	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
