@@ -6,7 +6,7 @@ require github.com/tetratelabs/wazero v1.12.0
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/vyuvaraj/ServShared v0.0.0-20260622105040-a5e471152273
+	github.com/vyuvaraj/ServShared v0.0.0-20260627072934-fdbc3a616721
 )
 
 require (

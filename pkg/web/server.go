@@ -45,26 +45,26 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/topics/", s.authorize(s.handleTopics))
-	mux.HandleFunc("/api/v1/topics/", s.authorize(s.handleTopics))
-	mux.HandleFunc("/api/topics", s.authorize(s.handleListTopics))
-	mux.HandleFunc("/api/v1/topics", s.authorize(s.handleListTopics))
-	mux.HandleFunc("/api/publish", s.authorize(s.handlePublish))
-	mux.HandleFunc("/api/v1/publish", s.authorize(s.handlePublish))
-	mux.HandleFunc("/api/stats", s.authorize(s.handleStats))
-	mux.HandleFunc("/api/v1/stats", s.authorize(s.handleStats))
-	mux.HandleFunc("/api/replay", s.authorize(s.handleReplay))
-	mux.HandleFunc("/api/v1/replay", s.authorize(s.handleReplay))
-	mux.HandleFunc("/api/offsets", s.authorize(s.handleOffsets))
-	mux.HandleFunc("/api/v1/offsets", s.authorize(s.handleOffsets))
-	mux.HandleFunc("/api/stats/ws", s.authorize(s.handleStatsWS))
-	mux.HandleFunc("/api/v1/stats/ws", s.authorize(s.handleStatsWS))
-	mux.HandleFunc("/api/admin/offloader", s.authorize(s.handleConfigureOffloader))
-	mux.HandleFunc("/api/v1/admin/offloader", s.authorize(s.handleConfigureOffloader))
+	mux.HandleFunc("/api/topics/", s.handleTopics)
+	mux.HandleFunc("/api/v1/topics/", s.handleTopics)
+	mux.HandleFunc("/api/topics", s.handleListTopics)
+	mux.HandleFunc("/api/v1/topics", s.handleListTopics)
+	mux.HandleFunc("/api/publish", s.handlePublish)
+	mux.HandleFunc("/api/v1/publish", s.handlePublish)
+	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/v1/stats", s.handleStats)
+	mux.HandleFunc("/api/replay", s.handleReplay)
+	mux.HandleFunc("/api/v1/replay", s.handleReplay)
+	mux.HandleFunc("/api/offsets", s.handleOffsets)
+	mux.HandleFunc("/api/v1/offsets", s.handleOffsets)
+	mux.HandleFunc("/api/stats/ws", s.handleStatsWS)
+	mux.HandleFunc("/api/v1/stats/ws", s.handleStatsWS)
+	mux.HandleFunc("/api/admin/offloader", s.handleConfigureOffloader)
+	mux.HandleFunc("/api/v1/admin/offloader", s.handleConfigureOffloader)
 
 	s.httpSrv = &http.Server{
 		Addr:    s.addr,
-		Handler: mux,
+		Handler: ServShared.AuthMiddleware(mux),
 	}
 
 	if s.tlsCert != "" && s.tlsKey != "" {
