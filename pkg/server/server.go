@@ -12,6 +12,8 @@ import (
 
 	"servcache/pkg/cache"
 	"servcache/pkg/otel"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 type Server struct {
@@ -43,6 +45,8 @@ type SetRequest struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
+	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
