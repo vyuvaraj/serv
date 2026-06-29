@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -2114,6 +2115,28 @@ func handleIngestLog(w http.ResponseWriter, r *http.Request) {
 		alertsMu.Lock()
 		addOrUpdateAlert(entry.Service, "anomaly_detection", entry.Message, "warning")
 		alertsMu.Unlock()
+	}
+
+	// Forward logs with TraceID to ServTrace logs endpoint
+	if entry.TraceID != "" {
+		go func(e LogEntry) {
+			traceURL := os.Getenv("SERV_TRACE_URL")
+			if traceURL == "" {
+				traceURL = "http://localhost:8090"
+			}
+			payload := map[string]interface{}{
+				"traceId":   e.TraceID,
+				"timestamp": e.Timestamp,
+				"service":   e.Service,
+				"level":     e.Level,
+				"message":   e.Message,
+			}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(traceURL+"/api/logs", "application/json", bytes.NewReader(body))
+			if err == nil {
+				resp.Body.Close()
+			}
+		}(entry)
 	}
 
 	logBufferMu.Lock()
