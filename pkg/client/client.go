@@ -34,6 +34,8 @@ type MeshTransport struct {
 	cacheExpiry map[string]time.Time
 	breakers    map[string]*resilience.CircuitBreaker // target -> breaker
 	rrIndex     map[string]int
+	rules       map[string]registry.RoutingRule
+	rulesExpiry map[string]time.Time
 	
 	cacheTTL    time.Duration
 	tlsConfig   *tls.Config
@@ -53,6 +55,8 @@ func NewMeshTransport(registryURL string, cacheTTL time.Duration) *MeshTransport
 		cacheExpiry: make(map[string]time.Time),
 		breakers:    make(map[string]*resilience.CircuitBreaker),
 		rrIndex:     make(map[string]int),
+		rules:       make(map[string]registry.RoutingRule),
+		rulesExpiry: make(map[string]time.Time),
 		cacheTTL:    cacheTTL,
 	}
 }
@@ -71,10 +75,20 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("mesh: no healthy endpoints found for service '%s'", serviceName)
 	}
 
+	// Fetch dynamic routing rules
+	rule, _ := t.ResolveRule(req.Context(), serviceName)
+	maxRetries := rule.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+	backoffVal := rule.BackoffMs
+	if backoffVal <= 0 {
+		backoffVal = 50
+	}
+	backoff := time.Duration(backoffVal) * time.Millisecond
+
 	// Dynamic Retries + Circuit Breaking Loop
 	var lastErr error
-	maxRetries := 3
-	backoff := 50 * time.Millisecond
 
 	// Store request body for retries
 	var bodyBytes []byte
@@ -101,7 +115,12 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, fmt.Errorf("mesh: invalid target URL '%s': %w", target, err)
 		}
 
-		clonedReq := req.Clone(req.Context())
+		var cancel context.CancelFunc
+		ctx := req.Context()
+		if rule.TimeoutMs > 0 {
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(rule.TimeoutMs)*time.Millisecond)
+		}
+		clonedReq := req.Clone(ctx)
 		if t.tlsConfig != nil {
 			clonedReq.URL.Scheme = "https"
 		} else {
@@ -122,6 +141,9 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		resp, err := t.base.RoundTrip(clonedReq)
+		if cancel != nil && (err != nil || (resp != nil && resp.StatusCode >= 500)) {
+			cancel()
+		}
 		
 		if span != nil {
 			ServShared.EndSpan(span, err, map[string]interface{}{
@@ -366,4 +388,50 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 	}
 
 	return clientTLSConfig, serverTLSConfig, nil
+}
+
+func (t *MeshTransport) ResolveRule(ctx context.Context, serviceName string) (registry.RoutingRule, error) {
+	t.mu.Lock()
+	if exp, ok := t.rulesExpiry[serviceName]; ok && time.Now().Before(exp) {
+		rule := t.rules[serviceName]
+		t.mu.Unlock()
+		return rule, nil
+	}
+	t.mu.Unlock()
+
+	// Fallback default rule
+	defaultRule := registry.RoutingRule{
+		Service:    serviceName,
+		MaxRetries: 3,
+		TimeoutMs:  2000,
+		BackoffMs:  50,
+	}
+
+	resolveURL := fmt.Sprintf("%s/api/rules/%s", t.registryURL, serviceName)
+	req, err := http.NewRequestWithContext(ctx, "GET", resolveURL, nil)
+	if err != nil {
+		return defaultRule, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return defaultRule, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return defaultRule, fmt.Errorf("registry returned status %d", resp.StatusCode)
+	}
+
+	var rule registry.RoutingRule
+	if err := json.NewDecoder(resp.Body).Decode(&rule); err != nil {
+		return defaultRule, err
+	}
+
+	t.mu.Lock()
+	t.rules[serviceName] = rule
+	t.rulesExpiry[serviceName] = time.Now().Add(t.cacheTTL)
+	t.mu.Unlock()
+
+	return rule, nil
 }

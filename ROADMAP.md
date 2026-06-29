@@ -31,7 +31,7 @@ This roadmap outlines the planned development phases for the ServMesh library-le
 ## Phase 4: Console & Observability (Planned)
 - [x] **Topology Map**: Real-time dependency graph visualization in ServConsole. [June 29, 2026]
 - [x] **Breaker Alerting**: Sends telemetry signals to alert on circuit-breaker trips. [June 29, 2026]
-- [ ] **Dynamic Routing Rules**: Update client-side routing and retries dynamically via registry config.
+- [x] **Dynamic Routing Rules**: Update client-side routing and retries dynamically via registry config. [June 29, 2026]
 
 
 ## Phase 5: Advanced Traffic Management (Next Level)

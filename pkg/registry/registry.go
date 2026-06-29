@@ -26,9 +26,17 @@ type Instance struct {
 	Weight    int       `json:"weight,omitempty"`
 }
 
+type RoutingRule struct {
+	Service    string `json:"service"`
+	MaxRetries int    `json:"max_retries"`
+	TimeoutMs  int    `json:"timeout_ms"`
+	BackoffMs  int    `json:"backoff_ms"`
+}
+
 type Registry struct {
 	mu        sync.RWMutex
 	instances map[string][]Instance // key: service name
+	rules     map[string]RoutingRule
 	ttl       time.Duration
 
 	caCert    *x509.Certificate
@@ -38,6 +46,7 @@ type Registry struct {
 func NewRegistry(ttl time.Duration) *Registry {
 	r := &Registry{
 		instances: make(map[string][]Instance),
+		rules:     make(map[string]RoutingRule),
 		ttl:       ttl,
 	}
 	r.generateRootCA()
@@ -303,6 +312,62 @@ func (r *Registry) Handler() http.Handler {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(instances)
+	})
+
+	mux.HandleFunc("/api/rules", func(w http.ResponseWriter, req *http.Request) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		if req.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(r.rules)
+			return
+		} else if req.Method == http.MethodPost {
+			var rule RoutingRule
+			if err := json.NewDecoder(req.Body).Decode(&rule); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if rule.Service == "" {
+				http.Error(w, "Service name required", http.StatusBadRequest)
+				return
+			}
+			r.rules[strings.ToLower(rule.Service)] = rule
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"success"}`))
+			return
+		}
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/rules/", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+		if len(parts) < 3 {
+			http.Error(w, "Service name required", http.StatusBadRequest)
+			return
+		}
+		serviceName := strings.ToLower(parts[2])
+
+		r.mu.RLock()
+		rule, ok := r.rules[serviceName]
+		r.mu.RUnlock()
+
+		if !ok {
+			// Return default fallback rule
+			rule = RoutingRule{
+				Service:    serviceName,
+				MaxRetries: 3,
+				TimeoutMs:  2000,
+				BackoffMs:  50,
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rule)
 	})
 
 	return ServShared.AuthMiddleware(mux)

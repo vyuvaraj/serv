@@ -351,3 +351,45 @@ func registerInstanceWithWeight(t *testing.T, regURL, serviceName, address, vers
 		t.Fatalf("registration returned status %d", resp.StatusCode)
 	}
 }
+
+func TestDynamicRoutingRules(t *testing.T) {
+	reg := registry.NewRegistry(5 * time.Second)
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	// Configure a custom rule for the service
+	rule := registry.RoutingRule{
+		Service:    "test-service",
+		MaxRetries: 5,
+		TimeoutMs:  100,
+		BackoffMs:  10,
+	}
+	ruleBody, _ := json.Marshal(rule)
+	resp, err := http.Post(regServer.URL+"/api/rules", "application/json", bytes.NewReader(ruleBody))
+	if err != nil {
+		t.Fatalf("failed to post rule: %v", err)
+	}
+	resp.Body.Close()
+
+	transport := client.NewMeshTransport(regServer.URL, 50*time.Millisecond)
+
+	// 1. Resolve and check rule values
+	ctx := context.Background()
+	resRule, err := transport.ResolveRule(ctx, "test-service")
+	if err != nil {
+		t.Fatalf("failed to resolve rule: %v", err)
+	}
+
+	if resRule.MaxRetries != 5 || resRule.TimeoutMs != 100 || resRule.BackoffMs != 10 {
+		t.Errorf("expected custom rule (MaxRetries=5, TimeoutMs=100, BackoffMs=10), got %+v", resRule)
+	}
+
+	// 2. Resolve unknown service, should fall back to default
+	resDefaultRule, err := transport.ResolveRule(ctx, "unknown-service")
+	if err != nil {
+		t.Fatalf("failed to resolve default rule: %v", err)
+	}
+	if resDefaultRule.MaxRetries != 3 || resDefaultRule.TimeoutMs != 2000 || resDefaultRule.BackoffMs != 50 {
+		t.Errorf("expected default rule fallback, got %+v", resDefaultRule)
+	}
+}
