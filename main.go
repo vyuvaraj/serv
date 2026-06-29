@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -21,6 +22,11 @@ type SendRequest struct {
 	Template string                 `json:"template"` // Go template text
 	Context  map[string]interface{} `json:"context"`  // template variables
 }
+
+var (
+	rateLimits   = make(map[string][]time.Time)
+	rateLimitsMu sync.Mutex
+)
 
 type SendResponse struct {
 	Status      string `json:"status"`
@@ -73,6 +79,29 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Channel, target, and template are required", http.StatusBadRequest)
 		return
 	}
+
+	rateLimitsMu.Lock()
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Minute)
+
+	var active []time.Time
+	for _, t := range rateLimits[req.Target] {
+		if t.After(cutoff) {
+			active = append(active, t)
+		}
+	}
+
+	if len(active) >= 5 {
+		rateLimitsMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate_limit_exceeded","message":"Recipient rate limit exceeded. Max 5 messages per minute."}`))
+		return
+	}
+
+	active = append(active, now)
+	rateLimits[req.Target] = active
+	rateLimitsMu.Unlock()
 
 	// 1. Render template
 	tmpl, err := template.New("notification").Parse(req.Template)

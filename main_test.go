@@ -93,3 +93,38 @@ func TestServMailRetriesAndDLQ(t *testing.T) {
 		t.Errorf("expected queued_in_dlq status, got %q", res.Status)
 	}
 }
+
+func TestServMailRateLimiting(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/mail/send", handleSend)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	payload := SendRequest{
+		Channel:  "email",
+		Target:   "spammy-recipient@example.com",
+		Template: "Hello",
+	}
+	body, _ := json.Marshal(payload)
+
+	// Send 5 successful quick messages
+	for i := 0; i < 5; i++ {
+		resp, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		resp.Body.Close()
+	}
+
+	// 6th message should be rate limited (Too Many Requests - 429)
+	resp, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("expected StatusTooManyRequests (429) on 6th request, got %d", resp.StatusCode)
+	}
+}
