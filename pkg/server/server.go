@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -187,6 +188,20 @@ func (s *Server) handleIngest(w http.ResponseWriter, req *http.Request) {
 							}
 						}
 					}
+				}
+
+				// Detect database slow queries
+				durationMs := float64(endTime-startTime) / 1e6
+				_, hasDb := attrs["db.system"].(string)
+				dbStatement, hasStmt := attrs["db.statement"].(string)
+				
+				// Standard heuristic: name contains SQL keywords, or has db.system/db.statement
+				isDb := hasDb || hasStmt || strings.HasPrefix(strings.ToLower(name), "select") || strings.HasPrefix(strings.ToLower(name), "db:") || strings.HasPrefix(strings.ToLower(name), "query")
+				
+				if isDb && durationMs > 100 { // threshold: 100ms
+					attrs["db.slow_query"] = true
+					attrs["db.duration_ms"] = durationMs
+					fmt.Printf("[DATABASE_ALERT] Slow query detected in %s: '%s' took %.2fms (query: %s)\n", serviceName, name, durationMs, dbStatement)
 				}
 
 				parsedSpans = append(parsedSpans, store.Span{
