@@ -206,6 +206,7 @@ To align with the "Adapters First, Platform Second" strategy and widen the addre
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
+| 13.0 | **`serv dev` — One-Command Local Stack** | Medium | ✅ Done — `serv dev main.srv` starts ServStore, ServQueue, ServCache, ServGate in background + hot-reload user code. Ctrl+C stops all. | [x] |
 | 13.1 | **`auth` keyword & adapter** | Medium | `auth "keycloak://host/realm"`, `auth "auth0://domain"`, `auth "oidc://issuer"` connection strings. Middleware auto-validates tokens via configured provider. | [x] |
 | 13.2 | **`search` keyword & adapter** | Medium | `search "meilisearch://host:7700/index"`, `search "elastic://host:9200/index"` with `search.query()` and `search.index()` APIs. | [x] |
 | 13.3 | **`mail` keyword & adapter** | Small | `mail "smtp://host:587"`, `mail "ses://us-east-1"`, `mail "sendgrid://key"` with `mail.send()` API. | [x] |
