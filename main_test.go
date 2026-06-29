@@ -248,7 +248,10 @@ func TestServAuthKeysAndSessions(t *testing.T) {
 	// 2. Validate API Key
 	payloadVal := map[string]string{"key": keyRes.Key}
 	bodyVal, _ := json.Marshal(payloadVal)
-	respVal, _ := http.Post(testServer.URL+"/api/auth/keys/validate", "application/json", bytes.NewReader(bodyVal))
+	respVal, err := http.Post(testServer.URL+"/api/auth/keys/validate", "application/json", bytes.NewReader(bodyVal))
+	if err != nil {
+		t.Fatalf("failed API key validation request: %v", err)
+	}
 	defer respVal.Body.Close()
 
 	if respVal.StatusCode != http.StatusOK {
@@ -268,7 +271,10 @@ func TestServAuthKeysAndSessions(t *testing.T) {
 		Password: "password123",
 	}
 	regBody, _ := json.Marshal(regPayload)
-	regResp, _ := http.Post(testServer.URL+"/api/auth/register", "application/json", bytes.NewReader(regBody))
+	regResp, err := http.Post(testServer.URL+"/api/auth/register", "application/json", bytes.NewReader(regBody))
+	if err != nil {
+		t.Fatalf("failed register request: %v", err)
+	}
 	regResp.Body.Close()
 
 	loginPayload := LoginRequest{
@@ -276,7 +282,10 @@ func TestServAuthKeysAndSessions(t *testing.T) {
 		Password: "password123",
 	}
 	loginBody, _ := json.Marshal(loginPayload)
-	loginResp, _ := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(loginBody))
+	loginResp, err := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(loginBody))
+	if err != nil {
+		t.Fatalf("failed login request: %v", err)
+	}
 	var loginRes LoginResponse
 	json.NewDecoder(loginResp.Body).Decode(&loginRes)
 	loginResp.Body.Close()
@@ -288,7 +297,10 @@ func TestServAuthKeysAndSessions(t *testing.T) {
 	// 4. Revoke Session
 	revPayload := map[string]string{"token": loginRes.Token}
 	revBody, _ := json.Marshal(revPayload)
-	revResp, _ := http.Post(testServer.URL+"/api/auth/sessions/revoke", "application/json", bytes.NewReader(revBody))
+	revResp, err := http.Post(testServer.URL+"/api/auth/sessions/revoke", "application/json", bytes.NewReader(revBody))
+	if err != nil {
+		t.Fatalf("failed session revocation request: %v", err)
+	}
 	defer revResp.Body.Close()
 
 	if revResp.StatusCode != http.StatusOK {
@@ -401,5 +413,121 @@ func TestServAuthSocialLogin(t *testing.T) {
 
 	if cbRes["status"] != "success" || cbRes["username"] != "social-google-mock" || cbRes["access_token"] == "" {
 		t.Errorf("unexpected callback response: %+v", cbRes)
+	}
+}
+
+func TestServAuthUserMgmtAndSecrets(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/register", handleRegister)
+	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/api/auth/users", handleUsers)
+	mux.HandleFunc("/api/auth/users/roles", handleUsersRoles)
+	mux.HandleFunc("/api/auth/sessions", handleSessions)
+	mux.HandleFunc("/api/auth/secrets/encrypt", handleSecretsEncrypt)
+	mux.HandleFunc("/api/auth/secrets/decrypt", handleSecretsDecrypt)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Register and login
+	regPayload := RegisterRequest{
+		Username: "mgmt-user",
+		Email:    "mgmt@example.com",
+		Password: "password123",
+	}
+	regBody, _ := json.Marshal(regPayload)
+	regResp, err := http.Post(testServer.URL+"/api/auth/register", "application/json", bytes.NewReader(regBody))
+	if err != nil || regResp.StatusCode != http.StatusCreated {
+		t.Fatalf("register failed: %v", err)
+	}
+	regResp.Body.Close()
+
+	loginBody, _ := json.Marshal(LoginRequest{Username: "mgmt-user", Password: "password123"})
+	loginResp, err := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(loginBody))
+	if err != nil || loginResp.StatusCode != http.StatusOK {
+		t.Fatalf("login failed: %v", err)
+	}
+	loginResp.Body.Close()
+
+	// 2. Query users list -> should contain our new user
+	usersResp, err := http.Get(testServer.URL + "/api/auth/users")
+	if err != nil || usersResp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to query users: %v", err)
+	}
+	var usersList []map[string]interface{}
+	json.NewDecoder(usersResp.Body).Decode(&usersList)
+	usersResp.Body.Close()
+
+	found := false
+	for _, u := range usersList {
+		if u["username"] == "mgmt-user" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected to find mgmt-user in users list")
+	}
+
+	// 3. Assign role/scopes
+	rolePayload := map[string]interface{}{
+		"username": "mgmt-user",
+		"scopes":   []string{"admin", "read:all"},
+	}
+	roleBody, _ := json.Marshal(rolePayload)
+	roleResp, err := http.Post(testServer.URL+"/api/auth/users/roles", "application/json", bytes.NewReader(roleBody))
+	if err != nil || roleResp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to update user roles: %v", err)
+	}
+	roleResp.Body.Close()
+
+	// 4. Query active sessions -> should contain a session
+	sessionsResp, err := http.Get(testServer.URL + "/api/auth/sessions")
+	if err != nil || sessionsResp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to query sessions: %v", err)
+	}
+	var sessionsList []Session
+	json.NewDecoder(sessionsResp.Body).Decode(&sessionsList)
+	sessionsResp.Body.Close()
+
+	if len(sessionsList) == 0 {
+		t.Errorf("expected at least one active session")
+	}
+
+	// 5. Test secrets encrypt/decrypt
+	encPayload := map[string]string{"plaintext": "super-secret-credentials"}
+	encBody, _ := json.Marshal(encPayload)
+	encResp, err := http.Post(testServer.URL+"/api/auth/secrets/encrypt", "application/json", bytes.NewReader(encBody))
+	if err != nil || encResp.StatusCode != http.StatusOK {
+		t.Fatalf("encrypt failed: %v", err)
+	}
+	var encRes struct {
+		Ciphertext       string `json:"ciphertext"`
+		EncryptedDataKey string `json:"encrypted_data_key"`
+	}
+	json.NewDecoder(encResp.Body).Decode(&encRes)
+	encResp.Body.Close()
+
+	if encRes.Ciphertext == "" || encRes.EncryptedDataKey == "" {
+		t.Errorf("invalid encryption response: %+v", encRes)
+	}
+
+	decPayload := map[string]string{
+		"ciphertext":         encRes.Ciphertext,
+		"encrypted_data_key": encRes.EncryptedDataKey,
+	}
+	decBody, _ := json.Marshal(decPayload)
+	decResp, err := http.Post(testServer.URL+"/api/auth/secrets/decrypt", "application/json", bytes.NewReader(decBody))
+	if err != nil || decResp.StatusCode != http.StatusOK {
+		t.Fatalf("decrypt failed: %v", err)
+	}
+	var decRes struct {
+		Plaintext string `json:"plaintext"`
+	}
+	json.NewDecoder(decResp.Body).Decode(&decRes)
+	decResp.Body.Close()
+
+	if decRes.Plaintext != "super-secret-credentials" {
+		t.Errorf("expected decrypted plaintext 'super-secret-credentials', got %q", decRes.Plaintext)
 	}
 }

@@ -16,3 +16,5 @@ This roadmap outlines the planned development phases for the ServAuth identity p
 - [x] **MFA support** — TOTP / WebAuthn. [June 29, 2026]
 - [x] **Session management** — Active session revocation. [June 29, 2026]
 - [x] **API key issuance** — Scoped service accounts API keys. [June 29, 2026]
+- [x] **User management API** — Admin user CRUD and session lists. [June 29, 2026]
+- [x] **Secrets Envelope encryption** — KMS encryption simulator. [June 29, 2026]

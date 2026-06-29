@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,6 +121,11 @@ func main() {
 	mux.HandleFunc("/api/auth/mfa/verify", handleMfaVerify)
 	mux.HandleFunc("/api/auth/social/login", handleSocialLogin)
 	mux.HandleFunc("/api/auth/social/callback", handleSocialCallback)
+	mux.HandleFunc("/api/auth/users", handleUsers)
+	mux.HandleFunc("/api/auth/users/roles", handleUsersRoles)
+	mux.HandleFunc("/api/auth/sessions", handleSessions)
+	mux.HandleFunc("/api/auth/secrets/encrypt", handleSecretsEncrypt)
+	mux.HandleFunc("/api/auth/secrets/decrypt", handleSecretsDecrypt)
 
 	// Wrap in ServShared middleware (auth checks for dashboard endpoints if needed, but signup/login are public)
 	serverHandler := ServShared.AuthMiddleware(mux)
@@ -672,5 +678,145 @@ func handleSocialCallback(w http.ResponseWriter, r *http.Request) {
 		"status":       "success",
 		"username":     username,
 		"access_token": token,
+	})
+}
+
+func handleUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	usersMu.RLock()
+	var list []map[string]interface{}
+	for _, u := range users {
+		if u.TenantID == tenantID {
+			list = append(list, map[string]interface{}{
+				"username":    u.Username,
+				"email":       u.Email,
+				"tenant_id":   u.TenantID,
+				"mfa_enabled": u.MFAEnabled,
+			})
+		}
+	}
+	usersMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(list)
+}
+
+func handleUsersRoles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Username string   `json:"username"`
+		Scopes   []string `json:"scopes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	userKey := tenantID + ":" + req.Username
+
+	usersMu.Lock()
+	user, exists := users[userKey]
+	usersMu.Unlock()
+
+	if !exists {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "success",
+		"username": user.Username,
+		"scopes":   req.Scopes,
+	})
+}
+
+func handleSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionsMu.RLock()
+	var list []*Session
+	for _, s := range sessions {
+		if !s.Revoked {
+			list = append(list, s)
+		}
+	}
+	sessionsMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(list)
+}
+
+func handleSecretsEncrypt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Plaintext string `json:"plaintext"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	ciphertext := "enc::" + req.Plaintext
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"ciphertext":         ciphertext,
+		"encrypted_data_key": "mock-datakey-9876",
+	})
+}
+
+func handleSecretsDecrypt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Ciphertext       string `json:"ciphertext"`
+		EncryptedDataKey string `json:"encrypted_data_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasPrefix(req.Ciphertext, "enc::") {
+		http.Error(w, "Invalid ciphertext structure", http.StatusBadRequest)
+		return
+	}
+
+	plaintext := strings.TrimPrefix(req.Ciphertext, "enc::")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"plaintext": plaintext,
 	})
 }
