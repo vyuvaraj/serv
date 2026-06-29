@@ -136,7 +136,11 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		// Handle failure
+		oldState := breaker.State()
 		breaker.Failure()
+		if oldState != resilience.Open && breaker.State() == resilience.Open {
+			fmt.Printf("[CIRCUIT_BREAKER] State changed to Open for target %s (threshold: 3 errors)\n", target)
+		}
 		lastErr = err
 		if err == nil {
 			lastErr = fmt.Errorf("http error status %d", resp.StatusCode)
