@@ -1,0 +1,209 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// servDevServices defines the default services to start in dev mode.
+var servDevServices = []struct {
+	Name    string
+	Port    string
+	Binary  string
+	Args    []string
+	EnvVars []string
+}{
+	{"ServStore", "8081", "servstore", []string{"--port", "8081", "--data-dir", ".servdev/store-data"}, nil},
+	{"ServQueue", "8082", "servqueue", nil, nil},
+	{"ServCache", "8086", "servcache", nil, nil},
+	{"ServCron", "8087", "servcron", nil, []string{"PORT=8087"}},
+	{"ServGate", "8080", "servgate", nil, nil},
+	{"ServTrace", "8090", "servtrace", nil, nil},
+}
+
+func runDevCmd() {
+	devCmd := flag.NewFlagSet("dev", flag.ExitOnError)
+	servicesFlag := devCmd.String("services", "store,queue,cache,gate", "Comma-separated services to start (store,queue,cache,cron,gate,trace,all)")
+	portFlag := devCmd.String("port", "8080", "Port for the user's .srv service")
+	noConsoleFlag := devCmd.Bool("no-console", false, "Skip opening ServConsole dashboard")
+	if err := devCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error parsing arguments: %v\n", err)
+		os.Exit(1)
+	}
+
+	args := devCmd.Args()
+	srvFile := "."
+	if len(args) > 0 {
+		srvFile = args[0]
+	}
+
+	fmt.Println()
+	fmt.Println("  ▲ Serv Dev Environment")
+	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	// Create dev data directory
+	os.MkdirAll(".servdev/store-data", 0755)
+
+	// Determine which services to start
+	requestedServices := parseServiceList(*servicesFlag)
+
+	// Start infrastructure services
+	var procs []*devProcess
+	var wg sync.WaitGroup
+
+	for _, svc := range servDevServices {
+		if !requestedServices[svc.Name] {
+			continue
+		}
+
+		// Check if the binary is available on PATH
+		_, err := exec.LookPath(svc.Binary)
+		if err != nil {
+			fmt.Printf("  ⚠  %s binary not found (%s). Skipping.\n", svc.Name, svc.Binary)
+			continue
+		}
+
+		proc := startDevService(svc.Name, svc.Binary, svc.Port, svc.Args, svc.EnvVars)
+		if proc != nil {
+			procs = append(procs, proc)
+			fmt.Printf("  ✓  %s started on :%s\n", svc.Name, svc.Port)
+		}
+	}
+
+	fmt.Println()
+
+	// Wait for services to be healthy
+	fmt.Print("  Waiting for services...")
+	time.Sleep(2 * time.Second)
+	healthyCount := 0
+	for _, proc := range procs {
+		if checkDevHealth(proc.port) {
+			healthyCount++
+		}
+	}
+	fmt.Printf(" %d/%d healthy\n", healthyCount, len(procs))
+	fmt.Println()
+
+	// Start the user's .srv file with hot reload
+	fmt.Printf("  ▶  Starting %s with hot-reload on :%s\n", srvFile, *portFlag)
+	fmt.Println()
+
+	// Set environment for the user service to discover infra
+	os.Setenv("SERV_STORE_ENDPOINT", "http://localhost:8081")
+	os.Setenv("SERV_QUEUE_ENDPOINT", "localhost:8082")
+	os.Setenv("SERV_CACHE_ENDPOINT", "http://localhost:8086")
+	os.Setenv("SERV_GATE_ENDPOINT", "http://localhost:8080")
+	os.Setenv("SERV_TRACE_ENDPOINT", "http://localhost:8090")
+
+	if !*noConsoleFlag {
+		fmt.Println("  Dashboard: http://localhost:8083 (start ServConsole separately)")
+	}
+
+	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  Press Ctrl+C to stop all services\n\n")
+
+	// Run the user service with hot reload
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runServHot(srvFile, "")
+	}()
+
+	// Handle shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	fmt.Println("\n  Shutting down dev environment...")
+	for _, proc := range procs {
+		if proc.cmd != nil && proc.cmd.Process != nil {
+			proc.cmd.Process.Kill()
+		}
+	}
+	fmt.Println("  ✓ All services stopped.")
+}
+
+type devProcess struct {
+	name string
+	port string
+	cmd  *exec.Cmd
+}
+
+func startDevService(name, binary, port string, args, envVars []string) *devProcess {
+	cmd := exec.Command(binary, args...)
+	cmd.Stdout = nil // Suppress output in dev mode
+	cmd.Stderr = nil
+	cmd.Env = append(os.Environ(), envVars...)
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("  ✗  Failed to start %s: %v", name, err)
+		return nil
+	}
+
+	return &devProcess{name: name, port: port, cmd: cmd}
+}
+
+func checkDevHealth(port string) bool {
+	client := http.Client{Timeout: 1 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%s/healthz", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
+func parseServiceList(input string) map[string]bool {
+	result := make(map[string]bool)
+	if input == "all" {
+		for _, svc := range servDevServices {
+			result[svc.Name] = true
+		}
+		return result
+	}
+	for _, s := range splitComma(input) {
+		switch s {
+		case "store":
+			result["ServStore"] = true
+		case "queue":
+			result["ServQueue"] = true
+		case "cache":
+			result["ServCache"] = true
+		case "cron":
+			result["ServCron"] = true
+		case "gate":
+			result["ServGate"] = true
+		case "trace":
+			result["ServTrace"] = true
+		}
+	}
+	return result
+}
+
+func splitComma(s string) []string {
+	var result []string
+	current := ""
+	for _, c := range s {
+		if c == ',' {
+			if current != "" {
+				result = append(result, current)
+			}
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		result = append(result, current)
+	}
+	return result
+}
