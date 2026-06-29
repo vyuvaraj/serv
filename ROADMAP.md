@@ -37,3 +37,5 @@ This roadmap outlines the planned development phases for the ServCron distribute
 - [ ] **Job Templating**: Parameterized job definitions that accept runtime variables (e.g., date ranges, partition IDs).
 - [ ] **Execution Resource Limits**: CPU/memory limits per job execution. Kill long-running jobs after timeout.
 - [ ] **Cron Expression Builder UI**: Visual cron builder in ServConsole with next-5-runs preview.
+
+> **Note:** For long-running, stateful, multi-day workflows with human approval gates and saga compensation, see **ServFlow** — the proposed workflow orchestrator. ServCron Phase 4 focuses on short-lived DAG job pipelines (minutes), while ServFlow handles durable workflows (hours/days) with state checkpointing. They integrate via ServQueue: ServCron can trigger ServFlow workflows on schedule, and ServFlow steps can schedule follow-up jobs in ServCron.
