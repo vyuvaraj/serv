@@ -71,6 +71,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/resume", handleResume)
 	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
 
 	serverHandler := ServShared.AuthMiddleware(mux)
@@ -161,6 +162,67 @@ func handleExecute(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(inst)
 }
 
+func handleResume(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		InstanceID string `json:"instance_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	stateFile := fmt.Sprintf("%s.state", req.InstanceID)
+	data, err := os.ReadFile(stateFile)
+	if err != nil {
+		http.Error(w, "State checkpoint not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	var inst WorkflowInstance
+	if err := json.Unmarshal(data, &inst); err != nil {
+		http.Error(w, "Failed to unmarshal state checkpoint: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	mu.RLock()
+	def, defExists := definitions[inst.WorkflowID]
+	mu.RUnlock()
+
+	if !defExists {
+		http.Error(w, "Workflow definition not found", http.StatusNotFound)
+		return
+	}
+
+	// Reload instance and override state to running
+	inst.Status = "running"
+	inst.Logs = append(inst.Logs, "Workflow execution resumed from checkpoint.")
+	
+	// Reset any failed steps back to pending so they rerun
+	for _, state := range inst.TaskStates {
+		if state.Status == "failed" {
+			state.Status = "pending"
+			state.Error = ""
+		}
+	}
+
+	instPointer := &inst
+
+	mu.Lock()
+	instances[inst.ID] = instPointer
+	mu.Unlock()
+
+	go runWorkflow(instPointer, def)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(instPointer)
+}
+
 func handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -195,6 +257,14 @@ func handleGetInstance(w http.ResponseWriter, r *http.Request) {
 // runWorkflow executes tasks in DAG dependency order
 func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 	completedCount := 0
+	inst.mu.RLock()
+	for _, state := range inst.TaskStates {
+		if state.Status == "completed" {
+			completedCount++
+		}
+	}
+	inst.mu.RUnlock()
+
 	totalTasks := len(def.Tasks)
 
 	for completedCount < totalTasks {
@@ -235,6 +305,7 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 			state.StartedAt = time.Now()
 			inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s started.", task.Name))
 			inst.mu.Unlock()
+			saveCheckpoint(inst)
 
 			// Run action logic (simulation)
 			err := executeTaskAction(task)
@@ -248,6 +319,7 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 				inst.FinishedAt = time.Now()
 				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s failed: %v. Workflow failed.", task.Name, err))
 				inst.mu.Unlock()
+				saveCheckpoint(inst)
 				return
 			} else {
 				state.Status = "completed"
@@ -256,6 +328,7 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 				progressMade = true
 			}
 			inst.mu.Unlock()
+			saveCheckpoint(inst)
 		}
 
 		if !progressMade && completedCount < totalTasks {
@@ -265,6 +338,7 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 			inst.FinishedAt = time.Now()
 			inst.Logs = append(inst.Logs, "Cycle detected in DAG definition. Workflow aborted.")
 			inst.mu.Unlock()
+			saveCheckpoint(inst)
 			return
 		}
 	}
@@ -274,6 +348,19 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 	inst.FinishedAt = time.Now()
 	inst.Logs = append(inst.Logs, "Workflow completed successfully.")
 	inst.mu.Unlock()
+	saveCheckpoint(inst)
+}
+
+func saveCheckpoint(inst *WorkflowInstance) {
+	inst.mu.RLock()
+	defer inst.mu.RUnlock()
+
+	data, err := json.Marshal(inst)
+	if err != nil {
+		return
+	}
+
+	_ = os.WriteFile(fmt.Sprintf("%s.state", inst.ID), data, 0644)
 }
 
 func executeTaskAction(t Task) error {
