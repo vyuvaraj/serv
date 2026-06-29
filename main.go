@@ -2109,6 +2109,13 @@ func handleIngestLog(w http.ResponseWriter, r *http.Request) {
 		alertsMu.Unlock()
 	}
 
+	// Scan for anomaly detection prints to raise system alerts
+	if strings.Contains(entry.Message, "ANOMALY_DETECTION") || strings.Contains(entry.Message, "[ANOMALY_DETECTION]") {
+		alertsMu.Lock()
+		addOrUpdateAlert(entry.Service, "anomaly_detection", entry.Message, "warning")
+		alertsMu.Unlock()
+	}
+
 	logBufferMu.Lock()
 	if len(logBuffer) >= maxLogLimit {
 		logBuffer = logBuffer[1:]
