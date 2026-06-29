@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,10 +25,15 @@ type QueryResponse struct {
 }
 
 type PoolStats struct {
-	ActiveConnections int `json:"active_connections"`
-	IdleConnections   int `json:"idle_connections"`
-	MaxConnections    int `json:"max_connections"`
+	ActiveConnections int   `json:"active_connections"`
+	IdleConnections   int   `json:"idle_connections"`
+	MaxConnections    int   `json:"max_connections"`
 	TotalQueries      int64 `json:"total_queries"`
+}
+
+type StatsResponse struct {
+	Primary PoolStats `json:"primary"`
+	Replica PoolStats `json:"replica"`
 }
 
 // Simulated Connection
@@ -107,7 +113,10 @@ func (p *ConnectionPool) Stats() PoolStats {
 	}
 }
 
-var pool *ConnectionPool
+var (
+	primaryPool *ConnectionPool
+	replicaPool *ConnectionPool
+)
 
 func main() {
 	portStr := flag.String("port", "8097", "ServDB server port")
@@ -119,7 +128,8 @@ func main() {
 		port = *portStr
 	}
 
-	pool = NewConnectionPool(*maxConns)
+	primaryPool = NewConnectionPool(*maxConns)
+	replicaPool = NewConnectionPool(*maxConns)
 
 	mux := http.NewServeMux()
 
@@ -156,21 +166,33 @@ func handleQuery(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 
+	var targetPool *ConnectionPool
+	var targetName string
+
+	queryLower := strings.ToLower(strings.TrimSpace(req.Query))
+	if strings.HasPrefix(queryLower, "select") {
+		targetPool = replicaPool
+		targetName = "replica"
+	} else {
+		targetPool = primaryPool
+		targetName = "primary"
+	}
+
 	// Acquire mock pooled database connection handle
-	conn, err := pool.Acquire()
+	conn, err := targetPool.Acquire()
 	if err != nil {
 		http.Error(w, "Database unavailable: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	defer pool.Release(conn)
+	defer targetPool.Release(conn)
 
 	// Simulate brief query processing latency
 	time.Sleep(10 * time.Millisecond)
-	pool.IncrementQueries()
+	targetPool.IncrementQueries()
 
 	// Simulated query output rows
 	rows := []map[string]interface{}{
-		{"id": 1, "query": req.Query, "status": "executed", "conn_id": conn.ID},
+		{"id": 1, "query": req.Query, "status": "executed", "conn_id": conn.ID, "pool": targetName},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -188,7 +210,12 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	res := StatsResponse{
+		Primary: primaryPool.Stats(),
+		Replica: replicaPool.Stats(),
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(pool.Stats())
+	json.NewEncoder(w).Encode(res)
 }
