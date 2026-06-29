@@ -8,7 +8,7 @@ This roadmap outlines the planned development phases for the ServMail notificati
 - [x] **Multi-channel delivery** — SMTP email, Slack webhooks, and SMS. [June 29, 2026]
 - [x] **Template rendering engine** — Go-template parser with context injection. [June 29, 2026]
 - [ ] **Opt-out preferences** — Global subscription management.
-- [ ] **Serv-lang integration** — `mail.send()` and `notify()` builtins.
+- [x] **Serv-lang integration** — `mail.send()` and `notify()` builtins. [June 29, 2026]
 
 ## Phase 2: Delivery Control
 - [ ] **Dead letter queue retry** — Retry policies on delivery failure.
