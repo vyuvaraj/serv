@@ -11,6 +11,6 @@ This roadmap outlines the planned development phases for the ServMail notificati
 - [x] **Serv-lang integration** — `mail.send()` and `notify()` builtins. [June 29, 2026]
 
 ## Phase 2: Delivery Control
-- [ ] **Dead letter queue retry** — Retry policies on delivery failure.
+- [x] **Dead letter queue retry** — Retry policies on delivery failure. [June 29, 2026]
 - [ ] **Email tracking** — Open/click analytics.
 - [ ] **Attachments cold tier** — Eviction of large attachment payloads.

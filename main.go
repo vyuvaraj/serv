@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/vyuvaraj/ServShared"
 )
@@ -87,17 +89,49 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 
 	bodyStr := renderedBody.String()
 
-	// 2. Deliver via channel (simulate outputs)
+	// 2. Deliver via channel with retries (simulate temporary failures if target contains "fail")
 	channelLower := strings.ToLower(req.Channel)
-	switch channelLower {
-	case "email":
-		log.Printf("[ServMail] [EMAIL] Sending to %s: %s", req.Target, bodyStr)
-	case "slack":
-		log.Printf("[ServMail] [SLACK] Posting to webhook %s: %s", req.Target, bodyStr)
-	case "sms":
-		log.Printf("[ServMail] [SMS] Sending to number %s: %s", req.Target, bodyStr)
-	default:
-		http.Error(w, "Unsupported delivery channel: "+req.Channel, http.StatusBadRequest)
+	var deliveryErr error
+	maxAttempts := 3
+	backoff := 10 * time.Millisecond
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		deliveryErr = nil
+		if strings.Contains(req.Target, "fail") {
+			deliveryErr = fmt.Errorf("temporary network failure on attempt %d", attempt)
+		}
+
+		if deliveryErr == nil {
+			switch channelLower {
+			case "email":
+				log.Printf("[ServMail] [EMAIL] Sending to %s: %s", req.Target, bodyStr)
+			case "slack":
+				log.Printf("[ServMail] [SLACK] Posting to webhook %s: %s", req.Target, bodyStr)
+			case "sms":
+				log.Printf("[ServMail] [SMS] Sending to number %s: %s", req.Target, bodyStr)
+			default:
+				http.Error(w, "Unsupported delivery channel: "+req.Channel, http.StatusBadRequest)
+				return
+			}
+			break
+		}
+
+		log.Printf("[ServMail] Attempt %d failed: %v. Retrying in %v...", attempt, deliveryErr, backoff)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+
+	if deliveryErr != nil {
+		dlqMsgID := fmt.Sprintf("mail-%d", time.Now().UnixNano())
+		log.Printf("[DLQ] Published message to dead letter queue: %s (reason: %v)", dlqMsgID, deliveryErr)
+		
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(SendResponse{
+			Status:      "queued_in_dlq",
+			DeliveredTo: req.Target,
+			Body:        bodyStr,
+		})
 		return
 	}
 
