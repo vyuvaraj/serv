@@ -391,6 +391,30 @@ func main() {
 	mux.HandleFunc("/api/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
 	mux.HandleFunc("/api/v1/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
 
+	// AI Billing API endpoint
+	handleAIBilling := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			metrics := handler.GetAIBillingMetrics()
+			json.NewEncoder(w).Encode(metrics)
+		} else if r.Method == http.MethodPost {
+			// Set budget
+			var req struct {
+				TenantID           string  `json:"tenant_id"`
+				MaxCostPerDay      float64 `json:"max_cost_per_day_usd"`
+				MaxTokensPerMinute int     `json:"max_tokens_per_minute"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "Invalid request", http.StatusBadRequest)
+				return
+			}
+			handler.SetAIBudget(req.TenantID, req.MaxCostPerDay, req.MaxTokensPerMinute)
+			w.Write([]byte(`{"status":"budget_updated"}`))
+		}
+	}
+	mux.HandleFunc("/api/admin/ai-billing", withAdminRateLimit(60, handleAIBilling))
+	mux.HandleFunc("/api/v1/admin/ai-billing", withAdminRateLimit(60, handleAIBilling))
+
 	handleMetricsWS := func(w http.ResponseWriter, r *http.Request) {
 		if cfg.AuthToken != "" {
 			token := r.Header.Get("Authorization")

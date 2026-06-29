@@ -205,6 +205,7 @@ type GatewayHandler struct {
 	limitersMu     sync.RWMutex
 	apiKeys        map[string]APIKey
 	apiKeysMu      sync.RWMutex
+	aiBilling      *AIBillingTracker
 }
 
 func createMTLSTransport(clientCertPath, clientKeyPath, rootCAPath string) (http.RoundTripper, error) {
@@ -308,7 +309,22 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		transports:     transports,
 		limiters:       limiters,
 		apiKeys:        make(map[string]APIKey),
+		aiBilling:      NewAIBillingTracker(),
 	}
+}
+
+// GetAIBillingMetrics returns billing metrics for the admin API.
+func (h *GatewayHandler) GetAIBillingMetrics() map[string]interface{} {
+	return h.aiBilling.GetMetrics()
+}
+
+// SetAIBudget configures a spending limit for a tenant.
+func (h *GatewayHandler) SetAIBudget(tenantID string, maxCostPerDay float64, maxTokensPerMinute int) {
+	h.aiBilling.SetBudget(tenantID, &BudgetConfig{
+		MaxCostPerDay:      maxCostPerDay,
+		MaxTokensPerMinute: maxTokensPerMinute,
+		AlertThreshold:     80.0,
+	})
 }
 
 func (h *GatewayHandler) SetAPIKeys(keys []APIKey) {
