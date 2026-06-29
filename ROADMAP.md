@@ -18,11 +18,11 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 
 ## Phase 2: Observability UI & SQL Workbench Integration (Planned)
 - [x] **Interactive Waterfall UI**: Interactive Gantt-chart style trace waterfall interface. [June 29, 2026]
-- [ ] **Dependency Graph Generator**: Visual dependency graph indicating edge metrics (latency, error count).
+- [x] **Dependency Graph Generator**: Visual dependency graph indicating edge metrics (latency, error count). [June 29, 2026]
 - [x] **Database Slow Query Alerts**: Automatic highlighting of queries exceeding threshold. [June 29, 2026]
 
 ## Phase 3: High Scale & Retention (Planned)
-- [ ] **ServStore Cold Tier**: Export cold trace files to S3-compatible ServStore storage.
+- [x] **ServStore Cold Tier**: Export cold trace files to S3-compatible ServStore storage. [June 29, 2026]
 - [ ] **Sampling Policies**: Head-based and tail-based sampling rules to filter noise.
 - [ ] **Span metrics generation**: Auto-calculate throughput and latency percentiles (p50/p90/p99) on ingest.
 

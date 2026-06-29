@@ -36,10 +36,11 @@ type TraceSummary struct {
 }
 
 type Store struct {
-	mu     sync.RWMutex
-	spans  map[string][]Span // key: traceId
-	limit  int
-	order  []string // FIFO queue of traceIds for eviction
+	mu      sync.RWMutex
+	spans   map[string][]Span // key: traceId
+	limit   int
+	order   []string // FIFO queue of traceIds for eviction
+	OnEvict func(traceID string, spans []Span)
 }
 
 func NewStore(limit int) *Store {
@@ -64,7 +65,11 @@ func (s *Store) AddSpans(newSpans []Span) {
 			if len(s.spans) >= s.limit && len(s.order) > 0 {
 				oldest := s.order[0]
 				s.order = s.order[1:]
+				evicted := s.spans[oldest]
 				delete(s.spans, oldest)
+				if s.OnEvict != nil && len(evicted) > 0 {
+					go s.OnEvict(oldest, evicted)
+				}
 			}
 			s.spans[traceID] = []Span{}
 			s.order = append(s.order, traceID)
@@ -228,6 +233,140 @@ func (s *Store) GetTraceTree(traceID string) (*SpanNode, bool) {
 	buildTree(rootNode)
 
 	return rootNode, true
+}
+
+type DependencyNode struct {
+	ID         string  `json:"id"`
+	Throughput int     `json:"throughput"`
+	LatencyMs  float64 `json:"latency_ms"`
+	ErrorRate  float64 `json:"error_rate"`
+}
+
+type DependencyEdge struct {
+	Source     string  `json:"source"`
+	Target     string  `json:"target"`
+	Throughput int     `json:"throughput"`
+	LatencyMs  float64 `json:"latency_ms"`
+	ErrorRate  float64 `json:"error_rate"`
+}
+
+type DependencyGraph struct {
+	Nodes []DependencyNode `json:"nodes"`
+	Edges []DependencyEdge `json:"edges"`
+}
+
+func (s *Store) GenerateDependencyGraph() DependencyGraph {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	type stats struct {
+		requestCount int
+		totalLatency float64
+		errorCount   int
+	}
+
+	nodeStats := make(map[string]*stats)
+	edgeStats := make(map[string]map[string]*stats) // source -> target -> stats
+	
+	// First pass: locate span info and map span ID to service
+	spanServiceMap := make(map[string]string)
+	for _, spans := range s.spans {
+		for _, span := range spans {
+			spanServiceMap[span.SpanID] = span.Service
+		}
+	}
+
+	for _, spans := range s.spans {
+		for _, span := range spans {
+			svc := span.Service
+			if svc == "" {
+				svc = "unknown"
+			}
+
+			// Node stats
+			ns, ok := nodeStats[svc]
+			if !ok {
+				ns = &stats{}
+				nodeStats[svc] = ns
+			}
+			ns.requestCount++
+			latency := float64(span.EndTime-span.StartTime) / 1e6
+			if latency < 0 {
+				latency = 0
+			}
+			ns.totalLatency += latency
+			if span.Status == 2 {
+				ns.errorCount++
+			}
+
+			// Edge stats
+			if span.ParentSpanID != "" {
+				parentSvc, ok := spanServiceMap[span.ParentSpanID]
+				if ok && parentSvc != svc {
+					// We have a service-to-service call: parentSvc -> svc
+					if _, ok := edgeStats[parentSvc]; !ok {
+						edgeStats[parentSvc] = make(map[string]*stats)
+					}
+					es, ok := edgeStats[parentSvc][svc]
+					if !ok {
+						es = &stats{}
+						edgeStats[parentSvc][svc] = es
+					}
+					es.requestCount++
+					es.totalLatency += latency
+					if span.Status == 2 {
+						es.errorCount++
+					}
+				}
+			}
+		}
+	}
+
+	// Build nodes list
+	nodes := make([]DependencyNode, 0, len(nodeStats))
+	for id, ns := range nodeStats {
+		avgLatency := 0.0
+		if ns.requestCount > 0 {
+			avgLatency = ns.totalLatency / float64(ns.requestCount)
+		}
+		errRate := 0.0
+		if ns.requestCount > 0 {
+			errRate = float64(ns.errorCount) / float64(ns.requestCount)
+		}
+		nodes = append(nodes, DependencyNode{
+			ID:         id,
+			Throughput: ns.requestCount,
+			LatencyMs:  avgLatency,
+			ErrorRate:  errRate,
+		})
+	}
+
+	// Build edges list
+	var edges []DependencyEdge
+	for src, targets := range edgeStats {
+		for tgt, es := range targets {
+			avgLatency := 0.0
+			if es.requestCount > 0 {
+				avgLatency = es.totalLatency / float64(es.requestCount)
+			}
+			errRate := 0.0
+			if es.requestCount > 0 {
+				errRate = float64(es.errorCount) / float64(es.requestCount)
+			}
+			edges = append(edges, DependencyEdge{
+				Source:     src,
+				Target:     tgt,
+				Throughput: es.requestCount,
+				LatencyMs:  avgLatency,
+				ErrorRate:  errRate,
+			})
+		}
+	}
+
+	return DependencyGraph{
+		Nodes: nodes,
+		Edges: edges,
+	}
 }
 
 // ParseInt64Safe helper for OTLP timestamps

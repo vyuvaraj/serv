@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"servtrace/pkg/store"
 
@@ -30,6 +32,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/v1/traces", s.handleIngest)
 	mux.HandleFunc("/api/traces", s.handleListTraces)
+	mux.HandleFunc("/api/dependency-graph", s.handleDependencyGraph)
 	
 	mux.HandleFunc("/api/traces/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
@@ -246,10 +249,57 @@ func (s *Server) handleGetTraceTree(w http.ResponseWriter, req *http.Request, tr
 
 	tree, ok := s.traceStore.GetTraceTree(traceID)
 	if !ok {
-		http.Error(w, "Trace not found", http.StatusNotFound)
+		// Fallback to S3 Cold Tier!
+		endpoint := os.Getenv("SERV_CONFIG_S3_ENDPOINT")
+		if endpoint == "" {
+			endpoint = "http://localhost:8081"
+		}
+		bucket := "serv-traces"
+		authToken := os.Getenv("SERV_CONFIG_S3_AUTH_TOKEN")
+		if authToken == "" {
+			authToken = "gateway-secret-token"
+		}
+
+		fileURL := fmt.Sprintf("%s/%s/%s.json", endpoint, bucket, traceID)
+		fallbackReq, _ := http.NewRequestWithContext(req.Context(), "GET", fileURL, nil)
+		if authToken != "" {
+			fallbackReq.Header.Set("Authorization", "Bearer "+authToken)
+		}
+
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Do(fallbackReq)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var spans []store.Span
+			if err := json.NewDecoder(resp.Body).Decode(&spans); err == nil && len(spans) > 0 {
+				// Re-insert temporarily into store so we can build the tree
+				s.traceStore.AddSpans(spans)
+				if reloadedTree, ok := s.traceStore.GetTraceTree(traceID); ok {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(reloadedTree)
+					return
+				}
+			}
+		}
+		if err == nil {
+			resp.Body.Close()
+		}
+
+		http.Error(w, "Trace not found in memory or cold tier", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tree)
+}
+
+func (s *Server) handleDependencyGraph(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	graph := s.traceStore.GenerateDependencyGraph()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(graph)
 }

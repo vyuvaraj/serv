@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -33,6 +35,56 @@ func main() {
 	log.Printf("Trace limit in memory: %d", *limit)
 
 	ts := store.NewStore(*limit)
+	
+	// Setup Cold Tier Archiver callback
+	ts.OnEvict = func(traceID string, spans []store.Span) {
+		log.Printf("Cold Tier: Evicting trace %s to cold storage...", traceID)
+		
+		endpoint := os.Getenv("SERV_CONFIG_S3_ENDPOINT")
+		if endpoint == "" {
+			endpoint = "http://localhost:8081"
+		}
+		bucket := "serv-traces"
+		authToken := os.Getenv("SERV_CONFIG_S3_AUTH_TOKEN")
+		if authToken == "" {
+			authToken = "gateway-secret-token"
+		}
+
+		// Ensure bucket exists
+		bucketURL := fmt.Sprintf("%s/%s", endpoint, bucket)
+		req, _ := http.NewRequest("PUT", bucketURL, nil)
+		if authToken != "" {
+			req.Header.Set("Authorization", "Bearer "+authToken)
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		if r, err := client.Do(req); err == nil {
+			r.Body.Close()
+		}
+
+		// Upload trace payload
+		fileURL := fmt.Sprintf("%s/%s/%s.json", endpoint, bucket, traceID)
+		data, err := json.Marshal(spans)
+		if err != nil {
+			log.Printf("Cold Tier: Failed to marshal trace spans for %s: %v", traceID, err)
+			return
+		}
+		
+		upReq, _ := http.NewRequest("PUT", fileURL, bytes.NewReader(data))
+		upReq.Header.Set("Content-Type", "application/json")
+		if authToken != "" {
+			upReq.Header.Set("Authorization", "Bearer "+authToken)
+		}
+		
+		upClient := &http.Client{Timeout: 5 * time.Second}
+		resp, err := upClient.Do(upReq)
+		if err != nil {
+			log.Printf("Cold Tier: Failed to upload trace %s to ServStore: %v", traceID, err)
+			return
+		}
+		resp.Body.Close()
+		log.Printf("Cold Tier: Trace %s successfully archived to ServStore", traceID)
+	}
+
 	srv := server.NewServer(ts)
 	
 	httpSrv := &http.Server{
