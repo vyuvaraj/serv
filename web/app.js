@@ -1734,6 +1734,82 @@ let selectedNode = null;
 let graphAnimationId = null;
 let flowParticles = [];
 
+function clearInspector() {
+  const title = document.getElementById('inspector-title');
+  const body = document.getElementById('inspector-body');
+  if (title && body) {
+    title.textContent = 'No Node Selected';
+    body.innerHTML = '<p>Click on any service node in the topology graph on the left to inspect its real-time metrics, error rate, throughput, and active dependencies.</p>';
+  }
+}
+
+function updateInspector(node) {
+  const title = document.getElementById('inspector-title');
+  const body = document.getElementById('inspector-body');
+  if (!title || !body) return;
+  
+  title.textContent = node.label || node.id;
+  
+  // Find edges related to this node
+  const inbound = graphEdges.filter(e => e.to === node.id);
+  const outbound = graphEdges.filter(e => e.from === node.id);
+  
+  const statusBadge = node.online ? '<span class="badge online">ONLINE</span>' : '<span class="badge offline">OFFLINE</span>';
+  const errRatePct = ((node.error_rate || 0) * 100).toFixed(1);
+  const latency = node.latency_ms !== undefined ? `${node.latency_ms.toFixed(1)} ms` : '—';
+  const throughput = node.throughput !== undefined ? `${node.throughput} rps` : '—';
+  
+  let inboundHtml = '';
+  if (inbound.length > 0) {
+    inboundHtml = `<div style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+      <strong style="color: #fff; font-size: 0.8rem;">Inbound Connections:</strong>
+      ${inbound.map(e => `<div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.02); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.78rem; border: 1px solid rgba(255,255,255,0.02);">
+        <span style="font-family: var(--font-mono); color: #94a3b8;">← ${e.from} (${e.label || 'RPC'})</span>
+        <span style="font-family: var(--font-mono); color:${e.error_rate > 0.1 ? '#ef4444' : '#cbd5e1'}">${e.throughput || 0} rps | ${e.latency_ms || 0}ms</span>
+      </div>`).join('')}
+    </div>`;
+  } else {
+    inboundHtml = '<div style="margin-top:0.5rem; font-size:0.8rem; color:#64748b;">No inbound traffic</div>';
+  }
+  
+  let outboundHtml = '';
+  if (outbound.length > 0) {
+    outboundHtml = `<div style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+      <strong style="color: #fff; font-size: 0.8rem;">Outbound Connections:</strong>
+      ${outbound.map(e => `<div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.02); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.78rem; border: 1px solid rgba(255,255,255,0.02);">
+        <span style="font-family: var(--font-mono); color: #94a3b8;">→ ${e.to} (${e.label || 'RPC'})</span>
+        <span style="font-family: var(--font-mono); color:${e.error_rate > 0.1 ? '#ef4444' : '#cbd5e1'}">${e.throughput || 0} rps | ${e.latency_ms || 0}ms</span>
+      </div>`).join('')}
+    </div>`;
+  } else {
+    outboundHtml = '<div style="margin-top:0.5rem; font-size:0.8rem; color:#64748b;">No outbound traffic</div>';
+  }
+  
+  body.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="color: #94a3b8;">Status:</span>
+      ${statusBadge}
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: rgba(255,255,255,0.02); padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+      <div>
+        <div style="font-size:0.75rem; color:#64748b;">LATENCY</div>
+        <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-top:0.2rem; font-family: var(--font-mono);">${latency}</div>
+      </div>
+      <div>
+        <div style="font-size:0.75rem; color:#64748b;">THROUGHPUT</div>
+        <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-top:0.2rem; font-family: var(--font-mono);">${throughput}</div>
+      </div>
+      <div style="grid-column: span 2; margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">
+        <div style="font-size:0.75rem; color:#64748b;">ERROR RATE</div>
+        <div style="font-size:1.1rem; font-weight:600; color:${node.error_rate > 0.1 ? '#ef4444' : '#10b981'}; margin-top:0.2rem; font-family: var(--font-mono);">${errRatePct}%</div>
+      </div>
+    </div>
+    
+    ${inboundHtml}
+    ${outboundHtml}
+  `;
+}
+
 async function fetchDependencyGraph() {
   const canvas = document.getElementById('graph-canvas');
   if (!canvas) return;
@@ -1756,7 +1832,7 @@ async function fetchDependencyGraph() {
       const mouseY = e.clientY - rect.top;
       
       draggedNode = null;
-      selectedNode = null;
+      let hit = false;
       
       for (const node of graphNodes) {
         const dx = mouseX - node.x;
@@ -1764,9 +1840,15 @@ async function fetchDependencyGraph() {
         if (Math.sqrt(dx * dx + dy * dy) <= 45) {
           draggedNode = node;
           selectedNode = node;
+          updateInspector(node);
           logEvent('console', `Selected topology node: ${node.id}`);
+          hit = true;
           break;
         }
+      }
+      if (!hit) {
+        selectedNode = null;
+        clearInspector();
       }
     });
     
@@ -1782,7 +1864,7 @@ async function fetchDependencyGraph() {
   }
   
   try {
-    const res = await fetch('/api/topology');
+    const res = await fetch('/api/topology/live');
     if (!res.ok) {
       loadMockGraphData();
       startGraphRenderLoop(ctx, canvas);
@@ -1814,6 +1896,19 @@ async function fetchDependencyGraph() {
     });
 
     graphEdges = data.edges || [];
+    
+    // Update selectedNode state with new telemetry values if it exists
+    if (selectedNode) {
+      const updated = graphNodes.find(n => n.id === selectedNode.id);
+      if (updated) {
+        selectedNode = updated;
+        updateInspector(selectedNode);
+      } else {
+        selectedNode = null;
+        clearInspector();
+      }
+    }
+    
     startGraphRenderLoop(ctx, canvas);
   } catch (err) {
     loadMockGraphData();
@@ -2146,17 +2241,26 @@ function startGraphRenderLoop(ctx, canvas) {
       const fromNode = graphNodes.find(n => n.id === edge.from);
       const toNode = graphNodes.find(n => n.id === edge.to);
       if (fromNode && toNode) {
-        drawArrow(ctx, fromNode.x, fromNode.y, toNode.x, toNode.y, '#475569', edge.label);
+        const isErrorProne = edge.error_rate > 0.1;
+        const edgeColor = isErrorProne ? '#ef4444' : '#475569';
+        
+        let label = edge.label;
+        if (edge.throughput) {
+          label = `${edge.label || 'Call'} (${edge.throughput} rps)`;
+        }
+        drawArrow(ctx, fromNode.x, fromNode.y, toNode.x, toNode.y, edgeColor, label);
       }
     });
     
     // Periodically spawn particles on random edges
-    if (Math.random() < 0.03 && graphEdges.length > 0) {
+    if (Math.random() < 0.04 && graphEdges.length > 0) {
       const randomEdge = graphEdges[Math.floor(Math.random() * graphEdges.length)];
+      const throughputVal = randomEdge.throughput || 5;
       flowParticles.push({
         edge: randomEdge,
         progress: 0.0,
-        speed: 0.01 + Math.random() * 0.015
+        speed: 0.005 + Math.min(throughputVal * 0.001, 0.035),
+        color: randomEdge.error_rate > 0.1 ? '#ef4444' : '#6366f1'
       });
     }
     
@@ -2182,9 +2286,9 @@ function startGraphRenderLoop(ctx, canvas) {
         
         ctx.beginPath();
         ctx.arc(px, py, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = '#6366f1';
+        ctx.fillStyle = p.color || '#6366f1';
         ctx.shadowBlur = 8;
-        ctx.shadowColor = '#6366f1';
+        ctx.shadowColor = p.color || '#6366f1';
         ctx.fill();
         ctx.shadowBlur = 0;
       }
@@ -2192,21 +2296,31 @@ function startGraphRenderLoop(ctx, canvas) {
     
     // Draw nodes
     graphNodes.forEach(node => {
+      const isOffline = !node.online;
+      const isErrorProne = node.error_rate > 0.1;
+      const nodeColor = isOffline ? '#94a3b8' : (isErrorProne ? '#ef4444' : node.color);
+      
       ctx.beginPath();
       ctx.arc(node.x, node.y, 45, 0, 2 * Math.PI);
-      ctx.fillStyle = 'rgba(15, 17, 32, 0.85)';
-      ctx.strokeStyle = node.color;
+      ctx.fillStyle = isOffline ? 'rgba(15, 17, 32, 0.95)' : 'rgba(15, 17, 32, 0.85)';
+      ctx.strokeStyle = nodeColor;
       ctx.lineWidth = selectedNode === node ? 5 : 3;
       ctx.shadowBlur = selectedNode === node ? 18 : 10;
-      ctx.shadowColor = node.color;
+      ctx.shadowColor = nodeColor;
       ctx.fill();
       ctx.stroke();
       ctx.shadowBlur = 0;
       
       ctx.font = 'bold 12px Outfit';
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = isOffline ? '#94a3b8' : '#ffffff';
       ctx.textAlign = 'center';
-      ctx.fillText(node.id, node.x, node.y + 4);
+      ctx.fillText(node.id, node.x, node.y + (isErrorProne ? -4 : 4));
+      
+      if (isErrorProne) {
+        ctx.font = 'bold 10px JetBrains Mono';
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText('! ERROR', node.x, node.y + 12);
+      }
     });
     
     graphAnimationId = requestAnimationFrame(updateAndDraw);

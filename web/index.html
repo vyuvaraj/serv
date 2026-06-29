@@ -803,8 +803,20 @@
               <button class="btn btn-secondary btn-sm" id="btn-refresh-graph">Refresh Graph</button>
             </div>
             <p class="section-desc">Visual topological dependency map auto-discovered from OpenTelemetry traces.</p>
-            <div class="graph-container" style="display: flex; justify-content: center; align-items: center; min-height: 500px; background: rgba(15,17,32,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); margin-top: 1.5rem; position: relative;">
-              <canvas id="graph-canvas" width="800" height="500" style="max-width: 100%; height: auto;"></canvas>
+            <div style="display: flex; gap: 1.5rem; margin-top: 1.5rem; flex-wrap: wrap; width: 100%;">
+              <!-- Left: Canvas -->
+              <div class="graph-container" style="flex: 2; min-width: 450px; background: rgba(15,17,32,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); position: relative; display: flex; justify-content: center; align-items: center; min-height: 500px;">
+                <canvas id="graph-canvas" width="800" height="500" style="max-width: 100%; height: auto;"></canvas>
+              </div>
+              <!-- Right: Selection Inspector -->
+              <div class="card glass-card" style="flex: 1; min-width: 280px; margin-top: 0; background: rgba(15, 17, 32, 0.4); border: 1px solid rgba(255,255,255,0.05);" id="graph-inspector">
+                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.75rem;">
+                  <h3 id="inspector-title" style="margin: 0; font-size: 1.1rem; color: #fff;">No Node Selected</h3>
+                </div>
+                <div id="inspector-body" style="padding: 1rem; font-size: 0.85rem; color: #94a3b8; display: flex; flex-direction: column; gap: 1rem;">
+                  <p>Click on any service node in the topology graph on the left to inspect its real-time metrics, error rate, throughput, and active dependencies.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
