@@ -49,6 +49,13 @@ type MetricSummary struct {
 	P99        float64 `json:"p99_ms"`
 }
 
+type LogLine struct {
+	Timestamp time.Time `json:"timestamp"`
+	Service   string    `json:"service"`
+	Level     string    `json:"level"`
+	Message   string    `json:"message"`
+}
+
 type Store struct {
 	mu           sync.RWMutex
 	spans        map[string][]Span // key: traceId
@@ -61,6 +68,7 @@ type Store struct {
 	// Metrics fields
 	latencies  map[string][]float64   // key: service:spanName -> list of latencies in ms
 	timestamps map[string][]time.Time // key: service:spanName -> list of hit timestamps
+	traceLogs  map[string][]LogLine   // key: traceId
 }
 
 func NewStore(limit int) *Store {
@@ -77,6 +85,7 @@ func NewStore(limit int) *Store {
 		sampled:      make(map[string]bool),
 		latencies:    make(map[string][]float64),
 		timestamps:   make(map[string][]time.Time),
+		traceLogs:    make(map[string][]LogLine),
 	}
 }
 
@@ -101,6 +110,7 @@ func (s *Store) AddSpans(newSpans []Span) {
 				// Tail-based sampling evaluation during eviction!
 				isSampled := s.sampled[oldest]
 				delete(s.sampled, oldest)
+				delete(s.traceLogs, oldest)
 				
 				if isSampled && s.OnEvict != nil && len(evicted) > 0 {
 					go s.OnEvict(oldest, evicted)
@@ -545,5 +555,29 @@ func (s *Store) GetMetrics() []MetricSummary {
 	}
 
 	return summaries
+}
+
+func (s *Store) AddLog(traceID string, log LogLine) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.traceLogs[traceID] = append(s.traceLogs[traceID], log)
+	// Cap logs to 100 per trace to avoid infinite growth
+	if len(s.traceLogs[traceID]) > 100 {
+		s.traceLogs[traceID] = s.traceLogs[traceID][1:]
+	}
+}
+
+func (s *Store) GetLogs(traceID string) []LogLine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	logs, ok := s.traceLogs[traceID]
+	if !ok {
+		return []LogLine{}
+	}
+	
+	logsCopy := make([]LogLine, len(logs))
+	copy(logsCopy, logs)
+	return logsCopy
 }
 

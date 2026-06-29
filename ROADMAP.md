@@ -11,28 +11,27 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 
 ---
 
-## Phase 1: OTLP Ingest & Tree Collector (Completed)
+## Phase 1: OTLP Ingestion & Tree Collector (Completed)
 - [x] **OTLP Ingestion endpoint**: Supports standard `/v1/traces` HTTP POST payload ingestion.
 - [x] **Hierarchical Trace Tree**: Reconstructs parent-child relationships and calculates duration metrics.
 - [x] **Trace Query APIs**: REST APIs to list traces and fetch waterfall visualization trees.
 
-## Phase 2: Observability UI & SQL Workbench Integration (Planned)
+## Phase 2: Observability UI & SQL Workbench Integration (Completed)
 - [x] **Interactive Waterfall UI**: Interactive Gantt-chart style trace waterfall interface. [June 29, 2026]
 - [x] **Dependency Graph Generator**: Visual dependency graph indicating edge metrics (latency, error count). [June 29, 2026]
 - [x] **Database Slow Query Alerts**: Automatic highlighting of queries exceeding threshold. [June 29, 2026]
 
-## Phase 3: High Scale & Retention (Planned)
+## Phase 3: High Scale & Retention (Completed)
 - [x] **ServStore Cold Tier**: Export cold trace files to S3-compatible ServStore storage. [June 29, 2026]
 - [x] **Sampling Policies**: Head-based and tail-based sampling rules to filter noise. [June 29, 2026]
 - [x] **Span metrics generation**: Auto-calculate throughput and latency percentiles (p50/p90/p99) on ingest. [June 29, 2026]
 
-
-## Phase 3: Production Observability (Next Level)
+## Phase 4: Production Observability (Next Level)
 - [ ] **Trace Sampling Strategies**: Head-based and tail-based sampling with configurable rates per service.
 - [x] **Span Anomaly Detection**: Detect latency spikes and error bursts automatically. Alert via ServConsole. [June 29, 2026]
 - [ ] **Trace Comparison**: Compare two traces side-by-side to identify regression causes.
 - [ ] **Service Map Generation**: Auto-build dependency graph from trace parent-child relationships.
 - [ ] **Retention Policies**: Configurable TTL per service. Auto-archive old traces to ServStore.
 - [ ] **Metrics Derivation**: Extract RED metrics (Rate, Error, Duration) from traces. No separate metrics pipeline needed.
-- [ ] **Trace-to-Log Correlation**: Link trace spans to structured log entries via shared trace_id.
+- [x] **Trace-to-Log Correlation**: Link trace spans directly to structured log entries via shared trace_id. [June 29, 2026]
 - [ ] **Distributed Context Baggage**: Propagate custom key-value pairs across service boundaries via trace context.

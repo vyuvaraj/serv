@@ -354,3 +354,58 @@ func TestSpanMetricsAndAnomalies(t *testing.T) {
 		{TraceID: "trace-burst", SpanID: "b-span3", Service: "database", Name: "Select", Status: 1},
 	})
 }
+
+func TestTraceToLogCorrelation(t *testing.T) {
+	ts := store.NewStore(5)
+	srv := server.NewServer(ts)
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	// 1. Add trace spans
+	ts.AddSpans([]store.Span{
+		{TraceID: "correlated-trace-id", SpanID: "span1", Name: "GET", Status: 1, Service: "gateway", StartTime: 1000, EndTime: 2000},
+	})
+
+	// 2. Ingest logs associated with this traceID
+	logPayload := map[string]interface{}{
+		"traceId":   "correlated-trace-id",
+		"service":   "gateway",
+		"level":     "info",
+		"message":   "Gateway received request on path /users",
+		"timestamp": time.Now(),
+	}
+	body, _ := json.Marshal(logPayload)
+	resp, err := http.Post(testServer.URL+"/api/logs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to post log: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected StatusAccepted, got %d", resp.StatusCode)
+	}
+
+	// 3. Fetch correlated logs via the endpoint
+	getResp, err := http.Get(testServer.URL + "/api/traces/correlated-trace-id/logs")
+	if err != nil {
+		t.Fatalf("failed to get trace logs: %v", err)
+	}
+	defer getResp.Body.Close()
+
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected StatusOK, got %d", getResp.StatusCode)
+	}
+
+	var logs []store.LogLine
+	if err := json.NewDecoder(getResp.Body).Decode(&logs); err != nil {
+		t.Fatalf("failed to decode logs payload: %v", err)
+	}
+
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 correlated log line, got %d", len(logs))
+	}
+
+	if logs[0].Message != "Gateway received request on path /users" {
+		t.Errorf("expected log message to match, got %q", logs[0].Message)
+	}
+}

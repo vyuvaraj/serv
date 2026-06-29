@@ -34,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/traces", s.handleListTraces)
 	mux.HandleFunc("/api/dependency-graph", s.handleDependencyGraph)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
+	mux.HandleFunc("/api/logs", s.handleIngestLog)
 	
 	mux.HandleFunc("/api/traces/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
@@ -50,6 +51,10 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		traceID := parts[2]
+		if len(parts) == 4 && parts[3] == "logs" {
+			s.handleGetTraceLogs(w, req, traceID)
+			return
+		}
 		s.handleGetTraceTree(w, req, traceID)
 	})
 
@@ -314,4 +319,55 @@ func (s *Server) handleGetMetrics(w http.ResponseWriter, req *http.Request) {
 	metrics := s.traceStore.GetMetrics()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(metrics)
+}
+
+type IngestLogReq struct {
+	TraceID   string    `json:"traceId"`
+	Timestamp time.Time `json:"timestamp"`
+	Service   string    `json:"service"`
+	Level     string    `json:"level"`
+	Message   string    `json:"message"`
+}
+
+func (s *Server) handleIngestLog(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var r IngestLogReq
+	if err := json.NewDecoder(req.Body).Decode(&r); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if r.TraceID == "" {
+		http.Error(w, "TraceID required", http.StatusBadRequest)
+		return
+	}
+
+	if r.Timestamp.IsZero() {
+		r.Timestamp = time.Now()
+	}
+
+	s.traceStore.AddLog(r.TraceID, store.LogLine{
+		Timestamp: r.Timestamp,
+		Service:   r.Service,
+		Level:     r.Level,
+		Message:   r.Message,
+	})
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"status":"accepted"}`))
+}
+
+func (s *Server) handleGetTraceLogs(w http.ResponseWriter, req *http.Request, traceID string) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	logs := s.traceStore.GetLogs(traceID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(logs)
 }
