@@ -75,6 +75,7 @@ func main() {
 	mux.HandleFunc("/api/workflows/define", handleDefine)
 	mux.HandleFunc("/api/workflows/execute", handleExecute)
 	mux.HandleFunc("/api/workflows/resume", handleResume)
+	mux.HandleFunc("/api/workflows/approve", handleApprove)
 	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
 
 	serverHandler := ServShared.AuthMiddleware(mux)
@@ -226,6 +227,78 @@ func handleResume(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(instPointer)
 }
 
+func handleApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		InstanceID string `json:"instance_id"`
+		TaskName   string `json:"task_name"`
+		Decision   string `json:"decision"` // approve or reject
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	inst, exists := instances[req.InstanceID]
+	mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Instance not found", http.StatusNotFound)
+		return
+	}
+
+	inst.mu.Lock()
+	state, taskExists := inst.TaskStates[req.TaskName]
+	if !taskExists || state.Status != "pending_approval" {
+		inst.mu.Unlock()
+		http.Error(w, "Task is not pending approval", http.StatusBadRequest)
+		return
+	}
+
+	if req.Decision == "approve" {
+		state.Status = "completed"
+		inst.Status = "running"
+		inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s approved manually. Resuming workflow...", req.TaskName))
+	} else {
+		state.Status = "failed"
+		state.Error = "Manual approval rejected"
+		inst.Status = "failed"
+		inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s rejected manually. Initiating Saga compensations...", req.TaskName))
+	}
+	inst.mu.Unlock()
+	saveCheckpoint(inst)
+
+	mu.RLock()
+	def := definitions[inst.WorkflowID]
+	mu.RUnlock()
+
+	if req.Decision == "approve" {
+		go runWorkflow(inst, def)
+	} else {
+		inst.mu.Lock()
+		inst.FinishedAt = time.Now()
+		for i := len(def.Tasks) - 1; i >= 0; i-- {
+			t := def.Tasks[i]
+			tState := inst.TaskStates[t.Name]
+			if tState.Status == "completed" && t.CompensateAction != "" {
+				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
+				tState.Status = "compensated"
+			}
+		}
+		inst.mu.Unlock()
+		saveCheckpoint(inst)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(inst)
+}
+
 func handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -304,6 +377,15 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 			}
 
 			// Start executing task
+			if task.Action == "approval" {
+				state.Status = "pending_approval"
+				inst.Status = "paused"
+				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s paused pending manual approval.", task.Name))
+				inst.mu.Unlock()
+				saveCheckpoint(inst)
+				return
+			}
+
 			state.Status = "running"
 			state.StartedAt = time.Now()
 			inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s started.", task.Name))

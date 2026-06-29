@@ -12,6 +12,6 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 - [x] **Serv-lang integration** — Native workflow engine syntax support. [June 29, 2026]
 
 ## Phase 2: Workflow Management
-- [ ] **Human approval gates** — Execution pauses pending manual approval.
+- [x] **Human approval gates** — Execution pauses pending manual approval. [June 29, 2026]
 - [x] **Timeout & retry policies** — Configurable step timeouts and retry strategies. [June 29, 2026]
 - [ ] **Execution history** — Complete audit trail logs.

@@ -323,3 +323,79 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 	}
 	_ = os.Remove(inst2.ID + ".state")
 }
+
+func TestServFlowHumanApprovalGates(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/approve", handleApprove)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define DAG Workflow with Approval: Task A (success) -> Task B (approval) -> Task C (success)
+	defPayload := WorkflowDef{
+		ID: "approval-flow",
+		Tasks: []Task{
+			{Name: "TaskA", DependsOn: nil, Action: "success"},
+			{Name: "TaskB", DependsOn: []string{"TaskA"}, Action: "approval"},
+			{Name: "TaskC", DependsOn: []string{"TaskB"}, Action: "success"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "approval-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait briefly for Task A to complete and Task B to pause
+	time.Sleep(100 * time.Millisecond)
+
+	// Query Instance status - should be "paused"
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	if finalInst.Status != "paused" {
+		t.Fatalf("expected workflow to be paused on approval step, got %q. Logs: %v", finalInst.Status, finalInst.Logs)
+	}
+	if finalInst.TaskStates["TaskB"].Status != "pending_approval" {
+		t.Errorf("expected TaskB to be pending_approval, got %q", finalInst.TaskStates["TaskB"].Status)
+	}
+
+	// Approve task manually
+	approvePayload := map[string]string{
+		"instance_id": inst.ID,
+		"task_name":   "TaskB",
+		"decision":    "approve",
+	}
+	approveBody, _ := json.Marshal(approvePayload)
+	approveResp, _ := http.Post(testServer.URL+"/api/workflows/approve", "application/json", bytes.NewReader(approveBody))
+	approveResp.Body.Close()
+
+	// Wait for continuation
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify completed successfully!
+	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst2 WorkflowInstance
+	json.NewDecoder(getResp2.Body).Decode(&finalInst2)
+	getResp2.Body.Close()
+
+	if finalInst2.Status != "completed" {
+		t.Errorf("expected workflow to complete after approval, got %q. Logs: %v", finalInst2.Status, finalInst2.Logs)
+	}
+	if finalInst2.TaskStates["TaskC"].Status != "completed" {
+		t.Errorf("expected TaskC to be completed, got %q", finalInst2.TaskStates["TaskC"].Status)
+	}
+
+	_ = os.Remove(inst.ID + ".state")
+}
