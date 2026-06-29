@@ -199,3 +199,89 @@ func TestServMailTemplateVersioning(t *testing.T) {
 		t.Errorf("expected rendered v2 content, got %q", resS2.Body)
 	}
 }
+
+func TestServMailTrackingAndPreferences(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/mail/send", handleSend)
+	mux.HandleFunc("/api/mail/tracking/", handleGetTracking)
+	mux.HandleFunc("/api/mail/tracking/event", handlePostTrackingEvent)
+	mux.HandleFunc("/api/mail/preferences", handlePreferences)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Send mail and extract tracking ID
+	sendPayload := SendRequest{
+		Channel:  "email",
+		Target:   "track-user@example.com",
+		Template: "Hello Tracking!",
+		Category: "marketing",
+	}
+	body, _ := json.Marshal(sendPayload)
+	resp, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to send: %v", err)
+	}
+	var sendRes SendResponse
+	json.NewDecoder(resp.Body).Decode(&sendRes)
+	resp.Body.Close()
+
+	if sendRes.MessageID == "" {
+		t.Fatalf("expected valid message ID in response")
+	}
+
+	// 2. Query tracking status -> should be "sent"
+	getResp, err := http.Get(testServer.URL + "/api/mail/tracking/" + sendRes.MessageID)
+	if err != nil || getResp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to query tracking: %v", err)
+	}
+	var trackInfo TrackingInfo
+	json.NewDecoder(getResp.Body).Decode(&trackInfo)
+	getResp.Body.Close()
+
+	if trackInfo.Status != "sent" {
+		t.Errorf("expected status 'sent', got %q", trackInfo.Status)
+	}
+
+	// 3. Post event -> open message
+	eventPayload := map[string]string{
+		"message_id": sendRes.MessageID,
+		"status":     "opened",
+	}
+	eventBody, _ := json.Marshal(eventPayload)
+	eventResp, err := http.Post(testServer.URL+"/api/mail/tracking/event", "application/json", bytes.NewReader(eventBody))
+	if err != nil || eventResp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to post event: %v", err)
+	}
+	eventResp.Body.Close()
+
+	// 4. Query tracking status again -> should be "opened"
+	getResp2, _ := http.Get(testServer.URL + "/api/mail/tracking/" + sendRes.MessageID)
+	var trackInfo2 TrackingInfo
+	json.NewDecoder(getResp2.Body).Decode(&trackInfo2)
+	getResp2.Body.Close()
+
+	if trackInfo2.Status != "opened" {
+		t.Errorf("expected status 'opened', got %q", trackInfo2.Status)
+	}
+
+	// 5. Update preferences to opt-out of "marketing"
+	prefPayload := Preferences{
+		Recipient: "track-user@example.com",
+		OptedOut:  map[string]bool{"marketing": true},
+	}
+	prefBody, _ := json.Marshal(prefPayload)
+	prefResp, err := http.Post(testServer.URL+"/api/mail/preferences", "application/json", bytes.NewReader(prefBody))
+	if err != nil || prefResp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to update preferences: %v", err)
+	}
+	prefResp.Body.Close()
+
+	// 6. Try sending marketing email again -> should fail with StatusForbidden (403)
+	resp2, _ := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Errorf("expected StatusForbidden (403) for opted out category, got %d", resp2.StatusCode)
+	}
+}

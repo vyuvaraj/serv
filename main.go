@@ -21,7 +21,20 @@ type SendRequest struct {
 	Target   string                 `json:"target"`   // email address, webhook URL, or phone number
 	Template string                 `json:"template"` // Go template text or registered name
 	Version  string                 `json:"version"`  // Optional template version
+	Category string                 `json:"category"`  // e.g. "marketing", "transactional", "alerts"
 	Context  map[string]interface{} `json:"context"`  // template variables
+}
+
+type TrackingInfo struct {
+	MessageID   string    `json:"message_id"`
+	Status      string    `json:"status"` // sent, opened, clicked, bounced
+	DeliveredTo string    `json:"delivered_to"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type Preferences struct {
+	Recipient string          `json:"recipient"`
+	OptedOut  map[string]bool `json:"opted_out"` // category -> is_opted_out
 }
 
 var (
@@ -29,9 +42,14 @@ var (
 	rateLimitsMu   sync.Mutex
 	templateRepo   = make(map[string]map[string]string) // name -> version -> content
 	templateRepoMu sync.RWMutex
+	trackingRepo   = make(map[string]*TrackingInfo)
+	trackingMu     sync.RWMutex
+	preferences    = make(map[string]*Preferences)
+	preferencesMu  sync.RWMutex
 )
 
 type SendResponse struct {
+	MessageID   string `json:"message_id,omitempty"`
 	Status      string `json:"status"`
 	DeliveredTo string `json:"delivered_to"`
 	Body        string `json:"body"`
@@ -58,6 +76,9 @@ func main() {
 	})
 	mux.HandleFunc("/api/mail/send", handleSend)
 	mux.HandleFunc("/api/mail/templates", handleRegisterTemplate)
+	mux.HandleFunc("/api/mail/tracking/", handleGetTracking)
+	mux.HandleFunc("/api/mail/tracking/event", handlePostTrackingEvent)
+	mux.HandleFunc("/api/mail/preferences", handlePreferences)
 
 	serverHandler := ServShared.AuthMiddleware(mux)
 
@@ -106,6 +127,22 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 	active = append(active, now)
 	rateLimits[req.Target] = active
 	rateLimitsMu.Unlock()
+
+	// Check recipient category preference
+	category := req.Category
+	if category == "" {
+		category = "transactional"
+	}
+	preferencesMu.RLock()
+	pref, exists := preferences[req.Target]
+	if exists && pref.OptedOut[category] {
+		preferencesMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":"opted_out","message":"Recipient has opted out of category: ` + category + `"}`))
+		return
+	}
+	preferencesMu.RUnlock()
 
 	// 1. Resolve template content
 	templateText := req.Template
@@ -167,13 +204,25 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		backoff *= 2
 	}
 
+	msgID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
+
 	if deliveryErr != nil {
 		dlqMsgID := fmt.Sprintf("mail-%d", time.Now().UnixNano())
 		log.Printf("[DLQ] Published message to dead letter queue: %s (reason: %v)", dlqMsgID, deliveryErr)
 		
+		trackingMu.Lock()
+		trackingRepo[msgID] = &TrackingInfo{
+			MessageID:   msgID,
+			Status:      "bounced",
+			DeliveredTo: req.Target,
+			UpdatedAt:   time.Now(),
+		}
+		trackingMu.Unlock()
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		json.NewEncoder(w).Encode(SendResponse{
+			MessageID:   msgID,
 			Status:      "queued_in_dlq",
 			DeliveredTo: req.Target,
 			Body:        bodyStr,
@@ -181,9 +230,19 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	trackingMu.Lock()
+	trackingRepo[msgID] = &TrackingInfo{
+		MessageID:   msgID,
+		Status:      "sent",
+		DeliveredTo: req.Target,
+		UpdatedAt:   time.Now(),
+	}
+	trackingMu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(SendResponse{
+		MessageID:   msgID,
 		Status:      "delivered",
 		DeliveredTo: req.Target,
 		Body:        bodyStr,
@@ -223,4 +282,115 @@ func handleRegisterTemplate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"status":"success","message":"Template version registered successfully"}`))
+}
+
+func handleGetTracking(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := r.URL.Path
+	var msgID string
+	fmt.Sscanf(path, "/api/mail/tracking/%s", &msgID)
+	if msgID == "" {
+		http.Error(w, "Message ID is required", http.StatusBadRequest)
+		return
+	}
+
+	trackingMu.RLock()
+	info, exists := trackingRepo[msgID]
+	trackingMu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Tracking info not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(info)
+}
+
+func handlePostTrackingEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		MessageID string `json:"message_id"`
+		Status    string `json:"status"` // opened, clicked, bounced
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	trackingMu.Lock()
+	info, exists := trackingRepo[req.MessageID]
+	if exists {
+		info.Status = req.Status
+		info.UpdatedAt = time.Now()
+	}
+	trackingMu.Unlock()
+
+	if !exists {
+		http.Error(w, "Message not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success","message":"Event tracked successfully"}`))
+}
+
+func handlePreferences(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		recipient := r.URL.Query().Get("recipient")
+		if recipient == "" {
+			http.Error(w, "Recipient parameter required", http.StatusBadRequest)
+			return
+		}
+
+		preferencesMu.RLock()
+		pref, exists := preferences[recipient]
+		preferencesMu.RUnlock()
+
+		if !exists {
+			pref = &Preferences{
+				Recipient: recipient,
+				OptedOut:  make(map[string]bool),
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(pref)
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req Preferences
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.Recipient == "" {
+			http.Error(w, "Recipient is required", http.StatusBadRequest)
+			return
+		}
+
+		preferencesMu.Lock()
+		preferences[req.Recipient] = &req
+		preferencesMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"Preferences updated successfully"}`))
+		return
+	}
+
+	http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 }
