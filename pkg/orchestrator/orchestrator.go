@@ -152,11 +152,12 @@ func (o *Orchestrator) Deploy(name string, srvCode string) (*ServiceProcess, err
 	o.services[name] = proc
 
 	// Start build & run asynchronously based on mode
-	if isolationMode == "wasm" {
-		go o.buildAndRunWasm(proc, srvDir, srvFile)
-	} else if isolationMode == "docker" {
-		go o.buildAndRunDocker(proc, srvDir, srvFile)
-	} else {
+	switch isolationMode {
+	case "wasm":
+		go o.buildAndRunWasm(proc, srvDir)
+	case "docker":
+		go o.buildAndRunDocker(proc, srvDir)
+	default:
 		go o.buildAndRun(proc, srvDir, srvFile)
 	}
 
@@ -320,6 +321,11 @@ func (o *Orchestrator) readLogPipe(proc *ServiceProcess, reader io.Reader) {
 		if len(proc.logs) > 1000 {
 			proc.logs = proc.logs[1:]
 		}
+		proc.logMutex.Unlock()
+	}
+	if err := scanner.Err(); err != nil {
+		proc.logMutex.Lock()
+		proc.logs = append(proc.logs, fmt.Sprintf("[SYSTEM] Log reading error: %v", err))
 		proc.logMutex.Unlock()
 	}
 }
@@ -518,7 +524,7 @@ func (proc *ServiceProcess) ProcessCmd() *exec.Cmd {
 	return proc.cmd
 }
 
-func (o *Orchestrator) buildAndRunWasm(proc *ServiceProcess, srvDir, srvFile string) {
+func (o *Orchestrator) buildAndRunWasm(proc *ServiceProcess, srvDir string) {
 	proc.logMutex.Lock()
 	proc.logs = append(proc.logs, fmt.Sprintf("[%s] WASM sandbox initialization successful", time.Now().Format(time.RFC3339)))
 	proc.logs = append(proc.logs, fmt.Sprintf("[%s] Instantiating WASM module inside in-process sandbox...", time.Now().Format(time.RFC3339)))
@@ -597,7 +603,7 @@ func main() {
 	}()
 }
 
-func (o *Orchestrator) buildAndRunDocker(proc *ServiceProcess, srvDir, srvFile string) {
+func (o *Orchestrator) buildAndRunDocker(proc *ServiceProcess, srvDir string) {
 	proc.logMutex.Lock()
 	proc.logs = append(proc.logs, fmt.Sprintf("[%s] Docker engine target selected. Generating Dockerfile...", time.Now().Format(time.RFC3339)))
 	proc.logMutex.Unlock()

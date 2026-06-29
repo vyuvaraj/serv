@@ -91,10 +91,11 @@ server "8080" {
 			}
 			var statusRes orchestrator.ServiceProcess
 			if err := json.NewDecoder(resp.Body).Decode(&statusRes); err == nil {
-				if statusRes.Status == "running" {
+				switch statusRes.Status {
+				case "running":
 					running = true
 					activePort = statusRes.Port
-				} else if statusRes.Status == "failed" {
+				case "failed":
 					t.Fatalf("service deployment failed: %s", statusRes.Error)
 				}
 			}
@@ -109,8 +110,15 @@ server "8080" {
 	// 3. Make HTTP request directly to the deployed service port
 	serviceURL := fmt.Sprintf("http://127.0.0.1:%d", activePort)
 	
-	// Test health check
-	healthResp, err := http.Get(serviceURL + "/health")
+	// Test health check with retry loop to allow process to bind port
+	var healthResp *http.Response
+	for i := 0; i < 30; i++ {
+		healthResp, err = http.Get(serviceURL + "/health")
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if err != nil {
 		t.Fatalf("failed to ping service health: %v", err)
 	}
