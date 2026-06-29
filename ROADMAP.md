@@ -114,6 +114,19 @@ These create a **moat** around ServQueue — capabilities that Kafka, RabbitMQ, 
 | 10.9 | **Trace context propagation through transforms** | Already Done | OTel trace context flows from publisher → through every WASM transform → to subscriber. The full message journey is a single distributed trace. | Most brokers lose trace context between producer and consumer. ServQueue maintains it through arbitrary transform stages. |
 | 10.10 | **Real-time WASM hot-swap** | Already Done | Swap transform modules without disconnecting subscribers or dropping messages. Active connections continue with the new logic on the next message. | Atomic module replacement at the message boundary. Kafka Streams requires rebalancing; Flink requires savepoint + restart. |
 
+---
+
+## Phase 11: New Component Integrations (Proposed — 2027)
+
+ServQueue acts as the event backbone for proposed new components.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 11.1 | **ServMail delivery channel** | Small | ServMail publishes failed notification deliveries to a DLQ topic for retry. Success/bounce events published for tracking. | [ ] |
+| 11.2 | **ServFlow step triggers** | Medium | ServFlow publishes step completion events to topics. Subscribe to workflow events for downstream reactions. | [ ] |
+| 11.3 | **ServFlow workflow triggers** | Medium | Publish to a topic to start a ServFlow workflow. Event-driven workflow initiation without direct API calls. | [ ] |
+| 11.4 | **ServAuth event stream** | Small | User registration, login, password reset events published to `auth.events` topic for audit and downstream processing. | [ ] |
+
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
 
