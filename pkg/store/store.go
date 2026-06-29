@@ -1,9 +1,13 @@
 package store
 
 import (
+	"fmt"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 type Span struct {
@@ -36,6 +40,15 @@ type TraceSummary struct {
 	TimestampNano int64  `json:"timestampUnixNano"`
 }
 
+type MetricSummary struct {
+	Service    string  `json:"service"`
+	SpanName   string  `json:"span_name"`
+	Throughput float64 `json:"throughput_rpm"`
+	P50        float64 `json:"p50_ms"`
+	P90        float64 `json:"p90_ms"`
+	P99        float64 `json:"p99_ms"`
+}
+
 type Store struct {
 	mu           sync.RWMutex
 	spans        map[string][]Span // key: traceId
@@ -44,6 +57,10 @@ type Store struct {
 	OnEvict      func(traceID string, spans []Span)
 	samplingRate int
 	sampled      map[string]bool // key: traceId
+	
+	// Metrics fields
+	latencies  map[string][]float64   // key: service:spanName -> list of latencies in ms
+	timestamps map[string][]time.Time // key: service:spanName -> list of hit timestamps
 }
 
 func NewStore(limit int) *Store {
@@ -58,6 +75,8 @@ func NewStore(limit int) *Store {
 		limit:        limit,
 		samplingRate: samplingRate,
 		sampled:      make(map[string]bool),
+		latencies:    make(map[string][]float64),
+		timestamps:   make(map[string][]time.Time),
 	}
 }
 
@@ -121,6 +140,9 @@ func (s *Store) AddSpans(newSpans []Span) {
 			if isError || isSlowQuery {
 				s.sampled[traceID] = true
 			}
+
+			// Span metrics calculation!
+			s.recordSpanMetrics(span)
 		}
 	}
 }
@@ -418,3 +440,110 @@ func ParseInt64Safe(v interface{}) int64 {
 	}
 	return 0
 }
+
+func (s *Store) recordSpanMetrics(span Span) {
+	if span.Service == "" || span.Name == "" {
+		return
+	}
+
+	key := span.Service + ":" + span.Name
+	durationNano := span.EndTime - span.StartTime
+	durationMs := float64(durationNano) / 1000000.0
+
+	// Get current historical rolling average for anomaly detection BEFORE adding the new span
+	var currentP90 float64
+	existingLats := s.latencies[key]
+	if len(existingLats) > 5 {
+		// Calculate rolling p90
+		sorted := make([]float64, len(existingLats))
+		copy(sorted, existingLats)
+		sort.Float64s(sorted)
+		idx := int(float64(len(sorted)) * 0.9)
+		currentP90 = sorted[idx]
+	}
+
+	// Record latency and timestamp
+	s.latencies[key] = append(s.latencies[key], durationMs)
+	s.timestamps[key] = append(s.timestamps[key], time.Now())
+
+	// Cap history to last 100 entries for rolling metrics
+	if len(s.latencies[key]) > 100 {
+		s.latencies[key] = s.latencies[key][1:]
+	}
+	if len(s.timestamps[key]) > 100 {
+		s.timestamps[key] = s.timestamps[key][1:]
+	}
+
+	// Anomaly Detection:
+	// 1. Latency Spike: if duration > 3 * currentP90 (and we have enough samples)
+	if currentP90 > 0 && durationMs > 3*currentP90 {
+		fmt.Printf("[ANOMALY_DETECTION] Latency spike detected in service %s (span: %s): %.2fms exceeds 3x rolling P90 (%.2fms)\n",
+			span.Service, span.Name, durationMs, currentP90)
+	}
+
+	// 2. Error Burst: check error rate in the last 10 samples
+	if len(s.spans[span.TraceID]) > 0 {
+		errCount := 0
+		totalInTrace := len(s.spans[span.TraceID])
+		for _, sp := range s.spans[span.TraceID] {
+			if sp.Status == 2 {
+				errCount++
+			}
+		}
+		if totalInTrace >= 3 && float64(errCount)/float64(totalInTrace) > 0.3 {
+			fmt.Printf("[ANOMALY_DETECTION] Error burst detected in trace %s: %d errors in %d spans (%.1f%% error rate)\n",
+				span.TraceID, errCount, totalInTrace, float64(errCount)/float64(totalInTrace)*100.0)
+		}
+	}
+}
+
+func (s *Store) GetMetrics() []MetricSummary {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var summaries []MetricSummary
+
+	for key, lats := range s.latencies {
+		if len(lats) == 0 {
+			continue
+		}
+
+		parts := strings.Split(key, ":")
+		if len(parts) < 2 {
+			continue
+		}
+		service := parts[0]
+		spanName := parts[1]
+
+		// Calculate percentiles
+		sorted := make([]float64, len(lats))
+		copy(sorted, lats)
+		sort.Float64s(sorted)
+
+		p50 := sorted[int(float64(len(sorted))*0.5)]
+		p90 := sorted[int(float64(len(sorted))*0.9)]
+		p99 := sorted[int(float64(len(sorted))*0.99)]
+
+		// Calculate throughput: hits in the last 60 seconds
+		now := time.Now()
+		hits := 0
+		for _, ts := range s.timestamps[key] {
+			if now.Sub(ts) <= 1*time.Minute {
+				hits++
+			}
+		}
+		throughput := float64(hits) // requests per minute (rpm)
+
+		summaries = append(summaries, MetricSummary{
+			Service:    service,
+			SpanName:   spanName,
+			Throughput: throughput,
+			P50:        p50,
+			P90:        p90,
+			P99:        p99,
+		})
+	}
+
+	return summaries
+}
+

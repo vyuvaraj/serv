@@ -33,6 +33,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/traces", s.handleIngest)
 	mux.HandleFunc("/api/traces", s.handleListTraces)
 	mux.HandleFunc("/api/dependency-graph", s.handleDependencyGraph)
+	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	
 	mux.HandleFunc("/api/traces/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
@@ -302,4 +303,15 @@ func (s *Server) handleDependencyGraph(w http.ResponseWriter, req *http.Request)
 	graph := s.traceStore.GenerateDependencyGraph()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(graph)
+}
+
+func (s *Server) handleGetMetrics(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	metrics := s.traceStore.GetMetrics()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
 }

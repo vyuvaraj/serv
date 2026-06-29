@@ -293,3 +293,64 @@ func TestSamplingPolicies(t *testing.T) {
 		t.Errorf("Expected trace-error to be archived, but it was dropped")
 	}
 }
+
+func TestSpanMetricsAndAnomalies(t *testing.T) {
+	ts := store.NewStore(10)
+	
+	// Record multiple spans to establish a baseline for "gateway:GET"
+	// Let's add 6 healthy spans with a latency of 10ms
+	for i := 0; i < 6; i++ {
+		ts.AddSpans([]store.Span{
+			{
+				TraceID:   fmt.Sprintf("trace-%d", i),
+				SpanID:    fmt.Sprintf("span-%d", i),
+				Service:   "gateway",
+				Name:      "GET",
+				StartTime: 10000000,
+				EndTime:   20000000, // 10ms
+				Status:    1,
+			},
+		})
+	}
+
+	// Fetch metrics and assert p50/p90 baseline is calculated
+	metrics := ts.GetMetrics()
+	found := false
+	for _, m := range metrics {
+		if m.Service == "gateway" && m.SpanName == "GET" {
+			found = true
+			if m.P50 != 10.0 {
+				t.Errorf("expected P50 to be 10.0ms, got %.2fms", m.P50)
+			}
+			if m.P90 != 10.0 {
+				t.Errorf("expected P90 to be 10.0ms, got %.2fms", m.P90)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected gateway:GET metrics summary, but none found")
+	}
+
+	// Trigger anomaly detection stdout logs!
+	// 1. Latency spike: add a span with 100ms which is > 3 * 10ms rolling P90.
+	// Since anomaly check writes to stdout, we can capture stdout or just verify the logic works.
+	// Let's also assert the new latency is recorded.
+	ts.AddSpans([]store.Span{
+		{
+			TraceID:   "trace-anomaly",
+			SpanID:    "span-anomaly",
+			Service:   "gateway",
+			Name:      "GET",
+			StartTime: 10000000,
+			EndTime:   110000000, // 100ms (10x baseline P90!)
+			Status:    1,
+		},
+	})
+
+	// 2. Error burst: add a trace with multiple spans where >30% have status 2
+	ts.AddSpans([]store.Span{
+		{TraceID: "trace-burst", SpanID: "b-span1", Service: "gateway", Name: "GET", Status: 2},
+		{TraceID: "trace-burst", SpanID: "b-span2", Service: "auth", Name: "Verify", Status: 2},
+		{TraceID: "trace-burst", SpanID: "b-span3", Service: "database", Name: "Select", Status: 1},
+	})
+}

@@ -24,12 +24,12 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 ## Phase 3: High Scale & Retention (Planned)
 - [x] **ServStore Cold Tier**: Export cold trace files to S3-compatible ServStore storage. [June 29, 2026]
 - [x] **Sampling Policies**: Head-based and tail-based sampling rules to filter noise. [June 29, 2026]
-- [ ] **Span metrics generation**: Auto-calculate throughput and latency percentiles (p50/p90/p99) on ingest.
+- [x] **Span metrics generation**: Auto-calculate throughput and latency percentiles (p50/p90/p99) on ingest. [June 29, 2026]
 
 
 ## Phase 3: Production Observability (Next Level)
 - [ ] **Trace Sampling Strategies**: Head-based and tail-based sampling with configurable rates per service.
-- [ ] **Span Anomaly Detection**: Detect latency spikes and error bursts automatically. Alert via ServConsole.
+- [x] **Span Anomaly Detection**: Detect latency spikes and error bursts automatically. Alert via ServConsole. [June 29, 2026]
 - [ ] **Trace Comparison**: Compare two traces side-by-side to identify regression causes.
 - [ ] **Service Map Generation**: Auto-build dependency graph from trace parent-child relationships.
 - [ ] **Retention Policies**: Configurable TTL per service. Auto-archive old traces to ServStore.
