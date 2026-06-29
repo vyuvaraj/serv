@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -323,5 +324,76 @@ func TestServMailDashboard(t *testing.T) {
 
 	if metrics["total_messages"].(float64) != 1 || metrics["sent"].(float64) != 1 {
 		t.Errorf("unexpected dashboard stats: %+v", metrics)
+	}
+}
+
+func TestServMailAttachmentsColdTier(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/mail/attachments", handleUploadAttachment)
+	mux.HandleFunc("/api/mail/attachments/", handleGetAttachment)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Upload small attachment -> should remain "local"
+	smallPayload := map[string]string{
+		"filename": "invoice.pdf",
+		"payload":  "small-base64-payload-data",
+	}
+	bodySmall, _ := json.Marshal(smallPayload)
+	respSmall, err := http.Post(testServer.URL+"/api/mail/attachments", "application/json", bytes.NewReader(bodySmall))
+	if err != nil || respSmall.StatusCode != http.StatusCreated {
+		t.Fatalf("small upload failed: %v", err)
+	}
+	var smallRes map[string]string
+	json.NewDecoder(respSmall.Body).Decode(&smallRes)
+	respSmall.Body.Close()
+
+	if smallRes["storage"] != "local" {
+		t.Errorf("expected small attachment to be stored 'local', got %q", smallRes["storage"])
+	}
+
+	// 2. Fetch small attachment and verify payload exists
+	getSmall, err := http.Get(testServer.URL + "/api/mail/attachments/" + smallRes["id"])
+	if err != nil || getSmall.StatusCode != http.StatusOK {
+		t.Fatalf("fetch small failed: %v", err)
+	}
+	var attSmall Attachment
+	json.NewDecoder(getSmall.Body).Decode(&attSmall)
+	getSmall.Body.Close()
+
+	if attSmall.Payload != "small-base64-payload-data" {
+		t.Errorf("unexpected payload: %q", attSmall.Payload)
+	}
+
+	// 3. Upload large attachment (>1MB simulation) -> should be evicted to "cold" tier
+	largePayload := map[string]string{
+		"filename": "backup.zip",
+		"payload":  strings.Repeat("A", 10005),
+	}
+	bodyLarge, _ := json.Marshal(largePayload)
+	respLarge, err := http.Post(testServer.URL+"/api/mail/attachments", "application/json", bytes.NewReader(bodyLarge))
+	if err != nil || respLarge.StatusCode != http.StatusCreated {
+		t.Fatalf("large upload failed: %v", err)
+	}
+	var largeRes map[string]string
+	json.NewDecoder(respLarge.Body).Decode(&largeRes)
+	respLarge.Body.Close()
+
+	if largeRes["storage"] != "cold" {
+		t.Errorf("expected large attachment to be evicted to 'cold' tier, got %q", largeRes["storage"])
+	}
+
+	// 4. Fetch large attachment and verify payload was evicted
+	getLarge, err := http.Get(testServer.URL + "/api/mail/attachments/" + largeRes["id"])
+	if err != nil || getLarge.StatusCode != http.StatusOK {
+		t.Fatalf("fetch large failed: %v", err)
+	}
+	var attLarge Attachment
+	json.NewDecoder(getLarge.Body).Decode(&attLarge)
+	getLarge.Body.Close()
+
+	if attLarge.Payload != "" {
+		t.Errorf("expected payload to be evicted, got %q", attLarge.Payload)
 	}
 }

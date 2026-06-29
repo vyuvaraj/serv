@@ -13,7 +13,7 @@ This roadmap outlines the planned development phases for the ServMail notificati
 ## Phase 2: Delivery Control
 - [x] **Dead letter queue retry** — Retry policies on delivery failure. [June 29, 2026]
 - [x] **Email tracking** — Open/click analytics. [June 29, 2026]
-- [ ] **Attachments cold tier** — Eviction of large attachment payloads.
+- [x] **Attachments cold tier** — Eviction of large attachment payloads. [June 29, 2026]
 - [x] **Rate limiting** — Per-recipient throttling to prevent spam. [June 29, 2026]
 - [x] **Template versioning** — Versioned template support. [June 29, 2026]
 - [x] **Delivery dashboard** — Integrated telemetry metrics logs. [June 29, 2026]

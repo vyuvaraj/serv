@@ -37,15 +37,25 @@ type Preferences struct {
 	OptedOut  map[string]bool `json:"opted_out"` // category -> is_opted_out
 }
 
+type Attachment struct {
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	SizeBytes int64  `json:"size_bytes"`
+	Storage   string `json:"storage"` // local, cold
+	Payload   string `json:"payload,omitempty"`
+}
+
 var (
-	rateLimits     = make(map[string][]time.Time)
-	rateLimitsMu   sync.Mutex
-	templateRepo   = make(map[string]map[string]string) // name -> version -> content
-	templateRepoMu sync.RWMutex
-	trackingRepo   = make(map[string]*TrackingInfo)
-	trackingMu     sync.RWMutex
-	preferences    = make(map[string]*Preferences)
-	preferencesMu  sync.RWMutex
+	rateLimits      = make(map[string][]time.Time)
+	rateLimitsMu    sync.Mutex
+	templateRepo    = make(map[string]map[string]string) // name -> version -> content
+	templateRepoMu  sync.RWMutex
+	trackingRepo    = make(map[string]*TrackingInfo)
+	trackingMu      sync.RWMutex
+	preferences     = make(map[string]*Preferences)
+	preferencesMu   sync.RWMutex
+	attachmentsRepo = make(map[string]*Attachment)
+	attachmentsMu   sync.RWMutex
 )
 
 type SendResponse struct {
@@ -80,6 +90,8 @@ func main() {
 	mux.HandleFunc("/api/mail/tracking/event", handlePostTrackingEvent)
 	mux.HandleFunc("/api/mail/preferences", handlePreferences)
 	mux.HandleFunc("/api/mail/dashboard", handleMailDashboard)
+	mux.HandleFunc("/api/mail/attachments", handleUploadAttachment)
+	mux.HandleFunc("/api/mail/attachments/", handleGetAttachment)
 
 	serverHandler := ServShared.AuthMiddleware(mux)
 
@@ -426,4 +438,72 @@ func handleMailDashboard(w http.ResponseWriter, r *http.Request) {
 		"bounced":        totalBounced,
 		"opened":         totalOpened,
 	})
+}
+
+func handleUploadAttachment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Filename string `json:"filename"`
+		Payload  string `json:"payload"` // Base64 encoded payload
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	size := int64(len(req.Payload))
+	storage := "local"
+	payload := req.Payload
+
+	if size > 10000 {
+		storage = "cold"
+		payload = ""
+	}
+
+	id := fmt.Sprintf("att-%d", time.Now().UnixNano())
+
+	attachmentsMu.Lock()
+	attachmentsRepo[id] = &Attachment{
+		ID:        id,
+		Filename:  req.Filename,
+		SizeBytes: size,
+		Storage:   storage,
+		Payload:   payload,
+	}
+	attachmentsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":      id,
+		"storage": storage,
+		"status":  "success",
+	})
+}
+
+func handleGetAttachment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(r.URL.Path, "/")
+	id := parts[len(parts)-1]
+
+	attachmentsMu.RLock()
+	att, exists := attachmentsRepo[id]
+	attachmentsMu.RUnlock()
+
+	if !exists {
+		http.Error(w, "Attachment not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(att)
 }
