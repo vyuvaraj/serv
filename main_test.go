@@ -444,8 +444,8 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 	json.NewDecoder(histResp.Body).Decode(&history)
 
 	found := false
-	for _, h := range history {
-		if h.ID == inst.ID {
+	for i := range history {
+		if history[i].ID == inst.ID {
 			found = true
 			break
 		}
