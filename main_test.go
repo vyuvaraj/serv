@@ -55,7 +55,10 @@ func TestServMailTemplateAndChannels(t *testing.T) {
 	payload.Channel = "slack"
 	payload.Target = "https://hooks.slack.com/services/123"
 	body2, _ := json.Marshal(payload)
-	resp2, _ := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body2))
+	resp2, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body2))
+	if err != nil {
+		t.Fatalf("failed Slack send request: %v", err)
+	}
 	defer resp2.Body.Close()
 
 	if resp2.StatusCode != http.StatusOK {
@@ -279,7 +282,10 @@ func TestServMailTrackingAndPreferences(t *testing.T) {
 	prefResp.Body.Close()
 
 	// 6. Try sending marketing email again -> should fail with StatusForbidden (403)
-	resp2, _ := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+	resp2, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed send request: %v", err)
+	}
 	defer resp2.Body.Close()
 
 	if resp2.StatusCode != http.StatusForbidden {
