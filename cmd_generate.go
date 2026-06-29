@@ -10,15 +10,25 @@ import (
 
 func runGenerate() {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: serv generate client <file.srv> [--lang <typescript|python|go>] [-o <output-file>]")
+		fmt.Println("Usage:")
+		fmt.Println("  serv generate client <file.srv> [--lang <typescript|python|go>] [-o <output-file>]")
+		fmt.Println("  serv generate routes <spec.yaml|spec.json> [-o <output.srv>]")
 		os.Exit(1)
 	}
 
 	subCommand := os.Args[2]
-	if subCommand != "client" {
-		fmt.Printf("Unknown generate subcommand: %s. Only 'client' is supported.\n", subCommand)
+	switch subCommand {
+	case "client":
+		runGenerateClient()
+	case "routes":
+		runGenerateRoutes()
+	default:
+		fmt.Printf("Unknown generate subcommand: %s. Supported: 'client', 'routes'.\n", subCommand)
 		os.Exit(1)
 	}
+}
+
+func runGenerateClient() {
 
 	generateCmd := flag.NewFlagSet("generate client", flag.ExitOnError)
 	lang := generateCmd.String("lang", "typescript", "Target language (typescript, python, go)")
