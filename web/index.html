@@ -154,6 +154,66 @@
       font-size: 0.7rem;
       color: #94a3b8;
     }
+    
+    /* Interactive Waterfall UI Styles */
+    .waterfall-span-row.critical-path-highlight .waterfall-bar {
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.9);
+      border: 1.5px solid #fbbf24 !important;
+      animation: pulse-critical 1.5s infinite ease-in-out;
+    }
+    @keyframes pulse-critical {
+      0%, 100% { filter: brightness(1.2); }
+      50% { filter: brightness(1.7); }
+    }
+    .waterfall-toggle-btn {
+      font-size: 0.65rem;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.05);
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .waterfall-toggle-btn:hover {
+      background: rgba(255,255,255,0.15);
+      color: #f1f5f9;
+    }
+    .waterfall-children-container {
+      margin-left: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    /* Timeline Grid lines */
+    .waterfall-timeline-track::before {
+      content: "";
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 25%; width: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+    .waterfall-timeline-track::after {
+      content: "";
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 50%; width: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+    .waterfall-timeline-track-75 {
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 75%; width: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -686,7 +746,13 @@
           <div class="card glass-card">
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
               <h2>Trace Timeline Waterfall</h2>
-              <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <button id="btn-expand-all-spans" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-radius: 4px; display: none;">Expand All</button>
+                <button id="btn-collapse-all-spans" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-radius: 4px; display: none;">Collapse All</button>
+                <label style="display: none; align-items: center; gap: 0.25rem; font-size: 0.8rem; color: #cbd5e1; cursor: pointer;" id="critical-path-toggle-label">
+                  <input type="checkbox" id="checkbox-critical-path" style="cursor: pointer;">
+                  Show Critical Path
+                </label>
                 <button id="btn-replay-trace" class="btn btn-warning btn-sm" style="display: none; padding: 0.25rem 0.5rem; font-size: 0.8rem; font-weight: bold; border-radius: 4px; cursor: pointer;">⚡ Replay Request</button>
                 <span class="badge online" id="waterfall-trace-id-badge">No Trace Selected</span>
               </div>

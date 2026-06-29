@@ -770,6 +770,34 @@ function initForms() {
   document.getElementById('btn-refresh-graph')?.addEventListener('click', fetchDependencyGraph);
   document.getElementById('btn-clear-traces')?.addEventListener('click', clearTraces);
   document.getElementById('trace-search')?.addEventListener('input', filterTraces);
+  document.getElementById('btn-expand-all-spans')?.addEventListener('click', () => {
+    document.querySelectorAll('.waterfall-children-container').forEach(c => {
+      c.style.display = 'block';
+    });
+    document.querySelectorAll('.waterfall-toggle-btn').forEach(btn => {
+      btn.innerHTML = '▼';
+    });
+  });
+  document.getElementById('btn-collapse-all-spans')?.addEventListener('click', () => {
+    document.querySelectorAll('.waterfall-children-container').forEach(c => {
+      c.style.display = 'none';
+    });
+    document.querySelectorAll('.waterfall-toggle-btn').forEach(btn => {
+      btn.innerHTML = '▶';
+    });
+  });
+  document.getElementById('checkbox-critical-path')?.addEventListener('change', (e) => {
+    const show = e.target.checked;
+    document.querySelectorAll('.waterfall-span-row').forEach(row => {
+      if (row.dataset.critical === 'true') {
+        if (show) {
+          row.classList.add('critical-path-highlight');
+        } else {
+          row.classList.remove('critical-path-highlight');
+        }
+      }
+    });
+  });
   document.getElementById('btn-clear-logs')?.addEventListener('click', () => {
     document.getElementById('console-logs-screen').innerHTML = '';
   });
@@ -1889,13 +1917,41 @@ async function clearTraces() {
   }
 }
 
+function markCriticalPath(node) {
+  if (!node) return;
+  node.isCritical = true;
+  if (node.children && node.children.length > 0) {
+    let maxChild = null;
+    let maxDur = -1;
+    node.children.forEach(c => {
+      if (c.durationMs > maxDur) {
+        maxDur = c.durationMs;
+        maxChild = c;
+      }
+    });
+    if (maxChild) {
+      markCriticalPath(maxChild);
+    }
+  }
+}
+
 async function showTraceDetail(traceId) {
   const timeline = document.getElementById('traces-timeline');
   const badge = document.getElementById('waterfall-trace-id-badge');
   const replayBtn = document.getElementById('btn-replay-trace');
+  const expandBtn = document.getElementById('btn-expand-all-spans');
+  const collapseBtn = document.getElementById('btn-collapse-all-spans');
+  const cpToggleLabel = document.getElementById('critical-path-toggle-label');
+  const cpCheckbox = document.getElementById('checkbox-critical-path');
+  
   if (!timeline) return;
   
   if (replayBtn) replayBtn.style.display = 'none';
+  if (expandBtn) expandBtn.style.display = 'none';
+  if (collapseBtn) collapseBtn.style.display = 'none';
+  if (cpToggleLabel) cpToggleLabel.style.display = 'none';
+  if (cpCheckbox) cpCheckbox.checked = false;
+  
   badge.textContent = `TRACE ID: ${traceId.slice(0, 8)}...`;
   timeline.innerHTML = `<div class="text-center text-muted" style="padding: 4rem 0;">Loading trace tree...</div>`;
   
@@ -1908,12 +1964,18 @@ async function showTraceDetail(traceId) {
     const rootNode = await res.json();
     timeline.innerHTML = '';
     
+    // Calculate critical path
+    markCriticalPath(rootNode);
+    
     // We want to find the max duration of the trace to compute bar widths relative to total duration
     const totalDuration = findMaxDuration(rootNode);
     renderSpanNodeWaterfall(timeline, rootNode, totalDuration, 0);
 
     STATE.selectedTraceId = traceId;
     if (replayBtn) replayBtn.style.display = 'inline-block';
+    if (expandBtn) expandBtn.style.display = 'inline-block';
+    if (collapseBtn) collapseBtn.style.display = 'inline-block';
+    if (cpToggleLabel) cpToggleLabel.style.display = 'inline-flex';
   } catch (err) {
     timeline.innerHTML = `<div class="text-center text-muted">Error loading tree: ${err.message}</div>`;
   }
@@ -1933,8 +1995,18 @@ function findMaxDuration(node) {
 function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
   if (!node) return;
   
+  const hasChildren = node.children && node.children.length > 0;
+  
+  const spanWrapper = document.createElement('div');
+  spanWrapper.className = 'waterfall-span-wrapper';
+  spanWrapper.style.width = '100%';
+  spanWrapper.dataset.spanId = node.span.spanId;
+  
   const row = document.createElement('div');
   row.className = 'waterfall-span-row';
+  if (node.isCritical) {
+    row.dataset.critical = 'true';
+  }
   
   const service = (node.span.service || 'unknown').toLowerCase();
   const serviceClass = `waterfall-span-service service-${service}`;
@@ -1948,15 +2020,25 @@ function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
   const hasAttributes = node.span.attributes && Object.keys(node.span.attributes).length > 0;
   const uniqueId = `attr-${node.span.spanId}`;
   
+  // Build info cell with toggle button if children exist
+  let toggleBtnHtml = '';
+  if (hasChildren) {
+    toggleBtnHtml = `<span class="waterfall-toggle-btn" id="toggle-btn-${node.span.spanId}" style="margin-right: 4px;">▼</span>`;
+  } else {
+    toggleBtnHtml = `<span style="display: inline-block; width: 14px; margin-right: 4px;"></span>`;
+  }
+  
   row.innerHTML = `
     <div class="waterfall-span-main">
       <div class="waterfall-span-info" style="padding-left: ${indent}px;">
+        ${toggleBtnHtml}
         <span class="${serviceClass}">${escapeHtml(node.span.service || 'unknown')}</span>
         <span class="waterfall-span-name" title="${escapeHtml(node.span.name)}">${escapeHtml(node.span.name)}</span>
         ${hasAttributes ? `<span style="font-size:0.75rem; cursor:pointer; color:var(--primary);" onclick="toggleSpanAttr('${uniqueId}')">ⓘ</span>` : ''}
       </div>
       <div class="waterfall-timeline-track">
         <div class="${barClass}" style="left: ${pctOffset}%; width: ${pctWidth}%;"></div>
+        <div class="waterfall-timeline-track-75"></div>
         <div class="waterfall-duration-label" style="left: ${pctOffset + pctWidth}%;">${node.durationMs.toFixed(1)}ms</div>
       </div>
     </div>
@@ -1972,15 +2054,41 @@ function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
     ` : ''}
   `;
   
-  container.appendChild(row);
+  spanWrapper.appendChild(row);
   
-  if (node.children) {
+  if (hasChildren) {
+    const childrenContainer = document.createElement('div');
+    childrenContainer.className = 'waterfall-children-container';
+    childrenContainer.id = `children-${node.span.spanId}`;
+    
     // Sort children by start offset
     node.children.sort((a, b) => a.offsetMs - b.offsetMs);
     node.children.forEach(child => {
-      renderSpanNodeWaterfall(container, child, totalDuration, depth + 1);
+      renderSpanNodeWaterfall(childrenContainer, child, totalDuration, depth + 1);
     });
+    
+    spanWrapper.appendChild(childrenContainer);
+    
+    // Add event listener to toggle button
+    setTimeout(() => {
+      const btn = spanWrapper.querySelector(`#toggle-btn-${node.span.spanId}`);
+      if (btn) {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const disp = childrenContainer.style.display;
+          if (disp === 'none') {
+            childrenContainer.style.display = 'flex';
+            btn.innerHTML = '▼';
+          } else {
+            childrenContainer.style.display = 'none';
+            btn.innerHTML = '▶';
+          }
+        });
+      }
+    }, 0);
   }
+  
+  container.appendChild(spanWrapper);
 }
 
 function toggleSpanAttr(id) {
