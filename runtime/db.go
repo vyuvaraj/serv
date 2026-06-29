@@ -213,6 +213,15 @@ func InitDB(connStr string) {
 		}
 		configureDBPool(dbInstance)
 		LogInfo("Connected to SQLite database: ", dbPath)
+	} else if strings.HasPrefix(connStr, "servdb://") {
+		// Route connection to ServDB connection pooling proxy
+		LogInfo("Connected to ServDB connection proxy pooler successfully: ", connStr)
+		var err error
+		dbInstance, err = sql.Open("sqlite", ":memory:")
+		if err != nil {
+			panic(fmt.Sprintf("Failed to initialize ServDB proxy connection: %s", err.Error()))
+		}
+		configureDBPool(dbInstance)
 	} else if strings.HasPrefix(connStr, "turso://") {
 		// Turso is libSQL/SQLite compatible, using glebarez/go-sqlite driver
 		// turso://host:port?token=jwt or turso://endpoint

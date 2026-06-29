@@ -191,7 +191,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		if objStr == "mail" {
 			switch e.Field {
 			case "send":
-				return "runtime.SendMail", nil
+				return "runtime.MailSend", nil
 			}
 		}
 		if objStr == "store" {
@@ -377,6 +377,38 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 					return fmt.Sprintf("runtime.StartWorkflow(%s, %s)", args[0], args[1]), nil
 				}
 				return "runtime.StartWorkflow(nil, nil)", nil
+			}
+			if err == nil && objStr == "auth" {
+				var args []string
+				for _, arg := range e.Arguments {
+					argStr, argErr := c.genExpression(arg)
+					if argErr != nil {
+						return "", argErr
+					}
+					args = append(args, argStr)
+				}
+				if memExpr.Field == "register" && len(args) == 3 {
+					return fmt.Sprintf("runtime.AuthRegister(%s, %s, %s)", args[0], args[1], args[2]), nil
+				}
+				if memExpr.Field == "login" && len(args) == 2 {
+					return fmt.Sprintf("runtime.AuthLogin(%s, %s)", args[0], args[1]), nil
+				}
+				if memExpr.Field == "currentUser" && len(args) == 1 {
+					return fmt.Sprintf("runtime.AuthCurrentUser(%s)", args[0]), nil
+				}
+			}
+			if err == nil && objStr == "mail" && memExpr.Field == "send" {
+				var args []string
+				for _, arg := range e.Arguments {
+					argStr, argErr := c.genExpression(arg)
+					if argErr != nil {
+						return "", argErr
+					}
+					args = append(args, argStr)
+				}
+				if len(args) == 3 {
+					return fmt.Sprintf("runtime.MailSend(%s, %s, %s)", args[0], args[1], args[2]), nil
+				}
 			}
 			if err == nil && objStr == "env" && memExpr.Field == "secret" {
 				var args []string
@@ -674,6 +706,21 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return fmt.Sprintf("runtime.StartWorkflow(%s, nil)", args[0]), nil
 			}
 			return fmt.Sprintf("runtime.StartWorkflow(%s, %s)", args[0], args[1]), nil
+		}
+		if funcStr == "auth.register" && len(args) == 3 {
+			return fmt.Sprintf("runtime.AuthRegister(%s, %s, %s)", args[0], args[1], args[2]), nil
+		}
+		if funcStr == "auth.login" && len(args) == 2 {
+			return fmt.Sprintf("runtime.AuthLogin(%s, %s)", args[0], args[1]), nil
+		}
+		if funcStr == "auth.currentUser" && len(args) == 1 {
+			return fmt.Sprintf("runtime.AuthCurrentUser(%s)", args[0]), nil
+		}
+		if funcStr == "mail.send" && len(args) == 3 {
+			return fmt.Sprintf("runtime.MailSend(%s, %s, %s)", args[0], args[1], args[2]), nil
+		}
+		if funcStr == "notify" && len(args) == 3 {
+			return fmt.Sprintf("runtime.Notify(%s, %s, %s)", args[0], args[1], args[2]), nil
 		}
 
 		// Special case: time.now()

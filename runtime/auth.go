@@ -289,3 +289,39 @@ func parseRSAPublicKey(nStr, eStr string) (*rsa.PublicKey, error) {
 		E: eVal,
 	}, nil
 }
+
+func AuthRegister(usernameVal, emailVal, passwordVal interface{}) interface{} {
+	username := fmt.Sprint(usernameVal)
+	email := fmt.Sprint(emailVal)
+	LogInfo(fmt.Sprintf("[Serv-lang] [auth.register] Registering user: %s (%s)", username, email))
+
+	return &SafeMap{
+		m: map[string]interface{}{
+			"username": username,
+			"email":    email,
+			"status":   "registered",
+		},
+	}
+}
+
+func AuthLogin(usernameVal, passwordVal interface{}) interface{} {
+	username := fmt.Sprint(usernameVal)
+	LogInfo(fmt.Sprintf("[Serv-lang] [auth.login] Logging in user: %s", username))
+
+	return &SafeMap{
+		m: map[string]interface{}{
+			"token":    "mock-token-for-" + username,
+			"username": username,
+		},
+	}
+}
+
+func AuthCurrentUser(reqVal interface{}) interface{} {
+	LogInfo("[Serv-lang] [auth.currentUser] Resolving current user")
+	return &SafeMap{
+		m: map[string]interface{}{
+			"username": "guest",
+			"role":     "anonymous",
+		},
+	}
+}

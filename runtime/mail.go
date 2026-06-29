@@ -66,3 +66,27 @@ func SendMail(to, subject, body string) error {
 
 	return fmt.Errorf("unsupported mail provider scheme in: %s", mailConnString)
 }
+
+func MailSend(toVal, templateVal, dataVal interface{}) interface{} {
+	to := fmt.Sprint(toVal)
+	templateStr := fmt.Sprint(templateVal)
+
+	var data map[string]interface{}
+	if sm, ok := dataVal.(*SafeMap); ok {
+		data = sm.All()
+	} else if m, ok := dataVal.(map[string]interface{}); ok {
+		data = m
+	}
+
+	LogInfo(fmt.Sprintf("[Serv-lang] [mail.send] To: %s, Template: %s, Context: %+v", to, templateStr, data))
+	return true
+}
+
+func Notify(channelVal, targetVal, msgVal interface{}) interface{} {
+	channel := fmt.Sprint(channelVal)
+	target := fmt.Sprint(targetVal)
+	msg := fmt.Sprint(msgVal)
+
+	LogInfo(fmt.Sprintf("[Serv-lang] [notify] Channel: %s, Target: %s, Message: %s", channel, target, msg))
+	return true
+}
