@@ -16,11 +16,23 @@ import (
 )
 
 type User struct {
-	Username string    `json:"username"`
-	Email    string    `json:"email"`
-	Password string    `json:"-"`
-	Salt     string    `json:"-"`
-	CreatedAt time.Time `json:"created_at"`
+	Username       string    `json:"username"`
+	Email          string    `json:"email"`
+	Password       string    `json:"-"`
+	Salt           string    `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	FailedAttempts int       `json:"-"`
+	LockedUntil    time.Time `json:"-"`
+	ResetToken     string    `json:"-"`
+}
+
+type ResetRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetConfirm struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
 }
 
 type RegisterRequest struct {
@@ -75,6 +87,8 @@ func main() {
 	})
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/api/auth/reset-password/request", handleResetRequest)
+	mux.HandleFunc("/api/auth/reset-password/confirm", handleResetConfirm)
 	mux.HandleFunc("/oauth/token", handleToken)
 
 	// Wrap in ServShared middleware (auth checks for dashboard endpoints if needed, but signup/login are public)
@@ -141,9 +155,16 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	usersMu.RLock()
+	usersMu.Lock()
 	user, exists := users[req.Username]
-	usersMu.RUnlock()
+	if exists && !user.LockedUntil.IsZero() && user.LockedUntil.After(time.Now()) {
+		usersMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":"lockout","message":"Account is locked due to multiple failed login attempts."}`))
+		return
+	}
+	usersMu.Unlock()
 
 	if !exists {
 		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
@@ -152,9 +173,26 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	hashed := hashPassword(req.Password, user.Salt)
 	if hashed != user.Password {
+		usersMu.Lock()
+		u := users[req.Username]
+		u.FailedAttempts++
+		if u.FailedAttempts >= 3 {
+			u.LockedUntil = time.Now().Add(5 * time.Minute)
+		}
+		users[req.Username] = u
+		usersMu.Unlock()
+
 		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 		return
 	}
+
+	// Reset attempts on success
+	usersMu.Lock()
+	u := users[req.Username]
+	u.FailedAttempts = 0
+	u.LockedUntil = time.Time{}
+	users[req.Username] = u
+	usersMu.Unlock()
 
 	// Generate JWT using ServShared Secret or default test key
 	secret := os.Getenv("SERV_JWT_SECRET")
@@ -245,4 +283,87 @@ func handleToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf(`{"access_token":"%s","token_type":"Bearer","expires_in":3600}`, token)))
+}
+
+func handleResetRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ResetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	found := false
+	var username string
+	for name, user := range users {
+		if user.Email == req.Email {
+			found = true
+			username = name
+			break
+		}
+	}
+
+	if !found {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success","message":"Reset link sent if email exists"}`))
+		return
+	}
+
+	token := fmt.Sprintf("rst-%d", time.Now().UnixNano())
+	u := users[username]
+	u.ResetToken = token
+	users[username] = u
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "token": token})
+}
+
+func handleResetConfirm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ResetConfirm
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	found := false
+	var username string
+	for name, user := range users {
+		if user.ResetToken != "" && user.ResetToken == req.Token {
+			found = true
+			username = name
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "Invalid or expired token", http.StatusBadRequest)
+		return
+	}
+
+	u := users[username]
+	hashed := hashPassword(req.Password, u.Salt)
+	u.Password = hashed
+	u.ResetToken = "" // invalidate token
+	u.FailedAttempts = 0
+	u.LockedUntil = time.Time{}
+	users[username] = u
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success","message":"Password updated successfully"}`))
 }

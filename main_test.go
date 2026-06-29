@@ -105,3 +105,103 @@ func TestServAuthOAuthToken(t *testing.T) {
 		t.Errorf("expected access token and Bearer type, got %+v", res)
 	}
 }
+
+func TestServAuthSecurityLockoutAndReset(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/register", handleRegister)
+	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/api/auth/reset-password/request", handleResetRequest)
+	mux.HandleFunc("/api/auth/reset-password/confirm", handleResetConfirm)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Register a user
+	regPayload := RegisterRequest{
+		Username: "lockuser",
+		Email:    "lock@example.com",
+		Password: "correctpassword",
+	}
+	body, _ := json.Marshal(regPayload)
+	resp, _ := http.Post(testServer.URL+"/api/auth/register", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// 2. Perform 3 failed logins to trigger lockout
+	loginPayload := LoginRequest{
+		Username: "lockuser",
+		Password: "wrongpassword",
+	}
+	loginBody, _ := json.Marshal(loginPayload)
+
+	for i := 0; i < 3; i++ {
+		loginResp, _ := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(loginBody))
+		loginResp.Body.Close()
+	}
+
+	// 4th login attempt (even with CORRECT password) should fail with StatusForbidden (lockout)
+	successPayload := LoginRequest{
+		Username: "lockuser",
+		Password: "correctpassword",
+	}
+	successBody, _ := json.Marshal(successPayload)
+	lockResp, err := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(successBody))
+	if err != nil {
+		t.Fatalf("failed login: %v", err)
+	}
+	defer lockResp.Body.Close()
+
+	if lockResp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected StatusForbidden on locked account, got %d", lockResp.StatusCode)
+	}
+
+	// 3. Request Password Reset
+	resetReq := ResetRequest{Email: "lock@example.com"}
+	resetReqBody, _ := json.Marshal(resetReq)
+	resetResp, err := http.Post(testServer.URL+"/api/auth/reset-password/request", "application/json", bytes.NewReader(resetReqBody))
+	if err != nil {
+		t.Fatalf("failed reset request: %v", err)
+	}
+	defer resetResp.Body.Close()
+
+	var resetRes struct {
+		Status string `json:"status"`
+		Token  string `json:"token"`
+	}
+	json.NewDecoder(resetResp.Body).Decode(&resetRes)
+
+	if resetRes.Token == "" {
+		t.Fatalf("expected reset token, got empty")
+	}
+
+	// 4. Confirm Password Reset with new password
+	confirmReq := ResetConfirm{
+		Token:    resetRes.Token,
+		Password: "newpassword123",
+	}
+	confirmBody, _ := json.Marshal(confirmReq)
+	confirmResp, err := http.Post(testServer.URL+"/api/auth/reset-password/confirm", "application/json", bytes.NewReader(confirmBody))
+	if err != nil {
+		t.Fatalf("failed reset confirm: %v", err)
+	}
+	confirmResp.Body.Close()
+
+	if confirmResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected StatusOK on reset confirm, got %d", confirmResp.StatusCode)
+	}
+
+	// 5. Test login with new password (should be unlocked and succeed!)
+	newLoginPayload := LoginRequest{
+		Username: "lockuser",
+		Password: "newpassword123",
+	}
+	newLoginBody, _ := json.Marshal(newLoginPayload)
+	newLoginResp, err := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(newLoginBody))
+	if err != nil {
+		t.Fatalf("failed login: %v", err)
+	}
+	defer newLoginResp.Body.Close()
+
+	if newLoginResp.StatusCode != http.StatusOK {
+		t.Errorf("expected StatusOK on login after reset, got %d", newLoginResp.StatusCode)
+	}
+}
