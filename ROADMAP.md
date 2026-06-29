@@ -12,7 +12,7 @@ This roadmap outlines the planned development phases for the ServAuth identity p
 
 ## Phase 2: Advanced Directory Capabilities
 - [x] **Multi-tenant directories** — Isolated pools. [June 29, 2026]
-- [ ] **Social login federation** — Google/GitHub integration.
+- [x] **Social login federation** — Google/GitHub integration. [June 29, 2026]
 - [x] **MFA support** — TOTP / WebAuthn. [June 29, 2026]
 - [x] **Session management** — Active session revocation. [June 29, 2026]
 - [x] **API key issuance** — Scoped service accounts API keys. [June 29, 2026]

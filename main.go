@@ -118,6 +118,8 @@ func main() {
 	mux.HandleFunc("/api/auth/sessions/revoke", handleSessionsRevoke)
 	mux.HandleFunc("/api/auth/mfa/setup", handleMfaSetup)
 	mux.HandleFunc("/api/auth/mfa/verify", handleMfaVerify)
+	mux.HandleFunc("/api/auth/social/login", handleSocialLogin)
+	mux.HandleFunc("/api/auth/social/callback", handleSocialCallback)
 
 	// Wrap in ServShared middleware (auth checks for dashboard endpoints if needed, but signup/login are public)
 	serverHandler := ServShared.AuthMiddleware(mux)
@@ -605,4 +607,70 @@ func handleMfaVerify(w http.ResponseWriter, r *http.Request) {
 
 	usersMu.Unlock()
 	http.Error(w, "Invalid verification code", http.StatusUnauthorized)
+}
+
+func handleSocialLogin(w http.ResponseWriter, r *http.Request) {
+	provider := r.URL.Query().Get("provider")
+	if provider != "google" && provider != "github" {
+		http.Error(w, "Unsupported provider", http.StatusBadRequest)
+		return
+	}
+
+	redirectURL := fmt.Sprintf("https://auth.provider.com/%s/authorize?client_id=mock-client&redirect_uri=mock-redirect&response_type=code", provider)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":       "redirect_simulated",
+		"redirect_url": redirectURL,
+	})
+}
+
+func handleSocialCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		Code     string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if req.Code == "" || len(req.Code) < 4 {
+		http.Error(w, "Invalid auth code", http.StatusBadRequest)
+		return
+	}
+
+	username := fmt.Sprintf("social-%s-%s", req.Provider, req.Code[:4])
+	userKey := username
+
+	usersMu.Lock()
+	_, exists := users[userKey]
+	if !exists {
+		users[userKey] = User{
+			Username: username,
+			Salt:     "salt-social",
+			Password: "hash-social",
+		}
+	}
+	usersMu.Unlock()
+
+	claims := map[string]interface{}{
+		"sub": username,
+		"exp": time.Now().Add(24 * time.Hour).Unix(),
+	}
+	claimsBytes, _ := json.Marshal(claims)
+	token := base64Encode(claimsBytes)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":       "success",
+		"username":     username,
+		"access_token": token,
+	})
 }

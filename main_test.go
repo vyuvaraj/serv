@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -361,4 +362,44 @@ func TestServAuthTenancyAndMfa(t *testing.T) {
 		t.Fatalf("failed to verify MFA: %v", err)
 	}
 	respVerify.Body.Close()
+}
+
+func TestServAuthSocialLogin(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/social/login", handleSocialLogin)
+	mux.HandleFunc("/api/auth/social/callback", handleSocialCallback)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Trigger social login simulation (GET)
+	resp, err := http.Get(testServer.URL + "/api/auth/social/login?provider=google")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("social login init failed: %v", err)
+	}
+	var loginRes map[string]string
+	json.NewDecoder(resp.Body).Decode(&loginRes)
+	resp.Body.Close()
+
+	if loginRes["status"] != "redirect_simulated" || !strings.Contains(loginRes["redirect_url"], "google") {
+		t.Errorf("unexpected social login response: %+v", loginRes)
+	}
+
+	// 2. Complete social login callback exchange (POST)
+	callbackPayload := map[string]string{
+		"provider": "google",
+		"code":     "mock-auth-code-12345",
+	}
+	body, _ := json.Marshal(callbackPayload)
+	cbResp, err := http.Post(testServer.URL+"/api/auth/social/callback", "application/json", bytes.NewReader(body))
+	if err != nil || cbResp.StatusCode != http.StatusOK {
+		t.Fatalf("social callback failed: %v", err)
+	}
+	var cbRes map[string]string
+	json.NewDecoder(cbResp.Body).Decode(&cbRes)
+	cbResp.Body.Close()
+
+	if cbRes["status"] != "success" || cbRes["username"] != "social-google-mock" || cbRes["access_token"] == "" {
+		t.Errorf("unexpected callback response: %+v", cbRes)
+	}
 }
