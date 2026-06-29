@@ -67,3 +67,41 @@ func TestServAuthWorkflow(t *testing.T) {
 		t.Errorf("expected valid login response with token, got %+v", loginResponse)
 	}
 }
+
+func TestServAuthOAuthToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/token", handleToken)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Post client credentials to oauth/token
+	payload := map[string]string{
+		"client_id":     "console-client-id",
+		"client_secret": "console-secret-key-9876",
+		"grant_type":    "client_credentials",
+	}
+	body, _ := json.Marshal(payload)
+	resp, err := http.Post(testServer.URL+"/oauth/token", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to post token request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected StatusOK, got %d", resp.StatusCode)
+	}
+
+	var res struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if res.AccessToken == "" || res.TokenType != "Bearer" {
+		t.Errorf("expected access token and Bearer type, got %+v", res)
+	}
+}

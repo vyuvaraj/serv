@@ -42,6 +42,9 @@ type LoginResponse struct {
 var (
 	users   = make(map[string]User) // key: username
 	usersMu sync.RWMutex
+	clients = map[string]string{
+		"console-client-id": "console-secret-key-9876",
+	}
 )
 
 // hashPassword hashes password with sha256 and salt
@@ -72,6 +75,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/oauth/token", handleToken)
 
 	// Wrap in ServShared middleware (auth checks for dashboard endpoints if needed, but signup/login are public)
 	serverHandler := ServShared.AuthMiddleware(mux)
@@ -180,4 +184,65 @@ func base64Encode(src []byte) string {
 	hasher := sha256.New()
 	hasher.Write(src)
 	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func handleToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var clientID, clientSecret, grantType string
+	if r.Header.Get("Content-Type") == "application/json" {
+		var req struct {
+			ClientID     string `json:"client_id"`
+			ClientSecret string `json:"client_secret"`
+			GrantType    string `json:"grant_type"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			clientID = req.ClientID
+			clientSecret = req.ClientSecret
+			grantType = req.GrantType
+		}
+	} else {
+		_ = r.ParseForm()
+		clientID = r.FormValue("client_id")
+		clientSecret = r.FormValue("client_secret")
+		grantType = r.FormValue("grant_type")
+	}
+
+	if clientID == "" {
+		username, password, ok := r.BasicAuth()
+		if ok {
+			clientID = username
+			clientSecret = password
+		}
+	}
+
+	if grantType != "client_credentials" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"unsupported_grant_type"}`))
+		return
+	}
+
+	expectedSecret, ok := clients[clientID]
+	if !ok || expectedSecret != clientSecret {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"invalid_client"}`))
+		return
+	}
+
+	claims := map[string]interface{}{
+		"sub": clientID,
+		"iss": "servauth",
+		"exp": time.Now().Add(1 * time.Hour).Unix(),
+	}
+	claimsBytes, _ := json.Marshal(claims)
+	token := base64Encode(claimsBytes)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf(`{"access_token":"%s","token_type":"Bearer","expires_in":3600}`, token)))
 }
