@@ -36,7 +36,7 @@ This roadmap outlines the planned development phases for the ServMesh library-le
 
 ## Phase 5: Advanced Traffic Management (Next Level)
 - [ ] **Rate Limiting per Service Pair**: Client-side rate limiting based on caller→callee identity (not just global).
-- [ ] **Fault Injection Testing**: Inject artificial latency, errors, or timeouts via registry config for chaos engineering.
+- [x] **Fault Injection Testing**: Inject artificial latency, errors, or timeouts via registry config for chaos engineering. [June 30, 2026]
 - [ ] **Service Versioning & Header Routing**: Route requests to specific versions based on `X-Service-Version` header. Blue/green at service mesh level.
 - [ ] **Health-Aware Load Balancing**: Weight routing based on real-time latency/error-rate feedback from OTel spans.
 - [ ] **Sidecar-less mTLS Rotation**: Automated cert rotation with zero-downtime using background goroutine.
