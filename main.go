@@ -217,6 +217,9 @@ func main() {
 	case "audit":
 		runAudit()
 
+	case "doctor":
+		runDoctor()
+
 	case "monitor":
 		target := "8080"
 		if len(os.Args) >= 3 {
@@ -268,5 +271,6 @@ func printUsage() {
 	fmt.Println("  serv tunnel <port> [options]               Expose a local service via the ServTunnel relay server")
 	fmt.Println("  serv dev [file.srv] [--services all]       Start full dev environment (infra + hot-reload)")
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
+	fmt.Println("  serv doctor                                Run compatibility and health checks on all Servverse services")
 	fmt.Println("  serv lsp-action --file <file> --line <line> [--type <type>] Resolve LSP code action recommendation")
 }
