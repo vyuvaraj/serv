@@ -297,6 +297,9 @@ func main() {
 	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
 	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
 	mux.HandleFunc("/api/tenant/switch", authorizeConsole(handleTenantSwitch))
+	mux.HandleFunc("/api/plugins", authorizeConsole(handleGetPlugins))
+	mux.HandleFunc("/api/plugins/register", authorizeConsole(handleRegisterPlugin))
+	mux.HandleFunc("/api/plugins/serve", handleServePlugin)
 	mux.HandleFunc("/api/incidents/analyze", authorizeConsole(handleIncidentAnalyze))
 	mux.HandleFunc("/api/runbooks", authorizeConsole(handleRunbooks))
 	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(handleExecuteRunbook))
@@ -3762,5 +3765,108 @@ func handleTenantSwitch(w http.ResponseWriter, r *http.Request) {
 		"token":       newToken,
 		"newTenantId": req.TenantID,
 	})
+}
+
+type ConsolePlugin struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	WASMUrl     string `json:"wasmUrl"`
+}
+
+var (
+	consolePlugins   = []ConsolePlugin{
+		{ID: "db-inspector", Name: "SQL DB Inspector", Description: "Live PostgreSQL and MySQL query visualizer panel", WASMUrl: "/api/plugins/serve?id=db-inspector"},
+	}
+	consolePluginsMu sync.RWMutex
+	pluginBinaries   = make(map[string][]byte)
+	pluginBinariesMu sync.Mutex
+)
+
+func handleGetPlugins(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	consolePluginsMu.RLock()
+	defer consolePluginsMu.RUnlock()
+	json.NewEncoder(w).Encode(consolePlugins)
+}
+
+func handleRegisterPlugin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		WriteJSONError(w, r, "Failed to parse multipart form: "+err.Error(), "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+
+	id := r.FormValue("id")
+	name := r.FormValue("name")
+	desc := r.FormValue("description")
+
+	file, _, err := r.FormFile("plugin")
+	if err != nil {
+		WriteJSONError(w, r, "Plugin WASM file is required", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, file); err != nil {
+		WriteJSONError(w, r, "Failed to read uploaded plugin: "+err.Error(), "ERR_INTERNAL_ERROR", http.StatusInternalServerError)
+		return
+	}
+
+	pluginBinariesMu.Lock()
+	pluginBinaries[id] = buf.Bytes()
+	pluginBinariesMu.Unlock()
+
+	consolePluginsMu.Lock()
+	exists := false
+	for i, p := range consolePlugins {
+		if p.ID == id {
+			consolePlugins[i] = ConsolePlugin{ID: id, Name: name, Description: desc, WASMUrl: "/api/plugins/serve?id=" + id}
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		consolePlugins = append(consolePlugins, ConsolePlugin{ID: id, Name: name, Description: desc, WASMUrl: "/api/plugins/serve?id=" + id})
+	}
+	consolePluginsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Plugin registered successfully",
+		"id":      id,
+	})
+}
+
+func handleServePlugin(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "Plugin ID is required", http.StatusBadRequest)
+		return
+	}
+
+	pluginBinariesMu.Lock()
+	binary, ok := pluginBinaries[id]
+	pluginBinariesMu.Unlock()
+
+	if !ok {
+		if id == "db-inspector" {
+			binary = []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+		} else {
+			http.Error(w, "Plugin not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/wasm")
+	w.WriteHeader(http.StatusOK)
+	w.Write(binary)
 }
 
