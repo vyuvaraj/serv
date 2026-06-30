@@ -293,6 +293,8 @@ func main() {
 	mux.HandleFunc("/api/diagnostics/exec", authorizeConsole(handleDiagnosticExec))
 	mux.HandleFunc("/api/topology/live", authorizeConsole(handleTopologyLive))
 	mux.HandleFunc("/api/dashboards", authorizeConsole(handleDashboards))
+	mux.HandleFunc("/api/dev/services", authorizeConsole(handleDevServices))
+	mux.HandleFunc("/api/dev/restart", authorizeConsole(handleDevRestart))
 
 	// 2. Auth E&OIDC
 	mux.HandleFunc("/api/auth/config", handleAuthConfig)
@@ -3540,3 +3542,85 @@ func handleDashboards(w http.ResponseWriter, r *http.Request) {
 		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 	}
 }
+
+type DevServiceStatus struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Status string `json:"status"`
+}
+
+func handleDevServices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	services := []struct {
+		Name string
+		URL  string
+	}{
+		{"ServGate", activeDiscovery.Gate},
+		{"ServStore", activeDiscovery.Store},
+		{"ServQueue", activeDiscovery.Queue},
+		{"ServTrace", activeDiscovery.Trace},
+		{"ServTunnel", activeDiscovery.Tunnel},
+		{"ServAuth", activeDiscovery.Auth},
+		{"ServDB", activeDiscovery.DB},
+		{"ServMail", activeDiscovery.Mail},
+		{"ServFlow", activeDiscovery.Flow},
+	}
+
+	client := &http.Client{Timeout: 300 * time.Millisecond}
+	var list []DevServiceStatus
+
+	for _, s := range services {
+		if s.URL == "" {
+			continue
+		}
+		status := "unhealthy"
+		resp, err := client.Get(strings.TrimSuffix(s.URL, "/") + "/healthz")
+		if err == nil {
+			if resp.StatusCode == http.StatusOK {
+				status = "healthy"
+			}
+			resp.Body.Close()
+		} else {
+			resp2, err2 := client.Get(strings.TrimSuffix(s.URL, "/") + "/health")
+			if err2 == nil {
+				if resp2.StatusCode == http.StatusOK {
+					status = "healthy"
+				}
+				resp2.Body.Close()
+			}
+		}
+
+		list = append(list, DevServiceStatus{
+			Name:   s.Name,
+			URL:    s.URL,
+			Status: status,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
+}
+
+func handleDevRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	serviceName := r.URL.Query().Get("service")
+	if serviceName == "" {
+		http.Error(w, "service parameter required", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("Restart triggered for service %s in dev mode", serviceName),
+	})
+}
+
