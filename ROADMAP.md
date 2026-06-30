@@ -26,7 +26,7 @@ This roadmap outlines the planned development phases for the ServAuth identity p
 - [x] **SIGTERM Graceful Shutdown** â€” Register listener to shut down HTTP listener cleanly with a 5-second timeout. [June 30, 2026]
 
 ## Phase 4: Architectural Depth (Pending)
-- [ ] **Secrets Envelope Key Rotation** â€” Secret KMS rotation schedule & API key hashing (SEC.8)
+- [x] **Secrets Envelope Key Rotation** â€” Secret KMS rotation schedule & API key hashing (SEC.8)
 
 ## Phase 5: Production Security & Contract Hardening (Pending)
 - [ ] **JWT Key Rotation via JWKS** — Replace single shared SERV_JWT_SECRET with a JWKS endpoint; all services verify tokens by fetching the public key, enabling rotation without restarts (SEC.9)
