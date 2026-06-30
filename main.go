@@ -307,8 +307,12 @@ func main() {
 	mux.HandleFunc("/api/auth/secrets/encrypt", handleSecretsEncrypt)
 	mux.HandleFunc("/api/auth/secrets/decrypt", handleSecretsDecrypt)
 
-	// Wrap in ServShared middleware (OTel tracing + auth check middleware)
-	serverHandler := ServShared.TraceMiddleware("servauth", ServShared.AuthMiddleware(mux))
+	// Wrap in ServShared middleware: OTel tracing → JWT auth → tenant enforcement → handlers
+	serverHandler := ServShared.TraceMiddleware("servauth",
+		ServShared.AuthMiddleware(
+			ServShared.TenantMiddleware(mux),
+		),
+	)
 
 	// Setup Server
 	server := &http.Server{
@@ -473,7 +477,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		secret = "test-secret-key-12345"
 	}
 
-	token, err := ServShared.GenerateUserToken(secret, user.Username, []string{"user"}, 24*time.Hour)
+	token, err := ServShared.GenerateUserToken(secret, user.Username, []string{"user"}, tenantID, 24*time.Hour)
 	if err != nil {
 		http.Error(w, "Token generation failed", http.StatusInternalServerError)
 		return
@@ -918,7 +922,12 @@ func handleSocialCallback(w http.ResponseWriter, r *http.Request) {
 		secret = "test-secret-key-12345"
 	}
 
-	token, err := ServShared.GenerateUserToken(secret, username, []string{"user"}, 24*time.Hour)
+	tenantID := ServShared.GetTenantID(r)
+	if tenantID == "" {
+		tenantID = "default"
+	}
+
+	token, err := ServShared.GenerateUserToken(secret, username, []string{"user"}, tenantID, 24*time.Hour)
 	if err != nil {
 		http.Error(w, "Token generation failed", http.StatusInternalServerError)
 		return
