@@ -22,3 +22,6 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 - [x] **Interface Abstractions & Decoupled Storage** — Extract workflow definition and checkpoints behind `WorkflowStore` interface. [June 30, 2026]
 - [x] **Structured Logging & OTel Tracing** — Add TraceMiddleware for tracing context propagation and JSON log format. [June 30, 2026]
 - [x] **SIGTERM Graceful Shutdown** — Register listener to shut down HTTP listener cleanly with a 5-second timeout. [June 30, 2026]
+
+## Phase 4: Architectural Depth (Pending)
+- [ ] **Durable Sagas State Machine** — Durable execution rollback engine backed by ServStore (CORE.2)
