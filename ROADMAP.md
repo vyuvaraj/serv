@@ -23,3 +23,6 @@ This roadmap outlines the planned development phases for the ServMail notificati
 - [x] **Interface Abstractions & Decoupled Storage** — Extract templates repository behind `TemplateStore` interface for mockability. [June 30, 2026]
 - [x] **Structured Logging & OTel Tracing** — Add TraceMiddleware for tracing context propagation and JSON log format. [June 30, 2026]
 - [x] **SIGTERM Graceful Shutdown** — Register listener to shut down HTTP listener cleanly with a 5-second timeout. [June 30, 2026]
+
+## Phase 4: Developer Experience (Pending)
+- [ ] **Local Mock Dev Server** — Offline SMTP mock responses for local testing (DX.9)
