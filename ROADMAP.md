@@ -24,5 +24,5 @@ This roadmap outlines the planned development phases for the ServDB database pro
 - [x] **SIGTERM Graceful Shutdown** — Register listener to shut down HTTP listener cleanly with a 5-second timeout. [June 30, 2026]
 
 ## Phase 3: Architectural Depth (Pending)
-- [ ] **Dynamic Connection Pool Tuning** — Adaptive pool sizing and automated invalidation invalidations (PS.1)
+- [x] **Dynamic Connection Pool Tuning** — Adaptive pool sizing and automated invalidation invalidations (PS.1)
 - [ ] **Secrets Envelope Key Rotation** — Secret KMS rotation schedule & API key hashing (SEC.8)
