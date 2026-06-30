@@ -529,3 +529,16 @@ func BenchmarkQueryCacheLookup(b *testing.B) {
 		queryCacheMu.RUnlock()
 	}
 }
+
+func BenchmarkConnectionPoolAcquireRelease(b *testing.B) {
+	pool := NewConnectionPool(100, "postgres") // high max conns to prevent exhaustion in benchmark
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			c, err := pool.Acquire()
+			if err == nil {
+				pool.Release(c)
+			}
+		}
+	})
+}
