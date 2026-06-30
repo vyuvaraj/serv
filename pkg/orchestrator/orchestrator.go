@@ -174,7 +174,7 @@ func (o *Orchestrator) DeployWithEnv(name string, srvCode string, customEnv map[
 
 	// Wait/poll for the new process to become healthy
 	healthy := false
-	timeoutChan := time.After(8 * time.Second)
+	timeoutChan := time.After(45 * time.Second)
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
