@@ -3,8 +3,10 @@ package ServShared
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -129,4 +131,75 @@ func writeAuthError(w http.ResponseWriter, status int, msg, code string) {
 		"error": msg,
 		"code":  code,
 	})
+}
+
+// responseWriterWrapper wraps http.ResponseWriter to capture status code
+type responseWriterWrapper struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *responseWriterWrapper) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// TraceMiddleware intercepts requests to create OTel spans and propagates trace headers
+func TraceMiddleware(serviceName string, next http.Handler) http.Handler {
+	InitTrace(serviceName)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		traceparent := r.Header.Get("traceparent")
+		if traceparent == "" {
+			traceparent = r.Header.Get("X-Request-ID")
+		}
+
+		span := StartSpan(fmt.Sprintf("%s %s", r.Method, r.URL.Path), traceparent)
+		if span != nil {
+			span.Kind = 2 // Server span
+			tpVal := fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID)
+			r.Header.Set("traceparent", tpVal)
+		}
+
+		wrapper := &responseWriterWrapper{ResponseWriter: w, statusCode: http.StatusOK}
+
+		defer func() {
+			if span != nil {
+				attrs := map[string]interface{}{
+					"http.method":      r.Method,
+					"http.status_code": wrapper.statusCode,
+					"http.url":         r.URL.String(),
+				}
+				var err error
+				if wrapper.statusCode >= 400 {
+					err = fmt.Errorf("HTTP error status %d", wrapper.statusCode)
+				}
+				EndSpan(span, err, attrs)
+			}
+		}()
+
+		next.ServeHTTP(wrapper, r)
+	})
+}
+
+// LogJSON logs a message in structured JSON format, extracting trace ID from request context if available
+func LogJSON(r *http.Request, level, msg string) {
+	entry := map[string]interface{}{
+		"level": level,
+		"ts":    time.Now().Format(time.RFC3339),
+		"msg":   msg,
+	}
+	if r != nil {
+		entry["method"] = r.Method
+		entry["path"] = r.URL.Path
+		tp := r.Header.Get("traceparent")
+		if tp != "" {
+			parts := strings.Split(tp, "-")
+			if len(parts) >= 3 {
+				entry["trace_id"] = parts[1]
+			}
+		}
+	}
+	data, _ := json.Marshal(entry)
+	fmt.Println(string(data))
 }
