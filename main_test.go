@@ -36,7 +36,22 @@ func generateTOTP(secret string) string {
 	return fmt.Sprintf("%06d", otp)
 }
 
+func setupTest() {
+	usersMu.Lock()
+	users = make(map[string]User)
+	usersMu.Unlock()
+
+	apiKeysMu.Lock()
+	apiKeys = make(map[string]*APIKey)
+	apiKeysMu.Unlock()
+
+	sessionsMu.Lock()
+	sessions = make(map[string]*Session)
+	sessionsMu.Unlock()
+}
+
 func TestServAuthWorkflow(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
@@ -97,6 +112,7 @@ func TestServAuthWorkflow(t *testing.T) {
 }
 
 func TestServAuthOAuthToken(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth/token", handleToken)
 
@@ -135,6 +151,7 @@ func TestServAuthOAuthToken(t *testing.T) {
 }
 
 func TestServAuthSecurityLockoutAndReset(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
@@ -235,6 +252,7 @@ func TestServAuthSecurityLockoutAndReset(t *testing.T) {
 }
 
 func TestServAuthKeysAndSessions(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
@@ -336,6 +354,7 @@ func TestServAuthKeysAndSessions(t *testing.T) {
 }
 
 func TestServAuthTenancyAndMfa(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
@@ -405,6 +424,7 @@ func TestServAuthTenancyAndMfa(t *testing.T) {
 }
 
 func TestServAuthSocialLogin(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/social/login", handleSocialLogin)
 	mux.HandleFunc("/api/auth/social/callback", handleSocialCallback)
@@ -445,6 +465,7 @@ func TestServAuthSocialLogin(t *testing.T) {
 }
 
 func TestServAuthUserMgmtAndSecrets(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
@@ -561,6 +582,7 @@ func TestServAuthUserMgmtAndSecrets(t *testing.T) {
 }
 
 func TestServAuthSecurityFeatures(t *testing.T) {
+	setupTest()
 	// 1. Test Bcrypt hashing
 	hash, err := hashPassword("mySecretPassword")
 	if err != nil {
@@ -605,6 +627,61 @@ func TestServAuthSecurityFeatures(t *testing.T) {
 	}
 	if !isSessionExpired(expiredSession) {
 		t.Errorf("session older than 24 hours should be expired")
+	}
+}
+
+func TestTableDrivenKeyValidation(t *testing.T) {
+	setupTest()
+
+	// Pre-populate some keys
+	apiKeysMu.Lock()
+	apiKeys["valid-key-id"] = &APIKey{
+		Key:       "valid-key-id",
+		Username:  "user-a",
+		CreatedAt: time.Now(),
+	}
+	apiKeysMu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/keys/validate", handleKeysValidate)
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	tests := []struct {
+		name       string
+		key        string
+		wantStatus int
+	}{
+		{
+			name:       "Valid Key",
+			key:        "valid-key-id",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "Non-existent Key",
+			key:        "missing-key-id",
+			wantStatus: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqPayload := struct {
+				Key string `json:"key"`
+			}{
+				Key: tt.key,
+			}
+			body, _ := json.Marshal(reqPayload)
+			resp, err := http.Post(testServer.URL+"/api/auth/keys/validate", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("failed to make request: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, resp.StatusCode)
+			}
+		})
 	}
 }
 
