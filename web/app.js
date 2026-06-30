@@ -1742,6 +1742,12 @@ let draggedNode = null;
 let selectedNode = null;
 let graphAnimationId = null;
 let flowParticles = [];
+let viewportOffsetX = 0;
+let viewportOffsetY = 0;
+let viewportZoom = 1;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
 
 function clearInspector() {
   const title = document.getElementById('inspector-title');
@@ -1834,18 +1840,22 @@ async function fetchDependencyGraph() {
   // Setup mouse events once
   if (!canvas.dataset.eventsAttached) {
     canvas.dataset.eventsAttached = 'true';
+    canvas.style.cursor = 'grab';
     
     canvas.addEventListener('mousedown', (e) => {
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       
+      const transformedMouseX = (mouseX - viewportOffsetX) / viewportZoom;
+      const transformedMouseY = (mouseY - viewportOffsetY) / viewportZoom;
+      
       draggedNode = null;
       let hit = false;
       
       for (const node of graphNodes) {
-        const dx = mouseX - node.x;
-        const dy = mouseY - node.y;
+        const dx = transformedMouseX - node.x;
+        const dy = transformedMouseY - node.y;
         if (Math.sqrt(dx * dx + dy * dy) <= 45) {
           draggedNode = node;
           selectedNode = node;
@@ -1855,21 +1865,72 @@ async function fetchDependencyGraph() {
           break;
         }
       }
+      
       if (!hit) {
         selectedNode = null;
         clearInspector();
+        isPanning = true;
+        panStartX = e.clientX - viewportOffsetX;
+        panStartY = e.clientY - viewportOffsetY;
+        canvas.style.cursor = 'grabbing';
       }
     });
     
     canvas.addEventListener('mousemove', (e) => {
-      if (!draggedNode) return;
       const rect = canvas.getBoundingClientRect();
-      draggedNode.x = Math.max(45, Math.min(canvas.width - 45, e.clientX - rect.left));
-      draggedNode.y = Math.max(45, Math.min(canvas.height - 45, e.clientY - rect.top));
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      const transformedMouseX = (mouseX - viewportOffsetX) / viewportZoom;
+      const transformedMouseY = (mouseY - viewportOffsetY) / viewportZoom;
+      
+      if (draggedNode) {
+        draggedNode.x = Math.max(45, Math.min(canvas.width - 45, transformedMouseX));
+        draggedNode.y = Math.max(45, Math.min(canvas.height - 45, transformedMouseY));
+      } else if (isPanning) {
+        viewportOffsetX = e.clientX - panStartX;
+        viewportOffsetY = e.clientY - panStartY;
+      } else {
+        let hover = false;
+        for (const node of graphNodes) {
+          const dx = transformedMouseX - node.x;
+          const dy = transformedMouseY - node.y;
+          if (Math.sqrt(dx * dx + dy * dy) <= 45) {
+            hover = true;
+            break;
+          }
+        }
+        canvas.style.cursor = hover ? 'pointer' : 'grab';
+      }
     });
     
-    canvas.addEventListener('mouseup', () => { draggedNode = null; });
-    canvas.addEventListener('mouseleave', () => { draggedNode = null; });
+    canvas.addEventListener('mouseup', () => { 
+      draggedNode = null; 
+      isPanning = false; 
+      canvas.style.cursor = 'grab';
+    });
+    
+    canvas.addEventListener('mouseleave', () => { 
+      draggedNode = null; 
+      isPanning = false; 
+      canvas.style.cursor = 'grab';
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const zoomIntensity = 0.05;
+      const wheelDelta = e.deltaY < 0 ? 1 : -1;
+      const zoomFactor = Math.exp(wheelDelta * zoomIntensity);
+      const newZoom = Math.min(3.0, Math.max(0.4, viewportZoom * zoomFactor));
+
+      viewportOffsetX = mouseX - (mouseX - viewportOffsetX) * (newZoom / viewportZoom);
+      viewportOffsetY = mouseY - (mouseY - viewportOffsetY) * (newZoom / viewportZoom);
+      viewportZoom = newZoom;
+    }, { passive: false });
   }
   
   try {
@@ -2253,6 +2314,10 @@ function startGraphRenderLoop(ctx, canvas) {
   function updateAndDraw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
+    ctx.save();
+    ctx.translate(viewportOffsetX, viewportOffsetY);
+    ctx.scale(viewportZoom, viewportZoom);
+    
     // Draw connection edges
     graphEdges.forEach(edge => {
       const fromNode = graphNodes.find(n => n.id === edge.from);
@@ -2339,6 +2404,23 @@ function startGraphRenderLoop(ctx, canvas) {
         ctx.fillText('! ERROR', node.x, node.y + 12);
       }
     });
+    
+    ctx.restore();
+    
+    // Draw zoom indicator in screen space (no transform)
+    const zoomPct = Math.round(viewportZoom * 100);
+    ctx.save();
+    ctx.font = '11px JetBrains Mono, monospace';
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${zoomPct}%`, canvas.width - 10, canvas.height - 10);
+    if (viewportZoom !== 1) {
+      ctx.font = '10px Outfit, sans-serif';
+      ctx.fillStyle = 'rgba(99, 102, 241, 0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText('Scroll to zoom · Drag to pan', canvas.width / 2, canvas.height - 10);
+    }
+    ctx.restore();
     
     graphAnimationId = requestAnimationFrame(updateAndDraw);
   }
@@ -3247,16 +3329,24 @@ function initSidebarCollapse() {
   const sidebar = document.querySelector('.sidebar');
   if (!collapseBtn || !sidebar) return;
 
+  const applyState = (collapsed) => {
+    if (collapsed) {
+      sidebar.classList.add('collapsed');
+      collapseBtn.style.transform = 'scale(1.15) rotate(180deg)';
+    } else {
+      sidebar.classList.remove('collapsed');
+      collapseBtn.style.transform = '';
+    }
+  };
+
   // Load state from localStorage
   const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
-  if (isCollapsed) {
-    sidebar.classList.add('collapsed');
-    collapseBtn.textContent = '▶';
-  }
+  applyState(isCollapsed);
 
   collapseBtn.addEventListener('click', () => {
     const collapsed = sidebar.classList.toggle('collapsed');
-    collapseBtn.textContent = collapsed ? '▶' : '◀';
+    // Keep rotate in sync; hover scale handled by CSS
+    collapseBtn.style.transform = collapsed ? 'rotate(180deg)' : '';
     localStorage.setItem('sidebar-collapsed', collapsed);
   });
 }

@@ -251,9 +251,9 @@
 
       <div style="display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0;">
         <!-- Environment Selector -->
-        <div class="env-selector-wrapper" style="display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-glass); padding: 0.25rem 0.5rem; border-radius: 8px;">
+        <div class="env-selector-wrapper" style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-tab-hover); border: 1px solid var(--border-glass); padding: 0.25rem 0.5rem; border-radius: 8px;">
           <span style="font-size:0.75rem; color:var(--text-secondary); font-weight:500;">Env:</span>
-          <select id="env-selector" style="background:transparent; border:none; color:#fff; font-size:0.8rem; font-weight:600; outline:none; cursor:pointer;">
+          <select id="env-selector" style="background:transparent; border:none; color:var(--text-primary); font-size:0.8rem; font-weight:600; outline:none; cursor:pointer;">
             <!-- Loaded dynamically -->
           </select>
         </div>
@@ -264,9 +264,9 @@
             <span id="alerts-count-badge" class="alerts-badge" style="display: none; position: absolute; top: -5px; right: -5px; background: var(--danger, #ef4444); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 0.7rem; font-weight: bold; align-items: center; justify-content: center;">0</span>
           </button>
           <!-- Alerts Dropdown Panel -->
-          <div id="alerts-dropdown-panel" class="alerts-panel" style="display: none; position: absolute; top: 45px; right: 0; width: 320px; max-height: 400px; background: rgba(15, 17, 32, 0.95); border: 1px solid var(--border-glass, rgba(255,255,255,0.08)); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 1000; padding: 1rem; overflow-y: auto;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem;">
-              <h4 style="margin: 0; font-size: 0.95rem; color: #fff;">Active Alerts</h4>
+          <div id="alerts-dropdown-panel" class="alerts-panel" style="display: none; position: absolute; top: 45px; right: 0; width: 320px; max-height: 400px; background: var(--bg-glass-card); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border-glass); border-radius: 12px; box-shadow: var(--shadow-lg); z-index: 9999; padding: 1rem; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.5rem;">
+              <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-primary);">Active Alerts</h4>
               <button id="btn-alerts-clear" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.15rem 0.4rem;">Dismiss All</button>
             </div>
             <div id="alerts-list-container" style="display: flex; flex-direction: column; gap: 0.5rem;">
@@ -289,9 +289,7 @@
 
     <div class="app-body">
       <aside class="sidebar">
-        <div class="sidebar-toggle-wrapper" style="display: flex; justify-content: flex-end; margin-bottom: 0.5rem; width: 100%;">
-          <button id="btn-sidebar-collapse" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border-glass);" title="Toggle Sidebar Expand/Collapse">◀</button>
-        </div>
+        <button id="btn-sidebar-collapse" title="Toggle Sidebar" aria-label="Toggle sidebar">◀</button>
         <nav class="nav-tabs" id="main-nav-tabs">
           <button class="tab-btn active" data-tab="gateways">
             <svg class="icon" viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V8h14v10zM7 10h2v2H7zm0 4h2v2H7zm4-4h2v2h-2zm0 4h2v2h-2zm4-4h2v2h-2zm0 4h2v2h-2z"/></svg>
