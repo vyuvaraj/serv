@@ -236,6 +236,9 @@ func main() {
 	case "dev":
 		runDevCmd()
 
+	case "lsp-action":
+		runLspActionCmd(os.Args[2:])
+
 	default:
 		printUsage()
 	}
@@ -265,4 +268,5 @@ func printUsage() {
 	fmt.Println("  serv tunnel <port> [options]               Expose a local service via the ServTunnel relay server")
 	fmt.Println("  serv dev [file.srv] [--services all]       Start full dev environment (infra + hot-reload)")
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
+	fmt.Println("  serv lsp-action --file <file> --line <line> [--type <type>] Resolve LSP code action recommendation")
 }

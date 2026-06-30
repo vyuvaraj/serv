@@ -75,6 +75,7 @@ const (
 	TOKEN_CIRCUIT_BREAKER TokenType = "CIRCUIT_BREAKER"
 	TOKEN_INJECT      TokenType = "INJECT"
 	TOKEN_GRAPHQL     TokenType = "GRAPHQL"
+	TOKEN_MACRO       TokenType = "MACRO"
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -317,6 +318,9 @@ func (l *Lexer) NextToken() Token {
 		tok.Literal = "?"
 	case ':':
 		tok.Type = TOKEN_COLON
+		tok.Literal = string(l.ch)
+	case '@':
+		tok.Type = TOKEN_MACRO
 		tok.Literal = string(l.ch)
 	case '(':
 		tok.Type = TOKEN_LPAREN

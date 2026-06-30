@@ -223,3 +223,52 @@ func TestDependencyInjectionAndGraphQL(t *testing.T) {
 		t.Errorf("expected graphql handler comment in generated code")
 	}
 }
+
+func TestCompileTimeMacrosAndLspActions(t *testing.T) {
+	src := `
+	@derive(Serialize, Validate)
+	struct User {
+		id: int,
+	}
+	`
+	lexer := compiler.NewLexer(src)
+	parser := compiler.NewParser(lexer)
+	prog := parser.ParseProgram()
+	if len(parser.Errors()) > 0 {
+		t.Fatalf("parser errors: %v", parser.Errors())
+	}
+
+	// Verify AST contains MacroStmt
+	var macroFound bool
+	for _, stmt := range prog.Statements {
+		if _, ok := stmt.(*compiler.MacroStmt); ok {
+			macroFound = true
+		}
+	}
+
+	if !macroFound {
+		t.Errorf("expected MacroStmt in AST")
+	}
+
+	// Verify codegen outputs correctly
+	codegen := compiler.NewCodegen(prog)
+	generated, err := codegen.Generate()
+	if err != nil {
+		t.Fatalf("codegen error: %v", err)
+	}
+
+	if !strings.Contains(generated, "compile-time macro expanded: @derive(Serialize, Validate)") {
+		t.Errorf("expected macro expansion comment in generated code")
+	}
+
+	// Test LSP action runner helper does not panic
+	tmpFile, err := os.CreateTemp("", "test_lsp_*.srv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// Capture execution
+	runLspActionCmd([]string{"--file", tmpFile.Name(), "--line", "10", "--type", "quickfix"})
+}

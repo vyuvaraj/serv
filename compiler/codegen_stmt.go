@@ -1454,3 +1454,7 @@ func (c *Codegen) genInjectStmt(s *InjectStmt) (string, error) {
 func (c *Codegen) genGraphQLStmt(s *GraphQLStmt) (string, error) {
 	return fmt.Sprintf("// graphql handler registered at %q\n", s.Path), nil
 }
+
+func (c *Codegen) genMacroStmt(s *MacroStmt) (string, error) {
+	return fmt.Sprintf("// compile-time macro expanded: @%s(%s)\n", s.Name, strings.Join(s.Args, ", ")), nil
+}

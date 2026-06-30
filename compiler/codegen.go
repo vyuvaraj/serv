@@ -457,6 +457,8 @@ case *InjectStmt:
 return c.genInjectStmt(s)
 case *GraphQLStmt:
 return c.genGraphQLStmt(s)
+case *MacroStmt:
+return c.genMacroStmt(s)
 case *MiddlewareDecl:
 return c.genMiddlewareDecl(s)
 case *WsStmt:

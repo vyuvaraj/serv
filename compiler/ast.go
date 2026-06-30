@@ -1192,3 +1192,16 @@ func (g *GraphQLStmt) TokenLiteral() string { return g.Token.Literal }
 func (g *GraphQLStmt) String() string {
 	return "graphql " + g.Path + " " + g.Body.String() + "\n"
 }
+
+// Macro Statement: @name(args)
+type MacroStmt struct {
+	Token Token
+	Name  string
+	Args  []string
+}
+
+func (m *MacroStmt) statementNode()       {}
+func (m *MacroStmt) TokenLiteral() string { return m.Token.Literal }
+func (m *MacroStmt) String() string {
+	return "@" + m.Name + "(" + strings.Join(m.Args, ", ") + ")\n"
+}

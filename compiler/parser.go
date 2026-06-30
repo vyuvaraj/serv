@@ -271,6 +271,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseInjectStatement()
 	case TOKEN_GRAPHQL:
 		return p.parseGraphQLStatement()
+	case TOKEN_MACRO:
+		return p.parseMacroStatement()
 	case TOKEN_MIDDLEWARE:
 		return p.parseMiddlewareDeclaration()
 	case TOKEN_DECLARE:

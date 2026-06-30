@@ -653,3 +653,30 @@ func (p *Parser) parseGraphQLStatement() Statement {
 	stmt.Body = p.parseBlockStatement()
 	return stmt
 }
+
+func (p *Parser) parseMacroStatement() Statement {
+	stmt := &MacroStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	// Optional arguments: @derive(Serialize, Validate)
+	if p.peekToken.Type == TOKEN_LPAREN {
+		p.nextToken() // consume '('
+		stmt.Args = []string{}
+		if p.peekToken.Type != TOKEN_RPAREN {
+			p.nextToken() // first arg
+			stmt.Args = append(stmt.Args, p.curToken.Literal)
+			for p.peekToken.Type == TOKEN_COMMA {
+				p.nextToken() // consume ','
+				p.nextToken() // next arg
+				stmt.Args = append(stmt.Args, p.curToken.Literal)
+			}
+		}
+		if !p.expectPeek(TOKEN_RPAREN) {
+			return nil
+		}
+	}
+	return stmt
+}
