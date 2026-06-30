@@ -28,6 +28,11 @@ import (
 	_ "github.com/sijms/go-ora/v2"
 
 	"github.com/vyuvaraj/ServShared"
+
+	"servconsole/pkg/ai"
+	"servconsole/pkg/incidents"
+	"servconsole/pkg/proxy"
+	"servconsole/pkg/ws"
 )
 
 var (
@@ -247,14 +252,14 @@ func main() {
 	mailProxy := httputil.NewSingleHostReverseProxy(mURL)
 
 	// Adjust Director to rewrite request path and set Authorization headers
-	configureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken)
-	configureProxyDirector(storeProxy, sURL, "/api/proxy/store", "")
-	configureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token")
-	configureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "")
-	configureProxyDirector(tunnelProxy, tunURL, "/api/proxy/tunnel", "")
-	configureProxyDirector(authProxy, aURL, "/api/proxy/auth", "")
-	configureProxyDirector(dbProxy, dURL, "/api/proxy/db", "")
-	configureProxyDirector(mailProxy, mURL, "/api/proxy/mail", "")
+	proxy.ConfigureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken)
+	proxy.ConfigureProxyDirector(storeProxy, sURL, "/api/proxy/store", "")
+	proxy.ConfigureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token")
+	proxy.ConfigureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "")
+	proxy.ConfigureProxyDirector(tunnelProxy, tunURL, "/api/proxy/tunnel", "")
+	proxy.ConfigureProxyDirector(authProxy, aURL, "/api/proxy/auth", "")
+	proxy.ConfigureProxyDirector(dbProxy, dURL, "/api/proxy/db", "")
+	proxy.ConfigureProxyDirector(mailProxy, mURL, "/api/proxy/mail", "")
 
 	mux := http.NewServeMux()
 
@@ -279,7 +284,14 @@ func main() {
 	mux.HandleFunc("/api/logs", authorizeConsole(handleGetLogs))
 	mux.HandleFunc("/api/logs/ingest", handleIngestLog)
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
-	mux.HandleFunc("/api/slo", authorizeConsole(handleSLO))
+	var sloTracker = incidents.NewSLOTracker()
+	mux.HandleFunc("/api/slo", authorizeConsole(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("decomposed") == "true" {
+			sloTracker.HandleSLO(w, r)
+		} else {
+			handleSLO(w, r)
+		}
+	}))
 	mux.HandleFunc("/api/deployments", authorizeConsole(handleDeployments))
 	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(handleRollback))
 	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
@@ -1415,7 +1427,13 @@ func startEventBroadcaster(ctx context.Context) {
 	}
 }
 
+var wsEventBroadcaster = ws.NewEventBroadcaster()
+
 func handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("decomposed") == "true" {
+		wsEventBroadcaster.HandleEvents(w, r)
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
@@ -2678,6 +2696,7 @@ type IncidentTimeline struct {
 	Events             []TimelineEvent `json:"events"`
 	AISuggestedRunbook string          `json:"ai_suggested_runbook,omitempty"`
 	AIRunbookSteps     []string        `json:"ai_runbook_steps,omitempty"`
+	AISuggestion       string          `json:"ai_suggestion,omitempty"`
 }
 
 func handleIncidentAnalyze(w http.ResponseWriter, r *http.Request) {
@@ -2822,6 +2841,7 @@ func handleIncidentAnalyze(w http.ResponseWriter, r *http.Request) {
 		Events:             events,
 		AISuggestedRunbook: suggestedRunbook,
 		AIRunbookSteps:     runbookSteps,
+		AISuggestion:       ai.GenerateIncidentResolutionSuggestion(alertType, message),
 	}
 
 	json.NewEncoder(w).Encode(timeline)
