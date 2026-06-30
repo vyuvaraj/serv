@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -635,8 +637,10 @@ func TestTableDrivenKeyValidation(t *testing.T) {
 
 	// Pre-populate some keys
 	apiKeysMu.Lock()
-	apiKeys["valid-key-id"] = &APIKey{
-		Key:       "valid-key-id",
+	testKeyBytes := sha256.Sum256([]byte("valid-key-id"))
+	testKeyHex := hex.EncodeToString(testKeyBytes[:])
+	apiKeys[testKeyHex] = &APIKey{
+		Key:       testKeyHex,
 		Username:  "user-a",
 		CreatedAt: time.Now(),
 	}

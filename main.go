@@ -166,13 +166,40 @@ var (
 		"v2": "rotated-kms-secret-32-bytes-long!",
 	}
 	latestKMSKeyVersion = "v2"
+	kmsMu               sync.RWMutex
 )
+
+func startKMSRotationLoop(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		versionCounter := 2
+		for range ticker.C {
+			kmsMu.Lock()
+			versionCounter++
+			newVersion := fmt.Sprintf("v%d", versionCounter)
+
+			// Generate a new 32-byte key dynamically
+			newKeyBytes := make([]byte, 32)
+			_, _ = io.ReadFull(rand.Reader, newKeyBytes)
+			newKeyHex := hex.EncodeToString(newKeyBytes)
+
+			kmsKeys[newVersion] = newKeyHex
+			latestKMSKeyVersion = newVersion
+			kmsMu.Unlock()
+			log.Printf("[INFO] Rotated KMS envelope key to version %s", newVersion)
+		}
+	}()
+}
 
 func getKMSKeyForVersion(version string) []byte {
 	envKey := "SERV_KMS_SECRET_" + strings.ToUpper(version)
 	secret := os.Getenv(envKey)
 	if secret == "" {
-		if val, ok := kmsKeys[version]; ok {
+		kmsMu.RLock()
+		val, ok := kmsKeys[version]
+		kmsMu.RUnlock()
+		if ok {
 			secret = val
 		} else {
 			secret = os.Getenv("SERV_KMS_SECRET")
@@ -188,10 +215,12 @@ func getKMSKeyForVersion(version string) []byte {
 
 // encryptAES encrypts plaintext using AES-GCM with versioning
 func encryptAES(plaintext string) (string, error) {
+	kmsMu.RLock()
 	version := os.Getenv("SERV_KMS_SECRET_LATEST_VERSION")
 	if version == "" {
 		version = latestKMSKeyVersion
 	}
+	kmsMu.RUnlock()
 	key := getKMSKeyForVersion(version)
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -366,6 +395,9 @@ func main() {
 	jwtRSAPublicKey = &privKey.PublicKey
 
 	initStore()
+
+	// SEC.8: Start background KMS envelope key rotation (simulated 24h rotation schedule)
+	startKMSRotationLoop(24 * time.Hour)
 
 	mux := http.NewServeMux()
 
@@ -784,22 +816,26 @@ func handleKeys(w http.ResponseWriter, r *http.Request) {
 	keyHash := sha256.Sum256([]byte(rawKey))
 	hexKey := hex.EncodeToString(keyHash[:])
 
+	// SEC.8: Hash the API Key before storing it
+	hashedBytes := sha256.Sum256([]byte(hexKey))
+	hashedKey := hex.EncodeToString(hashedBytes[:])
+
 	apiKey := &APIKey{
-		Key:       hexKey,
+		Key:       hashedKey,
 		Username:  req.Username,
 		Scopes:    req.Scopes,
 		CreatedAt: time.Now(),
 	}
 
 	apiKeysMu.Lock()
-	apiKeys[hexKey] = apiKey
+	apiKeys[hashedKey] = apiKey
 	apiKeysMu.Unlock()
 	saveAPIKeysToStore()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"key":      hexKey,
+		"key":      hexKey, // Return plaintext key only once to the registering client
 		"username": req.Username,
 		"scopes":   req.Scopes,
 	})
@@ -819,8 +855,12 @@ func handleKeysValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SEC.8: Hash the incoming validate request key before looking it up
+	hashedBytes := sha256.Sum256([]byte(req.Key))
+	hashedKey := hex.EncodeToString(hashedBytes[:])
+
 	apiKeysMu.RLock()
-	apiKey, exists := apiKeys[req.Key]
+	apiKey, exists := apiKeys[hashedKey]
 	apiKeysMu.RUnlock()
 
 	if !exists {
