@@ -116,7 +116,7 @@ func runGenerateRoutes() {
 		os.Exit(1)
 	}
 
-	if spec.Paths == nil || len(spec.Paths) == 0 {
+	if len(spec.Paths) == 0 {
 		fmt.Println("No paths found in the OpenAPI spec.")
 		os.Exit(1)
 	}

@@ -103,23 +103,25 @@ func (p *Parser) parseFnDeclaration() Statement {
 		stmt.ReturnType = p.parseTypeAnnotation()
 	}
 
+	parseLoop:
 	for {
-		if p.peekToken.Type == TOKEN_RETRIES {
+		switch p.peekToken.Type {
+		case TOKEN_RETRIES:
 			p.nextToken() // consume 'retries'
 			if !p.expectPeek(TOKEN_INT) {
 				return nil
 			}
 			val, _ := strconv.Atoi(p.curToken.Literal)
 			stmt.Retries = val
-		} else if p.peekToken.Type == TOKEN_TIMEOUT {
+		case TOKEN_TIMEOUT:
 			p.nextToken() // consume 'timeout'
 			p.nextToken() // consume duration/int/ident
 			stmt.Timeout = p.curToken.Literal
-		} else if p.peekToken.Type == TOKEN_CIRCUIT_BREAKER {
+		case TOKEN_CIRCUIT_BREAKER:
 			p.nextToken() // consume 'circuit_breaker'
 			stmt.HasCircuitBreaker = true
-		} else {
-			break
+		default:
+			break parseLoop
 		}
 	}
 

@@ -528,7 +528,9 @@ func (v *VersionBlockStmt) statementNode()       {}
 func (v *VersionBlockStmt) TokenLiteral() string { return v.Token.Literal }
 func (v *VersionBlockStmt) String() string {
 	var out strings.Builder
-	out.WriteString("version \"" + v.Version + "\" {\n")
+	out.WriteString("version \"")
+	out.WriteString(v.Version)
+	out.WriteString("\" {\n")
 	for _, s := range v.Statements {
 		out.WriteString(s.String())
 	}

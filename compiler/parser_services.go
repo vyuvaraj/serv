@@ -93,9 +93,7 @@ func (p *Parser) parseRouteStatement() Statement {
 		if !strings.HasPrefix(pfx, "/") {
 			pfx = "/" + pfx
 		}
-		if strings.HasSuffix(pfx, "/") {
-			pfx = pfx[:len(pfx)-1]
-		}
+		pfx = strings.TrimSuffix(pfx, "/")
 		if !strings.HasPrefix(pth, "/") {
 			pth = "/" + pth
 		}
