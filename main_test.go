@@ -63,18 +63,19 @@ func TestServFlowDAGExecution(t *testing.T) {
 		t.Fatalf("expected running workflow status, got %q", inst.Status)
 	}
 
-	// Wait briefly for background execution to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// 3. Query Instance Status
-	getResp, err := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	if err != nil {
-		t.Fatalf("failed to query instance: %v", err)
-	}
-	defer getResp.Body.Close()
-
+	// Poll for workflow completion (up to 1.5 seconds)
 	var finalInst WorkflowInstance
-	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	for i := 0; i < 30; i++ {
+		getResp, err := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+		if err == nil {
+			json.NewDecoder(getResp.Body).Decode(&finalInst)
+			getResp.Body.Close()
+			if finalInst.Status == "completed" {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if finalInst.Status != "completed" {
 		t.Errorf("expected workflow completion, got %q. Logs: %v", finalInst.Status, finalInst.Logs)
