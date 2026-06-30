@@ -168,6 +168,6 @@ These create a **moat** around ServStore — capabilities that MinIO, Ceph, AWS 
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
 ## Phase 11: Architectural Depth (Pending)
-- [ ] **HNSW Vector Search Graph** — True HNSW graphs replacing baseline linear scans (CORE.1)
+- [x] **HNSW Vector Search Graph** — True HNSW graphs replacing baseline linear scans (CORE.1)
 
 
