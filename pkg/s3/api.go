@@ -317,6 +317,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			g.proxyRequest(w, r, remoteClusterAddr)
 			return
 		}
+
+		if strings.Contains(bucket, "@") {
+			parts := strings.SplitN(bucket, "@", 2)
+			bucket = parts[0]
+		}
 	}
 
 	if r.Header.Get("X-ServStore-Shard-Index") != "" {
@@ -828,11 +833,27 @@ func (g *Gateway) resolveFederatedBucket(bucket string) (string, bool) {
 	if bucket == "system-access-logs" {
 		return "", false
 	}
+
+	targetRegion := ""
+	if strings.Contains(bucket, "@") {
+		parts := strings.SplitN(bucket, "@", 2)
+		bucket = parts[0]
+		targetRegion = parts[1]
+	}
+
 	g.fedMutex.RLock()
 	defer g.fedMutex.RUnlock()
 
 	for _, rule := range g.federationRules {
-		if matchPattern(bucket, rule.Pattern) {
+		// Match region pattern or bucket pattern
+		matches := false
+		if targetRegion != "" {
+			matches = strings.EqualFold(rule.Pattern, targetRegion)
+		} else {
+			matches = matchPattern(bucket, rule.Pattern)
+		}
+
+		if matches {
 			if g.cluster != nil {
 				localAddr, ok := g.cluster.GetNodeAddress(g.cluster.LocalNodeID())
 				if ok && (rule.Target == localAddr || strings.Contains(rule.Target, localAddr)) {
