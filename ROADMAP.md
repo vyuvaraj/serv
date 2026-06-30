@@ -282,3 +282,16 @@ Native language-level integration with the proposed Servverse components (ServAu
 | 16.5 | **`serv dev` with new components** | Small | `serv dev main.srv` auto-starts ServAuth, ServDB, ServMail, ServFlow alongside existing services when the `.srv` file references them. | [ ] |
 
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
+
+## Phase 17: Architectural Depth & Developer Experience (Pending)
+
+These items elevate Serv-lang from a capable DSL to a world-class developer-friendly language with first-class DevOps tooling.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 17.1 | **`serv doctor`** | Small | One command that checks the full local environment: compiler version, all service ports, ServStore connectivity, WASM runtime — prints ✅/❌ with fix hints. Zero guesswork for new team members. | [ ] |
+| 17.2 | **`serv fmt` formatter** | Small | Opinionated, zero-config code formatter for `.srv` files — like `gofmt` but for Serv. Run in CI to enforce consistent style across the team without code review debates. | [ ] |
+| 17.3 | **`serv lint` static analysis** | Medium | Catch bugs before runtime: unused variables, unreachable code, missing error handling, type-unsafe casts, and schema-registry mismatches — all at build time. | [ ] |
+| 17.4 | **Incremental Compilation Cache** | Medium | Cache compiled AST and IR per file; only recompile changed files and their dependents. Dramatic speedup for large multi-file `.srv` projects with many imports. | [ ] |
+| 17.5 | **`serv test --watch` Mode** | Small | Re-run affected tests automatically on every file save — like `jest --watch` for Serv. Tight red/green feedback loop without manual re-runs. | [ ] |
+| 17.6 | **Compiler Error Code Registry** | Small | Every compiler error has a unique code (e.g. `SRV-E042`) linked to a documentation page with cause, example, and fix. Eliminates cryptic error messages that junior developers can't interpret. | [ ] |
