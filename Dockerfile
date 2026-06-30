@@ -1,7 +1,7 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 WORKDIR /app
 COPY . .
-RUN CGO_ENABLED=0 go build -mod=vendor -o servdb main.go
+RUN CGO_ENABLED=0 go build -mod=vendor -o servdb
 
 FROM alpine:latest
 WORKDIR /app
