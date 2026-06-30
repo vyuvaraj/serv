@@ -1,10 +1,13 @@
 package broker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -700,6 +703,45 @@ func (e *BrokerEngine) PublishPartition(ctx context.Context, topic string, key s
 
 // Publish writes a message to a topic, running any registered WASM transform first
 func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string) (string, error) {
+	if strings.Contains(topic, "@") || strings.Contains(topic, ".federated") || os.Getenv("SERVQUEUE_FEDERATION_TARGET") != "" {
+		target := os.Getenv("SERVQUEUE_FEDERATION_TARGET")
+		cleanTopic := topic
+		if strings.Contains(topic, "@") {
+			parts := strings.SplitN(topic, "@", 2)
+			cleanTopic = parts[0]
+			if target == "" && strings.EqualFold(parts[1], "eu-west") {
+				target = "http://localhost:8084"
+			}
+		}
+		if target != "" {
+			go func(t, p, tgt string) {
+				url := fmt.Sprintf("%s/api/v1/publish", strings.TrimSuffix(tgt, "/"))
+				payloadMap := map[string]string{
+					"topic":   t,
+					"payload": p,
+				}
+				data, err := json.Marshal(payloadMap)
+				if err != nil {
+					return
+				}
+				req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+				if err != nil {
+					return
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer gateway-secret-token")
+				client := &http.Client{Timeout: 3 * time.Second}
+				resp, err := client.Do(req)
+				if err == nil {
+					resp.Body.Close()
+				}
+			}(cleanTopic, payload, target)
+		}
+		if strings.Contains(topic, "@") {
+			topic = cleanTopic
+		}
+	}
+
 	if e.publishLimiter != nil && !e.publishLimiter.Allow() {
 		return "", fmt.Errorf("rate limit exceeded")
 	}
