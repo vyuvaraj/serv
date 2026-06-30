@@ -57,59 +57,51 @@ var (
 	mu          sync.RWMutex
 )
 
-var storeClient *ServShared.StoreClient
+var workflowStore WorkflowStore
 
 func initStore() {
-	storeClient = ServShared.NewStoreClient()
+	client := ServShared.NewStoreClient()
+	workflowStore = NewServStoreWorkflowStore(client)
 	loadStateFromStore()
 }
 
 func loadStateFromStore() {
-	// Load definitions
-	if data, err := storeClient.Get("serv-flow-state", "definitions.json"); err == nil {
+	if defs, err := workflowStore.LoadDefinitions(); err == nil {
 		mu.Lock()
-		var loadedDefs map[string]WorkflowDef
-		if json.Unmarshal(data, &loadedDefs) == nil {
-			definitions = loadedDefs
-			ServShared.LogJSON(nil, "info", fmt.Sprintf("Loaded %d workflow definitions from ServStore", len(definitions)))
-		}
+		definitions = defs
 		mu.Unlock()
 	}
-
-	// Load instances
-	if data, err := storeClient.Get("serv-flow-state", "instances.json"); err == nil {
+	if insts, err := workflowStore.LoadInstances(); err == nil {
 		mu.Lock()
-		var loadedInsts map[string]*WorkflowInstance
-		if json.Unmarshal(data, &loadedInsts) == nil {
-			instances = loadedInsts
-			ServShared.LogJSON(nil, "info", fmt.Sprintf("Loaded %d workflow instances from ServStore", len(instances)))
-		}
+		instances = insts
 		mu.Unlock()
 	}
 }
 
 func saveDefinitionsToStore() {
-	if storeClient == nil {
+	if workflowStore == nil {
 		return
 	}
 	mu.RLock()
-	data, err := json.Marshal(definitions)
-	mu.RUnlock()
-	if err == nil {
-		_ = storeClient.Put("serv-flow-state", "definitions.json", data)
+	copied := make(map[string]WorkflowDef)
+	for k, v := range definitions {
+		copied[k] = v
 	}
+	mu.RUnlock()
+	_ = workflowStore.SaveDefinitions(copied)
 }
 
 func saveInstancesToStore() {
-	if storeClient == nil {
+	if workflowStore == nil {
 		return
 	}
 	mu.RLock()
-	data, err := json.Marshal(instances)
-	mu.RUnlock()
-	if err == nil {
-		_ = storeClient.Put("serv-flow-state", "instances.json", data)
+	copied := make(map[string]*WorkflowInstance)
+	for k, v := range instances {
+		copied[k] = v
 	}
+	mu.RUnlock()
+	_ = workflowStore.SaveInstances(copied)
 }
 
 func main() {
@@ -272,8 +264,8 @@ func handleResume(w http.ResponseWriter, r *http.Request) {
 	stateFile := fmt.Sprintf("%s.state", req.InstanceID)
 	var data []byte
 	var err error
-	if storeClient != nil {
-		data, err = storeClient.Get("serv-flow-state", stateFile)
+	if workflowStore != nil && workflowStore.GetClient() != nil {
+		data, err = workflowStore.GetClient().Get("serv-flow-state", stateFile)
 	}
 	if err != nil || len(data) == 0 {
 		data, err = os.ReadFile(stateFile)
@@ -762,8 +754,8 @@ func saveCheckpoint(inst *WorkflowInstance) {
 		return
 	}
 
-	if storeClient != nil {
-		_ = storeClient.Put("serv-flow-state", fmt.Sprintf("%s.state", inst.ID), data)
+	if workflowStore != nil && workflowStore.GetClient() != nil {
+		_ = workflowStore.GetClient().Put("serv-flow-state", fmt.Sprintf("%s.state", inst.ID), data)
 	}
 
 	_ = os.WriteFile(fmt.Sprintf("%s.state", inst.ID), data, 0644)
