@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -16,7 +17,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -319,13 +322,42 @@ func main() {
 	mux.HandleFunc("/api/auth/secrets/encrypt", handleSecretsEncrypt)
 	mux.HandleFunc("/api/auth/secrets/decrypt", handleSecretsDecrypt)
 
-	// Wrap in ServShared middleware (auth checks for dashboard endpoints if needed, but signup/login are public)
-	serverHandler := ServShared.AuthMiddleware(mux)
+	// Wrap in ServShared middleware (OTel tracing + auth check middleware)
+	serverHandler := ServShared.TraceMiddleware("servauth", ServShared.AuthMiddleware(mux))
 
-	log.Printf("ServAuth server starting on port %s", port)
-	if err := http.ListenAndServe(":"+port, serverHandler); err != nil {
-		log.Fatalf("failed to start ServAuth: %v", err)
+	// Setup Server
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: serverHandler,
 	}
+
+	// Channel to catch OS signals for Graceful Shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	// Start server in background
+	go func() {
+		log.Printf("[INFO] ServAuth server starting on port %s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("failed to start ServAuth: %v", err)
+		}
+	}()
+
+	// Wait for SIGTERM/SIGINT
+	<-stop
+
+	log.Println("[INFO] Shutting down ServAuth server...")
+
+	// Shutdown OTel
+	ServShared.Shutdown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server shutdown failed: %v", err)
+	}
+	log.Println("[INFO] ServAuth server exited cleanly")
 }
 
 func handleRegister(w http.ResponseWriter, r *http.Request) {
