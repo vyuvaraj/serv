@@ -4,5 +4,7 @@ github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZ
 github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/vyuvaraj/ServShared v0.0.0-20260627072934-fdbc3a616721 h1:BkAtGcnWtkxfYqCSS0kxNdBZi5SwokAowbg5EOSqWEs=
 github.com/vyuvaraj/ServShared v0.0.0-20260627072934-fdbc3a616721/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
+github.com/vyuvaraj/ServShared v0.0.0-20260630111408-9e466aadce49 h1:Z+XlZt3NoEQhVD0CiTrgJ8H48fi6z9obCzzR1eIm+do=
+github.com/vyuvaraj/ServShared v0.0.0-20260630111408-9e466aadce49/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
 golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
 golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
