@@ -2,9 +2,11 @@ package ServShared
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -100,4 +102,34 @@ func (c *StoreClient) Get(bucket, key string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read from ServStore (%d): %s", resp.StatusCode, string(body))
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// SemanticSearch runs a vector similarity/semantic search query on a bucket in ServStore.
+func (c *StoreClient) SemanticSearch(bucket, query string, limit int) ([]string, error) {
+	searchURL := fmt.Sprintf("%s/api/v1/search?bucket=%s&q=%s&limit=%d", c.Endpoint, bucket, url.QueryEscape(query), limit)
+	req, err := http.NewRequest("GET", searchURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("search failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var results []string
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, err
+	}
+	return results, nil
 }
