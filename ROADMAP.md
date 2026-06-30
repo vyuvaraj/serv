@@ -71,3 +71,10 @@
 - [ ] **Tunnel Metrics in ServConsole**: Live throughput, latency, and connection count dashboard.
 - [ ] **TCP Tunnel Support**: Tunnel raw TCP (databases, Redis, gRPC) — not just HTTP.
 - [ ] **Webhook Relay Mode**: Receive webhooks on public URL, replay to multiple local services.
+
+## Phase 5: Architectural Depth & Developer Experience (Pending)
+- [ ] **`serv tunnel inspect` CLI** — Real-time view of active tunnel connections, throughput, and recent request log from the terminal (DevOps)
+- [ ] **Request Diff Mode** — Show a coloured diff between the proxied request and original, highlighting header mutations, body modifications or injected WASM transforms (DX)
+- [ ] **Tunnel Config-as-Code** — Declare tunnel rules in `.serv/tunnel.yaml` (name, auth, subdomain, filters); committed to git for reproducible team setups (DevOps / DX)
+
+> See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
