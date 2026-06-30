@@ -17,3 +17,9 @@ This roadmap outlines the planned development phases for the ServMail notificati
 - [x] **Rate limiting** — Per-recipient throttling to prevent spam. [June 29, 2026]
 - [x] **Template versioning** — Versioned template support. [June 29, 2026]
 - [x] **Delivery dashboard** — Integrated telemetry metrics logs. [June 29, 2026]
+
+## Phase 3: Production Hardening & Resilience (Completed)
+- [x] **State-Isolated Unit & Validation Tests** — Table-driven checks for missing recipients and unsupported channels. [June 30, 2026]
+- [x] **Interface Abstractions & Decoupled Storage** — Extract templates repository behind `TemplateStore` interface for mockability. [June 30, 2026]
+- [x] **Structured Logging & OTel Tracing** — Add TraceMiddleware for tracing context propagation and JSON log format. [June 30, 2026]
+- [x] **SIGTERM Graceful Shutdown** — Register listener to shut down HTTP listener cleanly with a 5-second timeout. [June 30, 2026]
