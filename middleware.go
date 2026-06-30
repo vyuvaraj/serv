@@ -1,6 +1,7 @@
 package ServShared
 
 import (
+	"crypto/rsa"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,11 +48,12 @@ func GetTenantID(r *http.Request) string {
 //   - /healthz and /readyz are always allowed without auth
 func AuthMiddleware(next http.Handler) http.Handler {
 	secret := os.Getenv("SERV_JWT_SECRET")
-	if secret == "" {
+	jwksURL := os.Getenv("SERV_JWKS_URL")
+	if secret == "" && jwksURL == "" {
 		return next // dev mode — no auth enforced
 	}
 
-	validator := NewAuthValidator(secret, "", "")
+	validator := NewAuthValidator(secret, jwksURL, "")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Always allow health probes without auth
@@ -160,6 +162,25 @@ func GenerateUserToken(secret string, username string, roles []string, tenantID 
 	return token.SignedString([]byte(secret))
 }
 
+// GenerateUserTokenRS256 creates a JWT signed with an RSA private key.
+func GenerateUserTokenRS256(privKey *rsa.PrivateKey, kid string, username string, roles []string, tenantID string, ttl time.Duration) (string, error) {
+	claims := Claims{
+		Username: username,
+		Roles:    roles,
+		TenantID: tenantID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "servverse",
+			Subject:   username,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = kid
+	return token.SignedString(privKey)
+}
+
 // HasRole checks if the authenticated claims include a specific role.
 func HasRole(r *http.Request, role string) bool {
 	claims := GetClaims(r)
@@ -253,3 +274,33 @@ func LogJSON(r *http.Request, level, msg string) {
 	data, _ := json.Marshal(entry)
 	fmt.Println(string(data))
 }
+
+// Validatable represents a request payload that can validate its own fields.
+type Validatable interface {
+	Validate() error
+}
+
+// DecodeAndValidateJSON decodes JSON from a request body and validates it.
+// It returns true on success, or false if it wrote an HTTP error response.
+func DecodeAndValidateJSON(w http.ResponseWriter, r *http.Request, dest Validatable) bool {
+	if err := json.NewDecoder(r.Body).Decode(dest); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "Invalid JSON payload: "+err.Error(), "ERR_BAD_REQUEST")
+		return false
+	}
+	if err := dest.Validate(); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "Validation failed: "+err.Error(), "ERR_VALIDATION_FAILED")
+		return false
+	}
+	return true
+}
+
+// MaxBytesMiddleware limits the size of the request body.
+func MaxBytesMiddleware(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
