@@ -89,6 +89,7 @@ type Route struct {
 	MCPEnabled         bool              `json:"mcp_enabled,omitempty"`         // Enable MCP tool call parsing and tracking
 	LLMRouting         *LLMRoutingConfig `json:"llm_routing,omitempty"`         // LLM primary and fallback cost-routing configuration
 	WASMSplit          *WASMSplitConfig  `json:"wasm_split,omitempty"`          // A/B test split for WASM middlewares
+	MaxBodySize        int64             `json:"max_body_size,omitempty"`       // Max request body size in bytes
 }
 
 type MetricsTracker struct {
@@ -633,6 +634,13 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.metricsTracker.IncError()
 		return
 	}
+
+	// Limit request body size based on route configuration
+	limit := matchedRoute.MaxBodySize
+	if limit <= 0 {
+		limit = 10 * 1024 * 1024 // Default to 10MB limit if not specified
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 
 	// Multi-tenant API Key Check
 	if matchedRoute.RequireAPIKey {

@@ -1350,3 +1350,48 @@ func TestCanaryTrafficSplitting(t *testing.T) {
 	}
 }
 
+func TestMaxBodySizeLimit(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(body)
+	}))
+	defer backend.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:      "/limited",
+			Target:      backend.URL,
+			MaxBodySize: 10, // 10 bytes limit
+		},
+	}
+
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{}
+	resp, err := client.Post(gwServer.URL+"/limited/data", "application/json", strings.NewReader("123456789"))
+	if err != nil {
+		t.Fatalf("Failed to post within limit: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200 OK for 9-byte payload, got %d", resp.StatusCode)
+	}
+
+	resp2, err := client.Post(gwServer.URL+"/limited/data", "application/json", strings.NewReader("123456789012345"))
+	if err != nil {
+		t.Fatalf("Failed to post exceeding limit: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode == http.StatusOK {
+		t.Errorf("Expected request to be rejected, but got 200 OK")
+	}
+}
+
+
