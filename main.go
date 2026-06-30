@@ -6,8 +6,10 @@ import (
 	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -15,9 +17,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -61,6 +65,46 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+func (r *ResetRequest) Validate() error {
+	if r.Email == "" || !strings.Contains(r.Email, "@") {
+		return fmt.Errorf("invalid email address")
+	}
+	return nil
+}
+
+func (r *ResetConfirm) Validate() error {
+	if r.Token == "" {
+		return fmt.Errorf("token cannot be empty")
+	}
+	if len(r.Password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	return nil
+}
+
+func (r *RegisterRequest) Validate() error {
+	if r.Username == "" {
+		return fmt.Errorf("username cannot be empty")
+	}
+	if len(r.Password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	if r.Email == "" || !strings.Contains(r.Email, "@") {
+		return fmt.Errorf("invalid email address")
+	}
+	return nil
+}
+
+func (r *LoginRequest) Validate() error {
+	if r.Username == "" {
+		return fmt.Errorf("username cannot be empty")
+	}
+	if r.Password == "" {
+		return fmt.Errorf("password cannot be empty")
+	}
+	return nil
+}
+
 type LoginResponse struct {
 	Token    string `json:"token"`
 	Username string `json:"username"`
@@ -92,6 +136,11 @@ var (
 	clients    = map[string]string{
 		"console-client-id": "console-secret-key-9876",
 	}
+
+	// JWKS Keys
+	jwtRSAPrivateKey *rsa.PrivateKey
+	jwtRSAPublicKey  *rsa.PublicKey
+	jwtKeyID         = "servverse-key-v1"
 )
 
 // hashPassword hashes password using bcrypt
@@ -277,6 +326,14 @@ func main() {
 		port = *portStr
 	}
 
+	// Initialize RSA key pair for JWKS
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		log.Fatalf("Failed to generate RSA key pair: %v", err)
+	}
+	jwtRSAPrivateKey = privKey
+	jwtRSAPublicKey = &privKey.PublicKey
+
 	initStore()
 
 	mux := http.NewServeMux()
@@ -291,6 +348,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/api/auth/jwks", handleJWKS)
 	mux.HandleFunc("/api/auth/reset-password/request", handleResetRequest)
 	mux.HandleFunc("/api/auth/reset-password/confirm", handleResetConfirm)
 	mux.HandleFunc("/oauth/token", handleToken)
@@ -356,13 +414,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if req.Username == "" || req.Password == "" || req.Email == "" {
-		http.Error(w, "Username, email, and password are required", http.StatusBadRequest)
+	if !ServShared.DecodeAndValidateJSON(w, r, &req) {
 		return
 	}
 
@@ -420,8 +472,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+	if !ServShared.DecodeAndValidateJSON(w, r, &req) {
 		return
 	}
 
@@ -477,7 +528,13 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		secret = "test-secret-key-12345"
 	}
 
-	token, err := ServShared.GenerateUserToken(secret, user.Username, []string{"user"}, tenantID, 24*time.Hour)
+	var token string
+	var err error
+	if os.Getenv("SERV_JWKS_URL") != "" || os.Getenv("SERV_JWT_SIGNING_METHOD") == "RS256" {
+		token, err = ServShared.GenerateUserTokenRS256(jwtRSAPrivateKey, jwtKeyID, user.Username, []string{"user"}, tenantID, 24*time.Hour)
+	} else {
+		token, err = ServShared.GenerateUserToken(secret, user.Username, []string{"user"}, tenantID, 24*time.Hour)
+	}
 	if err != nil {
 		http.Error(w, "Token generation failed", http.StatusInternalServerError)
 		return
@@ -567,8 +624,16 @@ func handleToken(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
 		},
 	}
-	tokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	token, err := tokenObj.SignedString([]byte(secret))
+	var token string
+	var err error
+	if os.Getenv("SERV_JWKS_URL") != "" || os.Getenv("SERV_JWT_SIGNING_METHOD") == "RS256" {
+		tokenObj := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenObj.Header["kid"] = jwtKeyID
+		token, err = tokenObj.SignedString(jwtRSAPrivateKey)
+	} else {
+		tokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		token, err = tokenObj.SignedString([]byte(secret))
+	}
 	if err != nil {
 		http.Error(w, "Token generation failed", http.StatusInternalServerError)
 		return
@@ -586,8 +651,7 @@ func handleResetRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ResetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !ServShared.DecodeAndValidateJSON(w, r, &req) {
 		return
 	}
 
@@ -628,8 +692,7 @@ func handleResetConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req ResetConfirm
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !ServShared.DecodeAndValidateJSON(w, r, &req) {
 		return
 	}
 
@@ -927,7 +990,13 @@ func handleSocialCallback(w http.ResponseWriter, r *http.Request) {
 		tenantID = "default"
 	}
 
-	token, err := ServShared.GenerateUserToken(secret, username, []string{"user"}, tenantID, 24*time.Hour)
+	var token string
+	var err error
+	if os.Getenv("SERV_JWKS_URL") != "" || os.Getenv("SERV_JWT_SIGNING_METHOD") == "RS256" {
+		token, err = ServShared.GenerateUserTokenRS256(jwtRSAPrivateKey, jwtKeyID, username, []string{"user"}, tenantID, 24*time.Hour)
+	} else {
+		token, err = ServShared.GenerateUserToken(secret, username, []string{"user"}, tenantID, 24*time.Hour)
+	}
 	if err != nil {
 		http.Error(w, "Token generation failed", http.StatusInternalServerError)
 		return
@@ -1086,3 +1155,32 @@ func handleSecretsDecrypt(w http.ResponseWriter, r *http.Request) {
 		"plaintext": plaintext,
 	})
 }
+
+func handleJWKS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	nStr := base64.RawURLEncoding.EncodeToString(jwtRSAPublicKey.N.Bytes())
+	eBytes := big.NewInt(int64(jwtRSAPublicKey.E)).Bytes()
+	eStr := base64.RawURLEncoding.EncodeToString(eBytes)
+
+	jwks := map[string]interface{}{
+		"keys": []map[string]interface{}{
+			{
+				"kty": "RSA",
+				"use": "sig",
+				"alg": "RS256",
+				"kid": jwtKeyID,
+				"n":   nStr,
+				"e":   eStr,
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(jwks)
+}
+
