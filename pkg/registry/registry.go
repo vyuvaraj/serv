@@ -24,6 +24,7 @@ type Instance struct {
 	LastSeen  time.Time `json:"last_seen"`
 	Version   string    `json:"version,omitempty"`
 	Weight    int       `json:"weight,omitempty"`
+	Region    string    `json:"region,omitempty"`
 }
 
 type RoutingRule struct {
@@ -135,6 +136,29 @@ func (r *Registry) Resolve(service string) []Instance {
 
 	service = strings.ToLower(service)
 	list := r.instances[service]
+	healthy := make([]Instance, len(list))
+	copy(healthy, list)
+	return healthy
+}
+
+func (r *Registry) ResolveRegion(service, region string) []Instance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	service = strings.ToLower(service)
+	list := r.instances[service]
+
+	var regional []Instance
+	for _, inst := range list {
+		if region != "" && strings.ToLower(inst.Region) == strings.ToLower(region) {
+			regional = append(regional, inst)
+		}
+	}
+
+	if len(regional) > 0 {
+		return regional
+	}
+
 	healthy := make([]Instance, len(list))
 	copy(healthy, list)
 	return healthy
@@ -308,7 +332,13 @@ func (r *Registry) Handler() http.Handler {
 			return
 		}
 		serviceName := parts[2]
-		instances := r.Resolve(serviceName)
+		region := req.URL.Query().Get("region")
+		var instances []Instance
+		if region != "" {
+			instances = r.ResolveRegion(serviceName, region)
+		} else {
+			instances = r.Resolve(serviceName)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(instances)

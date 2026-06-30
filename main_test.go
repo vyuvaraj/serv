@@ -393,3 +393,57 @@ func TestDynamicRoutingRules(t *testing.T) {
 		t.Errorf("expected default rule fallback, got %+v", resDefaultRule)
 	}
 }
+
+func TestRegionalGeoRouting(t *testing.T) {
+	reg := registry.NewRegistry(5 * time.Second)
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	// Register instance 1 in us-east
+	inst1 := registry.Instance{
+		Service:   "geo-service",
+		Address:   "http://10.0.0.1:8080",
+		HealthURL: "http://10.0.0.1:8080/health",
+		Region:    "us-east",
+	}
+	body1, _ := json.Marshal(inst1)
+	resp1, _ := http.Post(regServer.URL+"/api/register", "application/json", bytes.NewReader(body1))
+	resp1.Body.Close()
+
+	// Register instance 2 in eu-west
+	inst2 := registry.Instance{
+		Service:   "geo-service",
+		Address:   "http://10.0.0.2:8080",
+		HealthURL: "http://10.0.0.2:8080/health",
+		Region:    "eu-west",
+	}
+	body2, _ := json.Marshal(inst2)
+	resp2, _ := http.Post(regServer.URL+"/api/register", "application/json", bytes.NewReader(body2))
+	resp2.Body.Close()
+
+	// 1. Resolve specifying us-east
+	resp, err := http.Get(regServer.URL + "/api/resolve/geo-service?region=us-east")
+	if err != nil {
+		t.Fatalf("failed resolve: %v", err)
+	}
+	defer resp.Body.Close()
+	var resolved []registry.Instance
+	json.NewDecoder(resp.Body).Decode(&resolved)
+
+	if len(resolved) != 1 || resolved[0].Address != "http://10.0.0.1:8080" {
+		t.Errorf("expected 1 instance in us-east, got: %+v", resolved)
+	}
+
+	// 2. Resolve specifying an unknown region, should fall back to all healthy
+	respFallback, err := http.Get(regServer.URL + "/api/resolve/geo-service?region=ap-south")
+	if err != nil {
+		t.Fatalf("failed resolve fallback: %v", err)
+	}
+	defer respFallback.Body.Close()
+	var resolvedFallback []registry.Instance
+	json.NewDecoder(respFallback.Body).Decode(&resolvedFallback)
+
+	if len(resolvedFallback) != 2 {
+		t.Errorf("expected fallback to return both instances, got: %d", len(resolvedFallback))
+	}
+}
