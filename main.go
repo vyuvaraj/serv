@@ -61,37 +61,37 @@ var (
 	attachmentsMu   sync.RWMutex
 )
 
-var storeClient *ServShared.StoreClient
+var templateStore TemplateStore
 
 func initStore() {
-	storeClient = ServShared.NewStoreClient()
+	client := ServShared.NewStoreClient()
+	templateStore = NewServStoreTemplateStore(client)
 	loadTemplatesFromStore()
 }
 
 func loadTemplatesFromStore() {
-	if data, err := storeClient.Get("serv-mail-templates", "templates.json"); err == nil {
+	if loaded, err := templateStore.LoadTemplates(); err == nil {
 		templateRepoMu.Lock()
-		var loadedTemplates map[string]map[string]string
-		if json.Unmarshal(data, &loadedTemplates) == nil {
-			templateRepo = loadedTemplates
-			ServShared.LogJSON(nil, "info", fmt.Sprintf("Loaded %d templates from ServStore", len(templateRepo)))
-		}
+		templateRepo = loaded
 		templateRepoMu.Unlock()
-	} else {
-		ServShared.LogJSON(nil, "warn", fmt.Sprintf("Failed to load templates (will use default/empty): %v", err))
 	}
 }
 
 func saveTemplatesToStore() {
-	if storeClient == nil {
+	if templateStore == nil {
 		return
 	}
 	templateRepoMu.RLock()
-	data, err := json.Marshal(templateRepo)
-	templateRepoMu.RUnlock()
-	if err == nil {
-		_ = storeClient.Put("serv-mail-templates", "templates.json", data)
+	copied := make(map[string]map[string]string)
+	for k, v := range templateRepo {
+		copiedInner := make(map[string]string)
+		for k2, v2 := range v {
+			copiedInner[k2] = v2
+		}
+		copied[k] = copiedInner
 	}
+	templateRepoMu.RUnlock()
+	_ = templateStore.SaveTemplates(copied)
 }
 
 type SendResponse struct {
