@@ -29,38 +29,89 @@ type PoolManager interface {
 
 type ConnectionPool struct {
 	mu           sync.Mutex
+	baseMaxConns int
 	maxConns     int
 	activeConns  map[int]*DbConn
 	idleConns    []*DbConn
 	totalQueries int64
 	nextConnID   int
 	dialect      string
+	maxLifetime  time.Duration
+	lastActive   time.Time
 }
 
 func NewConnectionPool(max int, dialect string) *ConnectionPool {
-	return &ConnectionPool{
-		maxConns:    max,
-		activeConns: make(map[int]*DbConn),
-		idleConns:   make([]*DbConn, 0),
-		dialect:     dialect,
+	p := &ConnectionPool{
+		baseMaxConns: max,
+		maxConns:     max,
+		activeConns:  make(map[int]*DbConn),
+		idleConns:    make([]*DbConn, 0),
+		dialect:      dialect,
+		maxLifetime:  5 * time.Second, // Max lifetime for connection invalidation (short for tests)
+		lastActive:   time.Now(),
 	}
+
+	// Start background janitor to clean up expired idle connections and scale down pool
+	go p.startPoolJanitor(100 * time.Millisecond)
+
+	return p
 }
 
 func (p *ConnectionPool) Dialect() string {
 	return p.dialect
 }
 
+func (p *ConnectionPool) startPoolJanitor(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		p.mu.Lock()
+		now := time.Now()
+		
+		// 1. Invalidate stale idle connections
+		var freshIdle []*DbConn
+		for _, conn := range p.idleConns {
+			if now.Sub(conn.CreatedAt) <= p.maxLifetime {
+				freshIdle = append(freshIdle, conn)
+			}
+		}
+		p.idleConns = freshIdle
+
+		// 2. Shrink pool limit back to baseMaxConns if idle for a cooldown period
+		if len(p.activeConns) < p.baseMaxConns/2 && p.maxConns > p.baseMaxConns {
+			if now.Sub(p.lastActive) > 1*time.Second { // Cooldown for scaling down (short for tests)
+				p.maxConns = p.baseMaxConns
+			}
+		}
+		p.mu.Unlock()
+	}
+}
+
 func (p *ConnectionPool) Acquire() (*DbConn, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if len(p.idleConns) > 0 {
+	p.lastActive = time.Now()
+
+	// 1. Recycle an idle connection, checking for freshness
+	for len(p.idleConns) > 0 {
 		conn := p.idleConns[len(p.idleConns)-1]
 		p.idleConns = p.idleConns[:len(p.idleConns)-1]
+
+		if time.Since(conn.CreatedAt) > p.maxLifetime {
+			// Invalidate stale connection
+			continue
+		}
+
 		p.activeConns[conn.ID] = conn
 		return conn, nil
 	}
 
+	// 2. Adaptive pool sizing: Scale pool limit up to 2x if close to exhaustion
+	if len(p.activeConns) >= p.maxConns && p.maxConns < p.baseMaxConns*2 {
+		p.maxConns = p.baseMaxConns * 2
+	}
+
+	// 3. Create new connection if under maxConns limit
 	if len(p.activeConns) < p.maxConns {
 		p.nextConnID++
 		conn := &DbConn{

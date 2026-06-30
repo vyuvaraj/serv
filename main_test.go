@@ -446,6 +446,72 @@ func TestTableDrivenQueryValidation(t *testing.T) {
 	}
 }
 
+func TestConnectionPoolTuning(t *testing.T) {
+	pool := NewConnectionPool(2, "postgres")
+	pool.maxLifetime = 50 * time.Millisecond // Use short lifetime for testing
+
+	// 1. Verify fresh connections are created and recycled
+	c1, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	c2, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+
+	// Release c1
+	pool.Release(c1)
+
+	// Acquire again -> should recycle c1
+	c1Recycled, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	if c1Recycled.ID != c1.ID {
+		t.Errorf("expected recycled connection %d, got %d", c1.ID, c1Recycled.ID)
+	}
+
+	// Release both
+	pool.Release(c1Recycled)
+	pool.Release(c2)
+
+	// Wait for connections to expire
+	time.Sleep(100 * time.Millisecond)
+
+	// Acquire again -> should invalidate stale ones and create fresh one
+	c3, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	if c3.ID == c1.ID || c3.ID == c2.ID {
+		t.Errorf("expected fresh connection, got stale connection %d", c3.ID)
+	}
+
+	// 2. Verify adaptive scaling (expansion to 2x baseMaxConns)
+	c4, _ := pool.Acquire() // base limit 2 is now exhausted
+	c5, err := pool.Acquire() // should scale maxConns up and acquire successfully
+	if err != nil {
+		t.Fatalf("expected successful expansion acquisition, got: %v", err)
+	}
+	if pool.Stats().MaxConnections != 4 {
+		t.Errorf("expected pool capacity expanded to 4, got %d", pool.Stats().MaxConnections)
+	}
+
+	// Release all
+	pool.Release(c3)
+	pool.Release(c4)
+	pool.Release(c5)
+
+	// Wait for pool scaling cooldown
+	time.Sleep(1200 * time.Millisecond)
+
+	// Verify pool scaled down back to baseMaxConns
+	if pool.Stats().MaxConnections != 2 {
+		t.Errorf("expected pool capacity shrunk back to 2, got %d", pool.Stats().MaxConnections)
+	}
+}
+
 func BenchmarkQueryCacheLookup(b *testing.B) {
 	// Pre-populate cache
 	queryCacheMu.Lock()
