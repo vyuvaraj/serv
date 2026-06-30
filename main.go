@@ -1,19 +1,27 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/vyuvaraj/ServShared"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
@@ -83,11 +91,113 @@ var (
 	}
 )
 
-// hashPassword hashes password with sha256 and salt
-func hashPassword(password, salt string) string {
-	hasher := sha256.New()
-	hasher.Write([]byte(password + salt))
-	return hex.EncodeToString(hasher.Sum(nil))
+// hashPassword hashes password using bcrypt
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+// verifyPassword checks password against bcrypt hash
+func verifyPassword(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// isSessionExpired checks if a session has expired (TTL of 24 hours)
+func isSessionExpired(s *Session) bool {
+	return time.Since(s.CreatedAt) > 24*time.Hour
+}
+
+// getKMSKey retrieves or defaults the key for AES-GCM encryption
+func getKMSKey() []byte {
+	secret := os.Getenv("SERV_KMS_SECRET")
+	if secret == "" {
+		secret = "default-kms-secret-32-bytes-long!"
+	}
+	key := make([]byte, 32)
+	copy(key, []byte(secret))
+	return key
+}
+
+// encryptAES encrypts plaintext using AES-GCM
+func encryptAES(plaintext string) (string, error) {
+	key := getKMSKey()
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return hex.EncodeToString(ciphertext), nil
+}
+
+// decryptAES decrypts ciphertext using AES-GCM
+func decryptAES(hexCiphertext string) (string, error) {
+	key := getKMSKey()
+	ciphertext, err := hex.DecodeString(hexCiphertext)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	nonce, actualCiphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, actualCiphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
+// verifyTOTP validates an RFC 6238 time-based one-time password
+func verifyTOTP(secret string, code string) bool {
+	var expectedCode int
+	if _, err := fmt.Sscanf(code, "%d", &expectedCode); err != nil {
+		return false
+	}
+
+	currentTime := time.Now().Unix()
+	step := int64(30)
+	key := []byte(secret)
+
+	// Allow 1 step window for clock drift
+	for i := -1; i <= 1; i++ {
+		counter := (currentTime / step) + int64(i)
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(counter))
+
+		mac := hmac.New(sha1.New, key)
+		mac.Write(buf)
+		hs := mac.Sum(nil)
+
+		offset := hs[len(hs)-1] & 0x0f
+		binCode := int(hs[offset]&0x7f)<<24 |
+			int(hs[offset+1]&0xff)<<16 |
+			int(hs[offset+2]&0xff)<<8 |
+			int(hs[offset+3]&0xff)
+
+		otp := binCode % 1000000
+		if otp == expectedCode {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
@@ -167,8 +277,18 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	salt := fmt.Sprintf("%d", time.Now().UnixNano())
-	hashedPassword := hashPassword(req.Password, salt)
+	saltBytes := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, saltBytes); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	salt := hex.EncodeToString(saltBytes)
+
+	hashedPassword, err := hashPassword(req.Password)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	newUser := User{
 		Username:  req.Username,
@@ -220,8 +340,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashed := hashPassword(req.Password, user.Salt)
-	if hashed != user.Password {
+	if !verifyPassword(req.Password, user.Password) {
 		usersMu.Lock()
 		u := users[userKey]
 		u.FailedAttempts++
@@ -249,14 +368,11 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		secret = "test-secret-key-12345"
 	}
 
-	// Simple JWT generation payload
-	claims := map[string]interface{}{
-		"sub":  user.Username,
-		"email": user.Email,
-		"exp":  time.Now().Add(24 * time.Hour).Unix(),
+	token, err := ServShared.GenerateUserToken(secret, user.Username, []string{"user"}, 24*time.Hour)
+	if err != nil {
+		http.Error(w, "Token generation failed", http.StatusInternalServerError)
+		return
 	}
-	claimsBytes, _ := json.Marshal(claims)
-	token := base64Encode(claimsBytes) // Simple representation
 
 	sessionsMu.Lock()
 	sessions[token] = &Session{
@@ -275,13 +391,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		Token:    token,
 		Username: user.Username,
 	})
-}
-
-func base64Encode(src []byte) string {
-	// Custom simple mock token for dev mode compatibility
-	hasher := sha256.New()
-	hasher.Write(src)
-	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func handleToken(w http.ResponseWriter, r *http.Request) {
@@ -332,13 +441,28 @@ func handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := map[string]interface{}{
-		"sub": clientID,
-		"iss": "servauth",
-		"exp": time.Now().Add(1 * time.Hour).Unix(),
+	secret := os.Getenv("SERV_JWT_SECRET")
+	if secret == "" {
+		secret = "test-secret-key-12345"
 	}
-	claimsBytes, _ := json.Marshal(claims)
-	token := base64Encode(claimsBytes)
+
+	claims := ServShared.Claims{
+		Username: clientID,
+		Roles:    []string{"client"},
+		Scopes:   []string{"*"},
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "servauth",
+			Subject:   clientID,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+		},
+	}
+	tokenObj := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token, err := tokenObj.SignedString([]byte(secret))
+	if err != nil {
+		http.Error(w, "Token generation failed", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -417,7 +541,11 @@ func handleResetConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u := users[username]
-	hashed := hashPassword(req.Password, u.Salt)
+	hashed, err := hashPassword(req.Password)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 	u.Password = hashed
 	u.ResetToken = "" // invalidate token
 	u.FailedAttempts = 0
@@ -513,7 +641,11 @@ func handleSessionsRevoke(w http.ResponseWriter, r *http.Request) {
 	sessionsMu.Lock()
 	session, exists := sessions[req.Token]
 	if exists {
-		session.Revoked = true
+		if isSessionExpired(session) {
+			exists = false
+		} else {
+			session.Revoked = true
+		}
 	}
 	sessionsMu.Unlock()
 
@@ -599,8 +731,8 @@ func handleMfaVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Simple mock verification: any 6-digit matching "123456" succeeds
-	if req.Code == "123456" {
+	// Verify the real TOTP code
+	if verifyTOTP(user.MFASecret, req.Code) {
 		user.MFAEnabled = true
 		users[userKey] = user
 		usersMu.Unlock()
@@ -665,12 +797,16 @@ func handleSocialCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	usersMu.Unlock()
 
-	claims := map[string]interface{}{
-		"sub": username,
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
+	secret := os.Getenv("SERV_JWT_SECRET")
+	if secret == "" {
+		secret = "test-secret-key-12345"
 	}
-	claimsBytes, _ := json.Marshal(claims)
-	token := base64Encode(claimsBytes)
+
+	token, err := ServShared.GenerateUserToken(secret, username, []string{"user"}, 24*time.Hour)
+	if err != nil {
+		http.Error(w, "Token generation failed", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -759,7 +895,7 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessionsMu.RLock()
 	var list []*Session
 	for _, s := range sessions {
-		if !s.Revoked {
+		if !s.Revoked && !isSessionExpired(s) {
 			list = append(list, s)
 		}
 	}
@@ -784,7 +920,12 @@ func handleSecretsEncrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciphertext := "enc::" + req.Plaintext
+	ciphertext, err := encryptAES(req.Plaintext)
+	if err != nil {
+		http.Error(w, "Encryption failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -808,12 +949,12 @@ func handleSecretsDecrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !strings.HasPrefix(req.Ciphertext, "enc::") {
-		http.Error(w, "Invalid ciphertext structure", http.StatusBadRequest)
+	plaintext, err := decryptAES(req.Ciphertext)
+	if err != nil {
+		http.Error(w, "Decryption failed: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	plaintext := strings.TrimPrefix(req.Ciphertext, "enc::")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{

@@ -2,12 +2,39 @@ package main
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+func generateTOTP(secret string) string {
+	currentTime := time.Now().Unix()
+	step := int64(30)
+	counter := currentTime / step
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, uint64(counter))
+
+	key := []byte(secret)
+	mac := hmac.New(sha1.New, key)
+	mac.Write(buf)
+	hs := mac.Sum(nil)
+
+	offset := hs[len(hs)-1] & 0x0f
+	binCode := int(hs[offset]&0x7f)<<24 |
+		int(hs[offset+1]&0xff)<<16 |
+		int(hs[offset+2]&0xff)<<8 |
+		int(hs[offset+3]&0xff)
+
+	otp := binCode % 1000000
+	return fmt.Sprintf("%06d", otp)
+}
 
 func TestServAuthWorkflow(t *testing.T) {
 	mux := http.NewServeMux()
@@ -362,9 +389,10 @@ func TestServAuthTenancyAndMfa(t *testing.T) {
 	}
 
 	// 3. Verify MFA
+	correctCode := generateTOTP(setupRes.Secret)
 	verifyReqBody, _ := json.Marshal(map[string]string{
 		"username": "multitenant-bob",
-		"code":     "123456",
+		"code":     correctCode,
 	})
 	reqVerify, _ := http.NewRequest(http.MethodPost, testServer.URL+"/api/auth/mfa/verify", bytes.NewReader(verifyReqBody))
 	reqVerify.Header.Set("X-Tenant-ID", "tenant-alpha")
@@ -531,3 +559,52 @@ func TestServAuthUserMgmtAndSecrets(t *testing.T) {
 		t.Errorf("expected decrypted plaintext 'super-secret-credentials', got %q", decRes.Plaintext)
 	}
 }
+
+func TestServAuthSecurityFeatures(t *testing.T) {
+	// 1. Test Bcrypt hashing
+	hash, err := hashPassword("mySecretPassword")
+	if err != nil {
+		t.Fatalf("bcrypt hashing failed: %v", err)
+	}
+	if !verifyPassword("mySecretPassword", hash) {
+		t.Errorf("bcrypt verification failed for correct password")
+	}
+	if verifyPassword("wrongPassword", hash) {
+		t.Errorf("bcrypt verification succeeded for incorrect password")
+	}
+
+	// 2. Test AES-GCM encryption/decryption
+	originalText := "sensitive-information"
+	ciphertext, err := encryptAES(originalText)
+	if err != nil {
+		t.Fatalf("AES-GCM encryption failed: %v", err)
+	}
+	decryptedText, err := decryptAES(ciphertext)
+	if err != nil {
+		t.Fatalf("AES-GCM decryption failed: %v", err)
+	}
+	if decryptedText != originalText {
+		t.Errorf("expected decrypted text %q, got %q", originalText, decryptedText)
+	}
+
+	// 3. Test TOTP verification
+	mfaSecret := "secret-totp-key-for-test-user"
+	code := generateTOTP(mfaSecret)
+	if !verifyTOTP(mfaSecret, code) {
+		t.Errorf("TOTP verification failed for correct current code")
+	}
+	if verifyTOTP(mfaSecret, "000000") {
+		t.Errorf("TOTP verification succeeded for invalid code")
+	}
+
+	// 4. Test Session Expiry helper
+	freshSession := &Session{CreatedAt: time.Now()}
+	expiredSession := &Session{CreatedAt: time.Now().Add(-25 * time.Hour)}
+	if isSessionExpired(freshSession) {
+		t.Errorf("fresh session should not be expired")
+	}
+	if !isSessionExpired(expiredSession) {
+		t.Errorf("session older than 24 hours should be expired")
+	}
+}
+
