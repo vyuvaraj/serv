@@ -58,6 +58,39 @@ var (
 	attachmentsMu   sync.RWMutex
 )
 
+var storeClient *ServShared.StoreClient
+
+func initStore() {
+	storeClient = ServShared.NewStoreClient()
+	loadTemplatesFromStore()
+}
+
+func loadTemplatesFromStore() {
+	if data, err := storeClient.Get("serv-mail-templates", "templates.json"); err == nil {
+		templateRepoMu.Lock()
+		var loadedTemplates map[string]map[string]string
+		if json.Unmarshal(data, &loadedTemplates) == nil {
+			templateRepo = loadedTemplates
+			log.Printf("[PERSISTENCE] Loaded %d templates from ServStore", len(templateRepo))
+		}
+		templateRepoMu.Unlock()
+	} else {
+		log.Printf("[PERSISTENCE] Failed to load templates (will use default/empty): %v", err)
+	}
+}
+
+func saveTemplatesToStore() {
+	if storeClient == nil {
+		return
+	}
+	templateRepoMu.RLock()
+	data, err := json.Marshal(templateRepo)
+	templateRepoMu.RUnlock()
+	if err == nil {
+		_ = storeClient.Put("serv-mail-templates", "templates.json", data)
+	}
+}
+
 type SendResponse struct {
 	MessageID   string `json:"message_id,omitempty"`
 	Status      string `json:"status"`
@@ -73,6 +106,10 @@ func main() {
 	if port == "" {
 		port = *portStr
 	}
+
+	primaryPool := &http.Server{} // just a placeholder to keep target content alignment if needed
+	_ = primaryPool
+	initStore()
 
 	mux := http.NewServeMux()
 
@@ -291,6 +328,7 @@ func handleRegisterTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	versions[req.Version] = req.Content
 	templateRepoMu.Unlock()
+	saveTemplatesToStore()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
