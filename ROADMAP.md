@@ -88,7 +88,7 @@ These items take ServQueue from a lightweight broker to a **category-defining ev
 | 9.6 | **Message replay with offset management** | Medium | Named consumer offsets with commit/seek semantics. Replay from any point in the WAL by offset or timestamp without re-creating subscriptions. | [x] |
 | 9.7 | **Fan-out patterns (broadcast + routing keys)** | Medium | Support topic routing patterns: `orders.*` (wildcard), `orders.us.#` (multi-level). Enables flexible pub/sub topologies without multiple topics. | [x] |
 | 9.8 | **Backpressure & flow control** | Medium | When consumers are slow, apply configurable backpressure: pause publishes, buffer to disk, or reject with `429`. Prevents unbounded memory growth. | [x] |
-| 9.9 | **Cross-cluster mirroring** | Large | Replicate topics between geographically separate ServQueue clusters for disaster recovery and multi-region active-active setups. | [ ] |
+| 9.9 | **Cross-cluster mirroring** | Large | Replicate topics between geographically separate ServQueue clusters for disaster recovery and multi-region active-active setups. | [x] |
 | 9.10 | **Message tracing (end-to-end)** | Medium | Track a message from publish through every WASM transform, DLQ redirect, and consumer ack — visualizable in ServConsole as a message journey timeline. | [ ] |
 | 9.11 | **WASM transform marketplace** | Medium | Install community or private transforms via `servqueue install <name>` resolving from ServRegistry. Pre-built transforms: JSON→Protobuf, PII masking, enrichment. | [ ] |
 | 9.12 | **Message TTL & expiration** | Small | Per-topic or per-message TTL. Expired messages are automatically moved to DLQ or purged. Essential for time-sensitive event processing. | [x] |
