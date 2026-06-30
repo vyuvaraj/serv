@@ -15,6 +15,7 @@ import (
 
 	"servmesh/pkg/client"
 	"servmesh/pkg/registry"
+	"servmesh/pkg/resilience"
 	"github.com/vyuvaraj/ServShared"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -494,4 +495,14 @@ func TestChaosFaultInjection(t *testing.T) {
 	if duration < 50*time.Millisecond {
 		t.Errorf("expected delay of at least 50ms, got %v", duration)
 	}
+}
+
+func BenchmarkCircuitBreakerAllow(b *testing.B) {
+	cb := resilience.NewCircuitBreaker(10, 1*time.Second)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = cb.Allow()
+		}
+	})
 }
