@@ -447,3 +447,51 @@ func TestRegionalGeoRouting(t *testing.T) {
 		t.Errorf("expected fallback to return both instances, got: %d", len(resolvedFallback))
 	}
 }
+
+func TestChaosFaultInjection(t *testing.T) {
+	reg := registry.NewRegistry(5 * time.Second)
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	rule := registry.RoutingRule{
+		Service:          "chaos-service",
+		MaxRetries:       1,
+		FaultDelayMs:     50,
+		FaultDelayRatio:  1.0,
+		FaultErrorStatus: 502,
+		FaultErrorRatio:  1.0,
+	}
+	ruleBody, _ := json.Marshal(rule)
+	resp, _ := http.Post(regServer.URL+"/api/rules", "application/json", bytes.NewReader(ruleBody))
+	resp.Body.Close()
+
+	// Register a mock instance so resolver finds an endpoint
+	inst := registry.Instance{
+		Service:   "chaos-service",
+		Address:   "http://127.0.0.1:9099",
+		HealthURL: "http://127.0.0.1:9099/health",
+	}
+	body, _ := json.Marshal(inst)
+	respReg, _ := http.Post(regServer.URL+"/api/register", "application/json", bytes.NewReader(body))
+	respReg.Body.Close()
+
+	transport := client.NewMeshTransport(regServer.URL, 50*time.Millisecond)
+	httpClient := &http.Client{Transport: transport}
+
+	start := time.Now()
+	res, err := httpClient.Get("serv://chaos-service/some-endpoint")
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != 502 {
+		t.Errorf("expected status code 502, got %d", res.StatusCode)
+	}
+
+	if duration < 50*time.Millisecond {
+		t.Errorf("expected delay of at least 50ms, got %v", duration)
+	}
+}

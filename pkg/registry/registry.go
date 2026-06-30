@@ -28,10 +28,14 @@ type Instance struct {
 }
 
 type RoutingRule struct {
-	Service    string `json:"service"`
-	MaxRetries int    `json:"max_retries"`
-	TimeoutMs  int    `json:"timeout_ms"`
-	BackoffMs  int    `json:"backoff_ms"`
+	Service    string  `json:"service"`
+	MaxRetries int     `json:"max_retries"`
+	TimeoutMs  int     `json:"timeout_ms"`
+	BackoffMs  int     `json:"backoff_ms"`
+	FaultDelayMs     int     `json:"fault_delay_ms,omitempty"`
+	FaultDelayRatio  float64 `json:"fault_delay_ratio,omitempty"`
+	FaultErrorStatus int     `json:"fault_error_status,omitempty"`
+	FaultErrorRatio  float64 `json:"fault_error_ratio,omitempty"`
 }
 
 type Registry struct {

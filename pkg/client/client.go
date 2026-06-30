@@ -90,6 +90,19 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Dynamic Retries + Circuit Breaking Loop
 	var lastErr error
 
+	// Fault Injection (Chaos Engineering)
+	if rule.FaultDelayMs > 0 && mrand.Float64() < rule.FaultDelayRatio {
+		time.Sleep(time.Duration(rule.FaultDelayMs) * time.Millisecond)
+	}
+	if rule.FaultErrorStatus > 0 && mrand.Float64() < rule.FaultErrorRatio {
+		return &http.Response{
+			StatusCode: rule.FaultErrorStatus,
+			Body:       io.NopCloser(strings.NewReader("Chaos engineering fault injected")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}
+
 	// Store request body for retries
 	var bodyBytes []byte
 	if req.Body != nil {
