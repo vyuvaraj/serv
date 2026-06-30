@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
 )
@@ -22,6 +24,7 @@ const (
 type WasmManager struct {
 	runtime wazero.Runtime
 	mu      sync.Mutex
+	pools   map[wazero.CompiledModule]chan api.Module
 }
 
 var (
@@ -34,6 +37,18 @@ func GetWasmManager(ctx context.Context) (*WasmManager, error) {
 	once.Do(func() {
 		memLimitPages := uint32((uint64(DefaultMemLimitMB) * 1024 * 1024) / wasmPageBytes)
 		rCfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(memLimitPages)
+
+		// PS.2: Configure directory-backed compilation cache
+		cacheDir := os.Getenv("SERV_WASM_CACHE_DIR")
+		if cacheDir == "" {
+			cacheDir = ".wazero-cache-servqueue"
+		}
+		_ = os.MkdirAll(cacheDir, 0755)
+		compCache, cacheErr := wazero.NewCompilationCacheWithDir(cacheDir)
+		if cacheErr == nil {
+			rCfg = rCfg.WithCompilationCache(compCache)
+		}
+
 		r := wazero.NewRuntimeWithConfig(ctx, rCfg)
 
 		// Instantiate WASI snapshot
@@ -44,6 +59,7 @@ func GetWasmManager(ctx context.Context) (*WasmManager, error) {
 
 		globalManager = &WasmManager{
 			runtime: r,
+			pools:   make(map[wazero.CompiledModule]chan api.Module),
 		}
 	})
 	return globalManager, err
@@ -59,6 +75,24 @@ func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.Compiled
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeoutSec*time.Second)
 	defer cancel()
 
+	m.mu.Lock()
+	pool, exists := m.pools[compiled]
+	if !exists {
+		pool = make(chan api.Module, 10)
+		m.pools[compiled] = pool
+	}
+	m.mu.Unlock()
+
+	var mod api.Module
+	reused := false
+
+	select {
+	case inst := <-pool:
+		mod = inst
+		reused = true
+	default:
+	}
+
 	stdin := bytes.NewReader([]byte(message))
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -70,24 +104,24 @@ func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.Compiled
 		WithName("").
 		WithEnv("TRACEPARENT", traceparent)
 
-	m.mu.Lock()
-	mod, err := m.runtime.InstantiateModule(ctx, compiled, modCfg)
-	m.mu.Unlock()
-
-	if err != nil {
-		var exitErr *sys.ExitError
-		if errors.As(err, &exitErr) {
-			if exitErr.ExitCode() != 0 {
-				return "", fmt.Errorf("wasm: exited with code %d: %s", exitErr.ExitCode(), stderr.String())
+	if mod == nil {
+		m.mu.Lock()
+		var err error
+		mod, err = m.runtime.InstantiateModule(ctx, compiled, modCfg)
+		m.mu.Unlock()
+		if err != nil {
+			var exitErr *sys.ExitError
+			if errors.As(err, &exitErr) {
+				if exitErr.ExitCode() != 0 {
+					return "", fmt.Errorf("wasm: exited with code %d: %s", exitErr.ExitCode(), stderr.String())
+				}
+			} else {
+				return "", fmt.Errorf("wasm: instantiation failed: %w", err)
 			}
-		} else {
-			return "", fmt.Errorf("wasm: instantiation failed: %w", err)
 		}
-	} else {
-		defer mod.Close(ctx)
+	}
 
-		// Direct Memory Optimizations:
-		// Check if module exports allocation and transformation entry points to bypass standard pipes.
+	if mod != nil {
 		allocFn := mod.ExportedFunction("allocate")
 		if allocFn == nil {
 			allocFn = mod.ExportedFunction("malloc")
@@ -98,26 +132,37 @@ func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.Compiled
 			msgBytes := []byte(message)
 			size := uint64(len(msgBytes))
 
-			// Allocate space in guest memory
 			results, allocErr := allocFn.Call(ctx, size)
 			if allocErr == nil && len(results) > 0 {
 				ptr := results[0]
-				// Write directly to guest memory space
 				if mod.Memory().Write(uint32(ptr), msgBytes) {
-					// Invoke the transform function (transform(ptr, len))
 					resResults, transErr := transformFn.Call(ctx, ptr, size)
 					if transErr == nil && len(resResults) > 0 {
 						resPtr := resResults[0]
-						// The return value is a 64-bit integer packing: (ptr << 32) | len
 						retPtr := uint32(resPtr >> 32)
 						retLen := uint32(resPtr)
 						
 						if outBytes, readOk := mod.Memory().Read(retPtr, retLen); readOk {
-							return string(outBytes), nil
+							outStr := string(outBytes)
+							
+							// Try to return to the pool
+							select {
+							case pool <- mod:
+								return outStr, nil
+							default:
+							}
+							_ = mod.Close(ctx)
+							return outStr, nil
 						}
 					}
 				}
 			}
+		}
+
+		if !reused {
+			defer mod.Close(ctx)
+		} else {
+			_ = mod.Close(ctx)
 		}
 	}
 
