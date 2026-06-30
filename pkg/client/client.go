@@ -295,11 +295,10 @@ func (t *MeshTransport) getBreaker(target string) *resilience.CircuitBreaker {
 	return breaker
 }
 
-// SetupmTLS generates keys, CSR, requests signed cert from registry, and configures TLS configs.
-func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtToken string) (*tls.Config, *tls.Config, error) {
+func (t *MeshTransport) renewCertificate(ctx context.Context, serviceName string, jwtToken string) (tls.Certificate, []byte, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate key: %w", err)
+		return tls.Certificate{}, nil, fmt.Errorf("failed to generate key: %w", err)
 	}
 
 	subj := pkix.Name{
@@ -314,7 +313,7 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 
 	csrBytes, err := x509.CreateCertificateRequest(rand.Reader, template, priv)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create CSR: %w", err)
+		return tls.Certificate{}, nil, fmt.Errorf("failed to create CSR: %w", err)
 	}
 
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
@@ -328,7 +327,7 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 	csrURL := fmt.Sprintf("%s/api/csr", t.registryURL)
 	req, err := http.NewRequestWithContext(ctx, "POST", csrURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, nil, err
+		return tls.Certificate{}, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if jwtToken != "" {
@@ -337,13 +336,13 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("CSR request failed: %w", err)
+		return tls.Certificate{}, nil, fmt.Errorf("CSR request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, nil, fmt.Errorf("CSR signing failed with status %d: %s", resp.StatusCode, string(respBody))
+		return tls.Certificate{}, nil, fmt.Errorf("CSR signing failed with status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var respData struct {
@@ -351,27 +350,45 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 		CA          string `json:"ca"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&respData); err != nil {
-		return nil, nil, err
+		return tls.Certificate{}, nil, err
 	}
 
 	keyBytes, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
-		return nil, nil, err
+		return tls.Certificate{}, nil, err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
 
 	tlsCert, err := tls.X509KeyPair([]byte(respData.Certificate), keyPEM)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse X509 key pair: %w", err)
+		return tls.Certificate{}, nil, fmt.Errorf("failed to parse X509 key pair: %w", err)
+	}
+
+	return tlsCert, []byte(respData.CA), nil
+}
+
+// SetupmTLS generates keys, CSR, requests signed cert from registry, and configures TLS configs.
+func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtToken string) (*tls.Config, *tls.Config, error) {
+	tlsCert, caBytes, err := t.renewCertificate(ctx, serviceName, jwtToken)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	caPool := x509.NewCertPool()
-	if !caPool.AppendCertsFromPEM([]byte(respData.CA)) {
+	if !caPool.AppendCertsFromPEM(caBytes) {
 		return nil, nil, fmt.Errorf("failed to append CA cert")
 	}
 
+	var activeCert tls.Certificate = tlsCert
+	var activeCertMu sync.RWMutex
+
 	clientTLSConfig := &tls.Config{
 		Certificates:       []tls.Certificate{tlsCert},
+		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			activeCertMu.RLock()
+			defer activeCertMu.RUnlock()
+			return &activeCert, nil
+		},
 		RootCAs:            caPool,
 		InsecureSkipVerify: true,
 		VerifyConnection: func(cs tls.ConnectionState) error {
@@ -391,6 +408,11 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 
 	serverTLSConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
+		GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			activeCertMu.RLock()
+			defer activeCertMu.RUnlock()
+			return &activeCert, nil
+		},
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    caPool,
 	}
@@ -399,6 +421,25 @@ func (t *MeshTransport) SetupmTLS(ctx context.Context, serviceName string, jwtTo
 	if transport, ok := t.base.(*http.Transport); ok {
 		transport.TLSClientConfig = clientTLSConfig
 	}
+
+	// Dynamic rotation schedule background loop
+	go func() {
+		ticker := time.NewTicker(300 * time.Millisecond) // Fast ticker for tests/simulation
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				newCert, _, err := t.renewCertificate(ctx, serviceName, jwtToken)
+				if err == nil {
+					activeCertMu.Lock()
+					activeCert = newCert
+					activeCertMu.Unlock()
+				}
+			}
+		}
+	}()
 
 	return clientTLSConfig, serverTLSConfig, nil
 }
