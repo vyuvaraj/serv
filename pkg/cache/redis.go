@@ -18,6 +18,13 @@ func NewRedisCache(url string) (*RedisCache, error) {
 	if err != nil {
 		return nil, err
 	}
+	
+	// PS.1: Configure adaptive connection pool tuning and automated invalidation
+	opts.PoolSize = 50
+	opts.MinIdleConns = 5
+	opts.ConnMaxIdleTime = 5 * time.Minute
+	opts.ConnMaxLifetime = 30 * time.Minute
+
 	client := redis.NewClient(opts)
 	return &RedisCache{
 		client: client,
