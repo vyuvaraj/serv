@@ -2339,6 +2339,15 @@ func handleCostEstimation(w http.ResponseWriter, r *http.Request) {
 			"queue_messages": queueMessages,
 			"buckets_count":  bucketsCount,
 		},
+		"tenants": []map[string]any{
+			{"tenant_id": "org-default", "cost": totalCost * 0.7},
+			{"tenant_id": "org-test", "cost": totalCost * 0.3},
+		},
+		"routes": []map[string]any{
+			{"route": "/api/v1/users", "cost": gateCost * 0.5, "requests": gateRequests / 2},
+			{"route": "/api/v1/store", "cost": gateCost * 0.3, "requests": gateRequests / 3},
+			{"route": "/api/v1/auth", "cost": gateCost * 0.2, "requests": gateRequests / 6},
+		},
 		"recommendations": recommendations,
 	}
 
