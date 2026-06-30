@@ -7,9 +7,33 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
+func setupTest() {
+	rateLimitsMu.Lock()
+	rateLimits = make(map[string][]time.Time)
+	rateLimitsMu.Unlock()
+
+	templateRepoMu.Lock()
+	templateRepo = make(map[string]map[string]string)
+	templateRepoMu.Unlock()
+
+	trackingMu.Lock()
+	trackingRepo = make(map[string]*TrackingInfo)
+	trackingMu.Unlock()
+
+	preferencesMu.Lock()
+	preferences = make(map[string]*Preferences)
+	preferencesMu.Unlock()
+
+	attachmentsMu.Lock()
+	attachmentsRepo = make(map[string]*Attachment)
+	attachmentsMu.Unlock()
+}
+
 func TestServMailTemplateAndChannels(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/send", handleSend)
 
@@ -67,6 +91,7 @@ func TestServMailTemplateAndChannels(t *testing.T) {
 }
 
 func TestServMailRetriesAndDLQ(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/send", handleSend)
 
@@ -99,6 +124,7 @@ func TestServMailRetriesAndDLQ(t *testing.T) {
 }
 
 func TestServMailRateLimiting(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/send", handleSend)
 
@@ -134,6 +160,7 @@ func TestServMailRateLimiting(t *testing.T) {
 }
 
 func TestServMailTemplateVersioning(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/send", handleSend)
 	mux.HandleFunc("/api/mail/templates", handleRegisterTemplate)
@@ -205,6 +232,7 @@ func TestServMailTemplateVersioning(t *testing.T) {
 }
 
 func TestServMailTrackingAndPreferences(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/send", handleSend)
 	mux.HandleFunc("/api/mail/tracking/", handleGetTracking)
@@ -294,6 +322,7 @@ func TestServMailTrackingAndPreferences(t *testing.T) {
 }
 
 func TestServMailDashboard(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/send", handleSend)
 	mux.HandleFunc("/api/mail/dashboard", handleMailDashboard)
@@ -334,6 +363,7 @@ func TestServMailDashboard(t *testing.T) {
 }
 
 func TestServMailAttachmentsColdTier(t *testing.T) {
+	setupTest()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/mail/attachments", handleUploadAttachment)
 	mux.HandleFunc("/api/mail/attachments/", handleGetAttachment)
@@ -401,5 +431,57 @@ func TestServMailAttachmentsColdTier(t *testing.T) {
 
 	if attLarge.Payload != "" {
 		t.Errorf("expected payload to be evicted, got %q", attLarge.Payload)
+	}
+}
+
+func TestTableDrivenMailValidation(t *testing.T) {
+	setupTest()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/mail/send", handleSend)
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	tests := []struct {
+		name       string
+		channel    string
+		target     string
+		template   string
+		wantStatus int
+	}{
+		{
+			name:       "Missing Target",
+			channel:    "email",
+			target:     "",
+			template:   "Hello {{.Name}}",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "Unsupported Channel",
+			channel:    "fax",
+			target:     "123-456",
+			template:   "Hello {{.Name}}",
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := SendRequest{
+				Channel:  tt.channel,
+				Target:   tt.target,
+				Template: tt.template,
+			}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("failed to make request: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, resp.StatusCode)
+			}
+		})
 	}
 }
