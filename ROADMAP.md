@@ -35,3 +35,10 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 - [x] **Metrics Derivation**: Extract RED metrics (Rate, Error, Duration) from traces. No separate metrics pipeline needed. [June 30, 2026]
 - [x] **Trace-to-Log Correlation**: Link trace spans directly to structured log entries via shared trace_id. [June 29, 2026]
 - [ ] **Distributed Context Baggage**: Propagate custom key-value pairs across service boundaries via trace context.
+
+## Phase 5: Architectural Depth & DevOps (Pending)
+- [ ] **`serv trace search` CLI** — Search traces by service, operation, error, or duration threshold from the terminal; output as JSON or ASCII waterfall (DevOps)
+- [ ] **Continuous Profiling Integration** — Link pprof CPU/memory profiles to trace spans; surface hot-path profiles in the ServConsole waterfall view alongside latency (Performance)
+- [ ] **Adaptive Sampling Rate** — Dynamically raise sampling rate when error rate spikes and lower it when traffic is healthy — reduces overhead in normal operation while capturing all errors (Performance / DevOps)
+
+> See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
