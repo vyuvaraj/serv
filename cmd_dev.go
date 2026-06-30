@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -112,6 +113,7 @@ func runDevCmd() {
 	fmt.Printf("  Press Ctrl+C to stop all services\n\n")
 
 	// Run the user service with hot reload
+	startWorkspaceWatcher(procs)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -133,9 +135,12 @@ func runDevCmd() {
 }
 
 type devProcess struct {
-	name string
-	port string
-	cmd  *exec.Cmd
+	name    string
+	port    string
+	binary  string
+	args    []string
+	envVars []string
+	cmd     *exec.Cmd
 }
 
 func startDevService(name, binary, port string, args, envVars []string) *devProcess {
@@ -149,7 +154,14 @@ func startDevService(name, binary, port string, args, envVars []string) *devProc
 		return nil
 	}
 
-	return &devProcess{name: name, port: port, cmd: cmd}
+	return &devProcess{
+		name:    name,
+		port:    port,
+		binary:  binary,
+		args:    args,
+		envVars: envVars,
+		cmd:     cmd,
+	}
 }
 
 func checkDevHealth(port string) bool {
@@ -206,4 +218,90 @@ func splitComma(s string) []string {
 		result = append(result, current)
 	}
 	return result
+}
+
+func startWorkspaceWatcher(procs []*devProcess) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	parentDir := filepath.Dir(wd)
+
+	dirMap := make(map[string]string)
+	for _, proc := range procs {
+		dirMap[proc.name] = filepath.Join(parentDir, proc.name)
+	}
+
+	getModTimes := func(dir string) map[string]time.Time {
+		times := make(map[string]time.Time)
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if !info.IsDir() && filepath.Ext(path) == ".go" {
+				times[path] = info.ModTime()
+			}
+			return nil
+		})
+		return times
+	}
+
+	lastMods := make(map[string]map[string]time.Time)
+	for name, dir := range dirMap {
+		lastMods[name] = getModTimes(dir)
+	}
+
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			for _, proc := range procs {
+				dir, exists := dirMap[proc.name]
+				if !exists {
+					continue
+				}
+				current := getModTimes(dir)
+				changed := false
+				for path, mtime := range current {
+					oldTime, ok := lastMods[proc.name][path]
+					if !ok || mtime.After(oldTime) {
+						changed = true
+						break
+					}
+				}
+				if !changed && len(current) != len(lastMods[proc.name]) {
+					changed = true
+				}
+
+				if changed {
+					lastMods[proc.name] = current
+					log.Printf("[WORKSPACE HOT-RELOAD] Change detected in %s. Rebuilding service...", proc.name)
+
+					buildCmd := exec.Command("go", "build", "-o", proc.binary+".exe")
+					buildCmd.Dir = dir
+					buildCmd.Env = append(os.Environ(), "GOWORK=off")
+					if err := buildCmd.Run(); err != nil {
+						log.Printf("[WORKSPACE HOT-RELOAD] Build failed for %s: %v", proc.name, err)
+						continue
+					}
+
+					if proc.cmd != nil && proc.cmd.Process != nil {
+						proc.cmd.Process.Kill()
+						proc.cmd.Wait()
+					}
+
+					binaryPath := filepath.Join(dir, proc.binary+".exe")
+					newCmd := exec.Command(binaryPath, proc.args...)
+					newCmd.Stdout = nil
+					newCmd.Stderr = nil
+					newCmd.Env = append(os.Environ(), proc.envVars...)
+					if err := newCmd.Start(); err != nil {
+						log.Printf("[WORKSPACE HOT-RELOAD] Restart failed for %s: %v", proc.name, err)
+					} else {
+						proc.cmd = newCmd
+						log.Printf("[WORKSPACE HOT-RELOAD] Successfully restarted %s", proc.name)
+					}
+				}
+			}
+		}
+	}()
 }
