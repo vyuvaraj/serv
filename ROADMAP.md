@@ -121,3 +121,9 @@ These create a **moat** around ServGate â€” capabilities that Kong, Envoy, AWS A
 ## Phase 11: DevOps & Infrastructure (Pending)
 - [ ] **GitOps Config Sync** â€” Git repository webhooks to automatically re-sync gateway routes (OPS.5)
 - [ ] **Auto TLS Let's Encrypt** â€” Integrated ACME client for automated certificate provisioning (OPS.6)
+
+## Phase 12: Production Readiness (External Audit — Pending)
+- [ ] **Request Body Size Limits** — http.MaxBytesReader with configurable per-route limits; currently any-size request body is accepted (API.2)
+- [ ] **Shared Input Validation Middleware** — Route-level JSON Schema validation via ServShared.ValidateJSON(); reject malformed payloads before handler executes (API.1)
+- [ ] **Ecosystem Version Manifest** — GET /api/version endpoint returning service name, version, and minimum compatible API version for serv doctor compatibility checks (API.4)
+- [ ] **Deprecation Header Standard** — Deprecated routes respond with Deprecation: true and Sunset: <date> headers giving consumers migration windows (API.5)
