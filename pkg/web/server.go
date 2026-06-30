@@ -64,7 +64,7 @@ func (s *Server) Start() error {
 
 	s.httpSrv = &http.Server{
 		Addr:    s.addr,
-		Handler: ServShared.AuthMiddleware(mux),
+		Handler: ServShared.AuthMiddleware(s.tenantAndTokenMiddleware(mux)),
 	}
 
 	if s.tlsCert != "" && s.tlsKey != "" {
@@ -118,13 +118,12 @@ func (s *Server) namespaceTopic(topic string, tenant string) (string, error) {
 	return tenant + ":" + topic, nil
 }
 
-func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func (s *Server) tenantAndTokenMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authToken == "" {
-			// Even if no auth token is required, we can still extract tenant from X-Tenant-ID
 			tenant := s.getTenant(r)
 			ctx := context.WithValue(r.Context(), "tenant-id", tenant)
-			next(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
@@ -135,7 +134,6 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		
 		authenticated := false
 		var tenant string
 		if token == s.authToken {
@@ -156,14 +154,13 @@ func (s *Server) authorize(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Header override takes precedence if tenant was empty
 		if tenant == "" {
 			tenant = r.Header.Get("X-Tenant-ID")
 		}
 
 		ctx := context.WithValue(r.Context(), "tenant-id", tenant)
-		next(w, r.WithContext(ctx))
-	}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (s *Server) handleListTopics(w http.ResponseWriter, r *http.Request) {
