@@ -14,15 +14,20 @@ import (
 	"fmt"
 	"io"
 	mrand "math/rand"
+	"os"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"servmesh/pkg/pb"
 	"servmesh/pkg/registry"
 	"servmesh/pkg/resilience"
 	"github.com/vyuvaraj/ServShared"
+	"google.golang.org/grpc"
 )
 
 type MeshTransport struct {
@@ -153,7 +158,45 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			clonedReq.Header.Set("traceparent", fmt.Sprintf("00-%s-%s-01", span.TraceID, span.SpanID))
 		}
 
-		resp, err := t.base.RoundTrip(clonedReq)
+		var resp *http.Response
+		if os.Getenv("SERV_MESH_GRPC") == "true" {
+			grpcHost := getGRPCHost(target)
+			conn, grpcErr := grpc.Dial(grpcHost, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(1*time.Second))
+			if grpcErr == nil {
+				defer conn.Close()
+				client := pb.NewMeshServiceClient(conn)
+				headersMap := make(map[string]string)
+				for k := range clonedReq.Header {
+					headersMap[k] = clonedReq.Header.Get(k)
+				}
+				grpcReq := &pb.MeshRequest{
+					Method:  clonedReq.Method,
+					Path:    clonedReq.URL.Path,
+					Headers: headersMap,
+					Body:    bodyBytes,
+				}
+				grpcResp, callErr := client.Forward(ctx, grpcReq)
+				if callErr == nil {
+					respHeaders := make(http.Header)
+					for k, v := range grpcResp.Headers {
+						respHeaders.Set(k, v)
+					}
+					resp = &http.Response{
+						StatusCode: int(grpcResp.StatusCode),
+						Header:     respHeaders,
+						Body:       io.NopCloser(bytes.NewReader(grpcResp.Body)),
+						Request:    clonedReq,
+					}
+				} else {
+					err = callErr
+				}
+			} else {
+				err = grpcErr
+			}
+		} else {
+			resp, err = t.base.RoundTrip(clonedReq)
+		}
+
 		if cancel != nil && (err != nil || (resp != nil && resp.StatusCode >= 500)) {
 			cancel()
 		}
@@ -488,4 +531,58 @@ func (t *MeshTransport) ResolveRule(ctx context.Context, serviceName string) (re
 	t.mu.Unlock()
 
 	return rule, nil
+}
+
+func getGRPCHost(httpAddr string) string {
+	u, err := url.Parse(httpAddr)
+	if err != nil {
+		return httpAddr
+	}
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		return host + ":9000"
+	}
+	var portInt int
+	fmt.Sscanf(port, "%d", &portInt)
+	return fmt.Sprintf("%s:%d", host, portInt+1000)
+}
+
+func StartGRPCProxy(grpcAddr string, httpHandler http.Handler) (*grpc.Server, error) {
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		return nil, err
+	}
+	s := grpc.NewServer()
+	pb.RegisterMeshServiceServer(s, &grpcProxyServer{handler: httpHandler})
+	go s.Serve(lis)
+	return s, nil
+}
+
+type grpcProxyServer struct {
+	handler http.Handler
+}
+
+func (p *grpcProxyServer) Forward(ctx context.Context, in *pb.MeshRequest) (*pb.MeshResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, in.Method, in.Path, bytes.NewReader(in.Body))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range in.Headers {
+		req.Header.Set(k, v)
+	}
+
+	w := httptest.NewRecorder()
+	p.handler.ServeHTTP(w, req)
+
+	respHeaders := make(map[string]string)
+	for k := range w.Header() {
+		respHeaders[k] = w.Header().Get(k)
+	}
+
+	return &pb.MeshResponse{
+		StatusCode: int32(w.Code),
+		Headers:    respHeaders,
+		Body:       w.Body.Bytes(),
+	}, nil
 }

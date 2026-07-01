@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
@@ -560,5 +561,61 @@ func TestMulticastServiceDiscovery(t *testing.T) {
 
 	if resolved[0].Address != "http://127.0.0.1:9098" {
 		t.Errorf("expected address http://127.0.0.1:9098, got %q", resolved[0].Address)
+	}
+}
+
+func TestGRPCMeshTransport(t *testing.T) {
+	os.Setenv("SERV_MESH_GRPC", "true")
+	defer os.Unsetenv("SERV_MESH_GRPC")
+
+	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Custom-Echo", r.Header.Get("X-Request-Header"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello from grpc mesh!"))
+	})
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	u, _ := url.Parse(httpServer.URL)
+	var portInt int
+	fmt.Sscanf(u.Port(), "%d", &portInt)
+	grpcAddr := fmt.Sprintf("127.0.0.1:%d", portInt+1000)
+
+	grpcServer, err := client.StartGRPCProxy(grpcAddr, mux)
+	if err != nil {
+		t.Fatalf("failed to start gRPC proxy: %v", err)
+	}
+	defer grpcServer.Stop()
+
+	registerInstance(t, regServer.URL+"/api/register", "grpc-service", httpServer.URL)
+
+	transport := client.NewMeshTransport(regServer.URL, 50*time.Millisecond)
+	httpClient := &http.Client{Transport: transport}
+
+	req, _ := http.NewRequest("GET", "serv://grpc-service/hello", nil)
+	req.Header.Set("X-Request-Header", "mesh-test")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("gRPC mesh request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "hello from grpc mesh!" {
+		t.Errorf("expected 'hello from grpc mesh!', got %q", string(body))
+	}
+
+	if resp.Header.Get("X-Custom-Echo") != "mesh-test" {
+		t.Errorf("expected header echo 'mesh-test', got %q", resp.Header.Get("X-Custom-Echo"))
 	}
 }
