@@ -225,6 +225,17 @@ type GatewayHandler struct {
 	// OPS.12: Automated Canary Deployment Engine
 	canaryStats   map[string]*canaryStatsRecord // key: canary target URL
 	canaryStatsMu sync.Mutex
+
+	// OPS.14: Enterprise Control Plane
+	tenantPolicies   map[string]TenantPolicy // key: TenantID
+	tenantPoliciesMu sync.RWMutex
+}
+
+type TenantPolicy struct {
+	TenantID        string   `json:"tenant_id"`
+	AllowedClusters []string `json:"allowed_clusters"`
+	AllowedRegions  []string `json:"allowed_regions"`
+	RateLimitRPM    int      `json:"rate_limit_rpm"`
 }
 
 func createMTLSTransport(clientCertPath, clientKeyPath, rootCAPath string) (http.RoundTripper, error) {
@@ -332,6 +343,7 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		targetLoad:      make(map[string]int),
 		revokedSessions: make(map[string]time.Time),
 		canaryStats:     make(map[string]*canaryStatsRecord),
+		tenantPolicies:  make(map[string]TenantPolicy),
 	}
 	go h.startCanaryPromotionLoop()
 	return h
@@ -608,6 +620,75 @@ func (h *GatewayHandler) isRateLimited(clientIP, routePrefix string, limit int) 
 func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	h.metricsTracker.IncRequest()
+
+	if r.URL.Path == "/api/tenants/policies" {
+		if r.Method == http.MethodGet {
+			h.tenantPoliciesMu.RLock()
+			defer h.tenantPoliciesMu.RUnlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(h.tenantPolicies)
+			return
+		} else if r.Method == http.MethodPost {
+			var policy TenantPolicy
+			if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if policy.TenantID == "" {
+				http.Error(w, "tenant_id required", http.StatusBadRequest)
+				return
+			}
+			h.tenantPoliciesMu.Lock()
+			h.tenantPolicies[policy.TenantID] = policy
+			h.tenantPoliciesMu.Unlock()
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+	}
+
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID != "" {
+		h.tenantPoliciesMu.RLock()
+		policy, exists := h.tenantPolicies[tenantID]
+		h.tenantPoliciesMu.RUnlock()
+		if exists {
+			currentCluster := os.Getenv("SERV_CLUSTER")
+			if currentCluster == "" {
+				currentCluster = "default"
+			}
+			if len(policy.AllowedClusters) > 0 {
+				allowed := false
+				for _, c := range policy.AllowedClusters {
+					if c == currentCluster || c == "*" {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					WriteJSONError(w, r, "Tenant policy violation: Cluster restricted", "ERR_TENANT_POLICY_VIOLATION", http.StatusForbidden)
+					return
+				}
+			}
+
+			currentRegion := os.Getenv("SERV_REGION")
+			if currentRegion == "" {
+				currentRegion = "us-east"
+			}
+			if len(policy.AllowedRegions) > 0 {
+				allowed := false
+				for _, reg := range policy.AllowedRegions {
+					if reg == currentRegion || reg == "*" {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					WriteJSONError(w, r, "Tenant policy violation: Region restricted", "ERR_TENANT_POLICY_VIOLATION", http.StatusForbidden)
+					return
+				}
+			}
+		}
+	}
 
 	if r.URL.Path == "/api/docs" {
 		w.Header().Set("Content-Type", "text/html")

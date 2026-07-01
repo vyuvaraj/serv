@@ -1658,10 +1658,81 @@ func TestAutomatedCanaryRollback(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
-
 	canaryTarget := resp.Header.Get("X-Canary-Target")
 	if canaryTarget != tsV1.URL {
 		t.Errorf("Expected rollback to stable target %s, got target %s", tsV1.URL, canaryTarget)
+	}
+}
+
+func TestTenantControlPlanePolicies(t *testing.T) {
+	os.Setenv("SERV_CLUSTER", "prod-cluster-1")
+	os.Setenv("SERV_REGION", "eu-west")
+	defer os.Unsetenv("SERV_CLUSTER")
+	defer os.Unsetenv("SERV_REGION")
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("backend success"))
+	}))
+	defer ts.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix: "/api/tenant-test",
+			Target: ts.URL,
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{}
+
+	policy := proxy.TenantPolicy{
+		TenantID:        "tenant-alpha",
+		AllowedClusters: []string{"prod-cluster-1"},
+		AllowedRegions:  []string{"eu-west"},
+	}
+	body, _ := json.Marshal(policy)
+	respPolicy, err := client.Post(gwServer.URL+"/api/tenants/policies", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to post policy: %v", err)
+	}
+	respPolicy.Body.Close()
+
+	policyBeta := proxy.TenantPolicy{
+		TenantID:        "tenant-beta",
+		AllowedClusters: []string{"prod-cluster-1"},
+		AllowedRegions:  []string{"us-east"},
+	}
+	bodyBeta, _ := json.Marshal(policyBeta)
+	respPolicyBeta, err := client.Post(gwServer.URL+"/api/tenants/policies", "application/json", bytes.NewReader(bodyBeta))
+	if err != nil {
+		t.Fatalf("failed to post policy: %v", err)
+	}
+	respPolicyBeta.Body.Close()
+
+	reqAlpha, _ := http.NewRequest("GET", gwServer.URL+"/api/tenant-test/read", nil)
+	reqAlpha.Header.Set("X-Tenant-ID", "tenant-alpha")
+	respAlpha, err := client.Do(reqAlpha)
+	if err != nil {
+		t.Fatalf("req failed: %v", err)
+	}
+	defer respAlpha.Body.Close()
+	if respAlpha.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", respAlpha.StatusCode)
+	}
+
+	reqBeta, _ := http.NewRequest("GET", gwServer.URL+"/api/tenant-test/read", nil)
+	reqBeta.Header.Set("X-Tenant-ID", "tenant-beta")
+	respBeta, err := client.Do(reqBeta)
+	if err != nil {
+		t.Fatalf("req failed: %v", err)
+	}
+	defer respBeta.Body.Close()
+	if respBeta.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", respBeta.StatusCode)
 	}
 }
 
