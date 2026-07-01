@@ -1,0 +1,14 @@
+// Serv Standard Library: Cache client
+// Import: import { set, get, invalidate } from "stdlib/cache.srv"
+
+export fn set(key: string, val: any, ttl: string) {
+    cache.set(key, val, ttl)
+}
+
+export fn get(key: string) -> any {
+    return cache.get(key)
+}
+
+export fn invalidate(key: string) {
+    cache.set(key, nil, "0s")
+}

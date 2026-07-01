@@ -34,3 +34,18 @@ export fn requireAuth(req) {
     }
     return nil
 }
+
+// Register a new user
+export fn register(username, email, password) {
+    return auth.register(username, email, password)
+}
+
+// Log in a user
+export fn login(username, password) {
+    return auth.login(username, password)
+}
+
+// Get the current authenticated user
+export fn currentUser(req) {
+    return auth.currentUser(req)
+}

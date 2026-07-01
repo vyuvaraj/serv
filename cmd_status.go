@@ -72,7 +72,7 @@ func runStatus() {
 		latency := time.Since(start).Milliseconds()
 
 		if err != nil {
-			fmt.Printf("| %-12s | ❌ OFFLINE | - | 0s | 100.0% | - |\n", s.name)
+			fmt.Printf("| %-12s | ❌ OFFLINE | - | 0s | 100.0%% | - |\n", s.name)
 			continue
 		}
 		defer resp.Body.Close()

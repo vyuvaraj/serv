@@ -1,0 +1,14 @@
+// Serv Standard Library: Database Client
+// Import: import { query, querySafe, queryPage } from "stdlib/db.srv"
+
+export fn query(sql: string, args: any) {
+    return db.query(sql, args)
+}
+
+export fn querySafe(sql: string, args: any) {
+    return db.querySafe(sql, args)
+}
+
+export fn queryPage(sql: string, limit: any, offset: any) {
+    return db.queryPage(sql, limit, offset)
+}
