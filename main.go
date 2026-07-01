@@ -445,6 +445,47 @@ func main() {
 	mux.HandleFunc("/api/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
 	mux.HandleFunc("/api/v1/admin/cache", withAdminRateLimit(60, handleCacheInvalidation))
 
+	// Dynamic Policy Reload and Session Revocation
+	handlePolicyReload := func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthToken != "" && r.Header.Get("Authorization") != "Bearer "+cfg.AuthToken {
+			proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			proxy.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+			return
+		}
+		handler.IncrementPolicyVersion()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "message": "Policy version incremented"})
+	}
+
+	handlePolicyRevoke := func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthToken != "" && r.Header.Get("Authorization") != "Bearer "+cfg.AuthToken {
+			proxy.WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			proxy.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Username string `json:"username"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" {
+			proxy.WriteJSONError(w, r, "Invalid payload", "ERR_INVALID_PAYLOAD", http.StatusBadRequest)
+			return
+		}
+		handler.RevokeUserSession(req.Username)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "message": "Session revoked for user " + req.Username})
+	}
+
+	mux.HandleFunc("/api/v1/admin/policy/reload", withAdminRateLimit(60, handlePolicyReload))
+	mux.HandleFunc("/api/v1/admin/policy/revoke", withAdminRateLimit(60, handlePolicyRevoke))
+
 	// AI Billing API endpoint
 	handleAIBilling := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

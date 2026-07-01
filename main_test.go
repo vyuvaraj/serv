@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -255,7 +258,7 @@ func TestDirectMemoryPassingAndResponseFilters(t *testing.T) {
 		w.Write([]byte("backend:" + string(reqBody)))
 	})
 	backendServer := &http.Server{
-		Addr:    "127.0.0.1:8095",
+		Addr:    "127.0.0.1:8065",
 		Handler: backendHandler,
 	}
 	go backendServer.ListenAndServe()
@@ -265,7 +268,7 @@ func TestDirectMemoryPassingAndResponseFilters(t *testing.T) {
 	routes := []proxy.Route{
 		{
 			Prefix:             "/api/v1/direct",
-			Target:             "http://127.0.0.1:8095",
+			Target:             "http://127.0.0.1:8065",
 			Middleware:         "direct-mem-inc",
 			ResponseMiddleware: "direct-mem-inc",
 		},
@@ -273,7 +276,7 @@ func TestDirectMemoryPassingAndResponseFilters(t *testing.T) {
 
 	gatewayHandler := proxy.NewGatewayHandler(routes, wasmManager, "")
 	gatewayServer := &http.Server{
-		Addr:    "127.0.0.1:8096",
+		Addr:    "127.0.0.1:8066",
 		Handler: gatewayHandler,
 	}
 	go gatewayServer.ListenAndServe()
@@ -283,7 +286,7 @@ func TestDirectMemoryPassingAndResponseFilters(t *testing.T) {
 
 	// 5. Issue proxy request
 	reqBody := []byte("hello-wasm")
-	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8096/api/v1/direct/test", bytes.NewReader(reqBody))
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:8066/api/v1/direct/test", bytes.NewReader(reqBody))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Request failed: %v", err)
@@ -1472,6 +1475,136 @@ func TestGitOpsConfigSyncWebhook(t *testing.T) {
 	routes := handler.GetRoutes()
 	if len(routes) != 1 || routes[0].Prefix != "/new" {
 		t.Errorf("expected updated routes, got %+v", routes)
+	}
+}
+
+func createTestSignedJWT(username string, exp, iat int64, policyVer int, secret []byte) string {
+	header := `{"alg":"HS256","typ":"JWT"}`
+	payload := fmt.Sprintf(`{"username":%q,"exp":%d,"iat":%d,"policy_ver":%d}`, username, exp, iat, policyVer)
+
+	hBase := base64UrlEncodeBytes([]byte(header))
+	pBase := base64UrlEncodeBytes([]byte(payload))
+
+	// Validate signature
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(hBase + "." + pBase))
+	sig := base64UrlEncodeBytes(mac.Sum(nil))
+
+	return hBase + "." + pBase + "." + sig
+}
+
+func base64UrlEncodeBytes(b []byte) string {
+	s := base64.URLEncoding.EncodeToString(b)
+	return strings.TrimRight(s, "=")
+}
+
+func TestDynamicBackpressureRouting(t *testing.T) {
+	backend1Count := 0
+	backend1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backend1Count++
+		w.Header().Set("X-Backpressure", "90")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("backend1"))
+	}))
+	defer backend1.Close()
+
+	backend2Count := 0
+	backend2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backend2Count++
+		w.Header().Set("X-Backpressure", "10")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("backend2"))
+	}))
+	defer backend2.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:       "/service",
+			LoadBalancer: "backpressure",
+			Targets:      []string{backend1.URL, backend2.URL},
+		},
+	}
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := &http.Client{}
+	// Warm up target loads
+	r1, _ := client.Get(server.URL + "/service/ping")
+	r1.Body.Close()
+	r2, _ := client.Get(server.URL + "/service/ping")
+	r2.Body.Close()
+
+	backend1Count = 0
+	backend2Count = 0
+
+	for i := 0; i < 5; i++ {
+		resp, err := client.Get(server.URL + "/service/ping")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		resp.Body.Close()
+	}
+
+	if backend1Count > 0 {
+		t.Errorf("Expected zero requests to backend1 (90%% backpressure), got %d", backend1Count)
+	}
+	if backend2Count != 5 {
+		t.Errorf("Expected all 5 requests to go to backend2 (10%% backpressure), got %d", backend2Count)
+	}
+}
+
+func TestDynamicIAMPolicyHotReloading(t *testing.T) {
+	jwtSec := "super-secret-key"
+	t.Setenv("SERV_JWT_SECRET", jwtSec)
+
+	testBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer testBackend.Close()
+
+	routes := []proxy.Route{
+		{Prefix: "/secure", Target: testBackend.URL},
+	}
+	handler := proxy.NewGatewayHandler(routes, nil, "admin-token")
+
+	// 1. Initial valid token
+	tokenStr := createTestSignedJWT("bob", time.Now().Add(1*time.Hour).Unix(), time.Now().Unix(), 0, []byte(jwtSec))
+	username, ok := handler.ValidateJWTWithPolicy(tokenStr, []byte(jwtSec))
+	if !ok || username != "bob" {
+		t.Fatalf("expected valid token authentication")
+	}
+
+	// 2. Revoke user session
+	handler.RevokeUserSession("bob")
+	_, ok = handler.ValidateJWTWithPolicy(tokenStr, []byte(jwtSec))
+	if ok {
+		t.Errorf("expected token authentication to fail after revocation")
+	}
+
+	// 3. Stale policy version refresh signaling
+	freshToken := createTestSignedJWT("alice", time.Now().Add(1*time.Hour).Unix(), time.Now().Unix(), 0, []byte(jwtSec))
+	handler.IncrementPolicyVersion() // current version becomes 1, alice has version 0
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", server.URL+"/secure", nil)
+	req.Header.Set("Authorization", "Bearer "+freshToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Token-Refresh") != "true" {
+		t.Errorf("expected X-Token-Refresh header to be set, got %q", resp.Header.Get("X-Token-Refresh"))
 	}
 }
 

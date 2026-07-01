@@ -207,6 +207,16 @@ type GatewayHandler struct {
 	apiKeys        map[string]APIKey
 	apiKeysMu      sync.RWMutex
 	aiBilling      *AIBillingTracker
+
+	// PS.3: Backpressure Routing
+	targetLoad     map[string]int
+	targetLoadMu   sync.RWMutex
+
+	// SEC.15: Dynamic IAM Policy
+	policyVersion    int
+	policyVersionMu  sync.RWMutex
+	revokedSessions  map[string]time.Time
+	revokedSessionsMu sync.RWMutex
 }
 
 func createMTLSTransport(clientCertPath, clientKeyPath, rootCAPath string) (http.RoundTripper, error) {
@@ -297,20 +307,22 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 	}()
 
 	return &GatewayHandler{
-		routes:         routes,
-		wasm:           wasm,
-		authToken:      authToken,
-		ratLimiters:    make(map[string]*rateLimiter),
-		rrIndices:      make(map[string]int),
-		activeConns:    make(map[string]int),
-		semanticCaches: semanticCaches,
-		accessLoggers:  accessLoggers,
-		responseCaches: responseCaches,
-		metricsTracker: tracker,
-		transports:     transports,
-		limiters:       limiters,
-		apiKeys:        make(map[string]APIKey),
-		aiBilling:      NewAIBillingTracker(),
+		routes:          routes,
+		wasm:            wasm,
+		authToken:       authToken,
+		ratLimiters:     make(map[string]*rateLimiter),
+		rrIndices:       make(map[string]int),
+		activeConns:     make(map[string]int),
+		semanticCaches:  semanticCaches,
+		accessLoggers:   accessLoggers,
+		responseCaches:  responseCaches,
+		metricsTracker:  tracker,
+		transports:      transports,
+		limiters:        limiters,
+		apiKeys:         make(map[string]APIKey),
+		aiBilling:       NewAIBillingTracker(),
+		targetLoad:      make(map[string]int),
+		revokedSessions: make(map[string]time.Time),
 	}
 }
 
@@ -605,8 +617,27 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if token == h.authToken {
 			authenticated = true
 		} else if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-			if _, ok := ValidateJWT(token, []byte(jwtSec)); ok {
+			if _, ok := h.ValidateJWTWithPolicy(token, []byte(jwtSec)); ok {
 				authenticated = true
+
+				h.policyVersionMu.RLock()
+				curVer := h.policyVersion
+				h.policyVersionMu.RUnlock()
+
+				parts := strings.Split(token, ".")
+				if len(parts) == 3 {
+					payloadBytes, err := base64UrlDecode(parts[1])
+					if err == nil {
+						var claims struct {
+							PolicyVer int `json:"policy_ver"`
+						}
+						if json.Unmarshal(payloadBytes, &claims) == nil {
+							if claims.PolicyVer < curVer {
+								w.Header().Set("X-Token-Refresh", "true")
+							}
+						}
+					}
+				}
 			}
 		}
 
@@ -1276,7 +1307,23 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = &RetryingTransport{base: baseTransport}
 
+	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
+		h.targetLoadMu.Lock()
+		h.targetLoad[selectedTarget] = 100 // Maximum penalty
+		h.targetLoadMu.Unlock()
+		WriteJSONError(rw, req, "Bad Gateway: "+err.Error(), "ERR_BAD_GATEWAY", http.StatusBadGateway)
+	}
+
 	proxy.ModifyResponse = func(resp *http.Response) error {
+		if loadStr := resp.Header.Get("X-Backpressure"); loadStr != "" {
+			var load int
+			if _, err := fmt.Sscanf(loadStr, "%d", &load); err == nil {
+				h.targetLoadMu.Lock()
+				h.targetLoad[selectedTarget] = load
+				h.targetLoadMu.Unlock()
+			}
+		}
+
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("failed to read response body: %w", err)
@@ -1426,6 +1473,24 @@ func (h *GatewayHandler) selectTarget(route *Route) string {
 			}
 		}
 		return selected
+	}
+
+	if route.LoadBalancer == "backpressure" {
+		minLoad := -1
+		var selected string
+		for _, target := range route.Targets {
+			h.targetLoadMu.RLock()
+			load := h.targetLoad[target]
+			h.targetLoadMu.RUnlock()
+
+			if minLoad == -1 || load < minLoad {
+				minLoad = load
+				selected = target
+			}
+		}
+		if selected != "" {
+			return selected
+		}
 	}
 
 	// Default: Round Robin
@@ -1795,13 +1860,54 @@ func ValidateJWT(tokenStr string, secret []byte) (string, bool) {
 	return claims.Username, true
 }
 
+func (h *GatewayHandler) ValidateJWTWithPolicy(tokenStr string, secret []byte) (string, bool) {
+	username, ok := ValidateJWT(tokenStr, secret)
+	if !ok {
+		return "", false
+	}
+
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) == 3 {
+		payloadBytes, err := base64UrlDecode(parts[1])
+		if err == nil {
+			var claims struct {
+				Iat      int64 `json:"iat"`
+				PolicyVer int   `json:"policy_ver"`
+			}
+			if json.Unmarshal(payloadBytes, &claims) == nil {
+				h.revokedSessionsMu.RLock()
+				revTime, exists := h.revokedSessions[username]
+				h.revokedSessionsMu.RUnlock()
+
+				if exists && claims.Iat > 0 && time.Unix(claims.Iat, 0).Before(revTime) {
+					return "", false // Explicitly revoked
+				}
+			}
+		}
+	}
+
+	return username, true
+}
+
+func (h *GatewayHandler) RevokeUserSession(username string) {
+	h.revokedSessionsMu.Lock()
+	h.revokedSessions[username] = time.Now()
+	h.revokedSessionsMu.Unlock()
+}
+
+func (h *GatewayHandler) IncrementPolicyVersion() {
+	h.policyVersionMu.Lock()
+	h.policyVersion++
+	h.policyVersionMu.Unlock()
+}
+
 func base64UrlDecode(s string) ([]byte, error) {
 	if l := len(s) % 4; l > 0 {
 		s += strings.Repeat("=", 4-l)
 	}
 	s = strings.ReplaceAll(s, "-", "+")
 	s = strings.ReplaceAll(s, "_", "/")
-	return base64.URLEncoding.DecodeString(s)
+	return base64.StdEncoding.DecodeString(s)
 }
 
 func (h *GatewayHandler) serveOpenAPIDocs(w http.ResponseWriter, r *http.Request) {
