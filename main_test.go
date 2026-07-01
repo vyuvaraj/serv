@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -646,4 +647,109 @@ func BenchmarkWorkflowDefinitionLookup(b *testing.B) {
 		_, _ = definitions[key]
 		mu.RUnlock()
 	}
+}
+
+func startMockStompServer(t *testing.T) (string, func()) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	
+	stopChan := make(chan struct{})
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				select {
+				case <-stopChan:
+					return
+				default:
+					continue
+				}
+			}
+			
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 1024)
+				n, _ := c.Read(buf)
+				if n > 0 && strings.HasPrefix(string(buf), "CONNECT") {
+					c.Write([]byte("CONNECTED\nversion:1.2\n\n\x00"))
+				}
+				_, _ = c.Read(buf)
+			}(conn)
+		}
+	}()
+	
+	return l.Addr().String(), func() {
+		close(stopChan)
+		l.Close()
+	}
+}
+
+func TestEventDrivenSagaCompensation(t *testing.T) {
+	setupTest()
+	
+	brokerAddr, cleanup := startMockStompServer(t)
+	defer cleanup()
+	t.Setenv("SERVQUEUE_ADDR", brokerAddr)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+	mux.HandleFunc("/api/workflows/compensate/complete", handleCompensateComplete)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	defPayload := WorkflowDef{
+		ID: "event-saga-flow",
+		Tasks: []Task{
+			{Name: "ChargeCard", DependsOn: nil, Action: "success", CompensateAction: "event://RefundCard"},
+			{Name: "ReserveSeat", DependsOn: []string{"ChargeCard"}, Action: "fail"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	execPayload := map[string]string{"workflow_id": "event-saga-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	time.Sleep(150 * time.Millisecond)
+
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var intermediateInst WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&intermediateInst)
+	getResp.Body.Close()
+
+	if intermediateInst.TaskStates["ChargeCard"].Status != "compensating" {
+		t.Errorf("expected ChargeCard status to be compensating, got %q", intermediateInst.TaskStates["ChargeCard"].Status)
+	}
+
+	completePayload := map[string]string{
+		"instance_id": inst.ID,
+		"task_name":   "ChargeCard",
+		"status":      "success",
+	}
+	cBody, _ := json.Marshal(completePayload)
+	cResp, _ := http.Post(testServer.URL+"/api/workflows/compensate/complete", "application/json", bytes.NewReader(cBody))
+	cResp.Body.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst WorkflowInstance
+	json.NewDecoder(getResp2.Body).Decode(&finalInst)
+	getResp2.Body.Close()
+
+	if finalInst.TaskStates["ChargeCard"].Status != "compensated" {
+		t.Errorf("expected final status to be compensated, got %q", finalInst.TaskStates["ChargeCard"].Status)
+	}
+
+	_ = os.Remove(inst.ID + ".state")
 }

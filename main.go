@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-stomp/stomp/v3"
+
 	"github.com/vyuvaraj/ServShared"
 )
 
@@ -135,6 +137,7 @@ func main() {
 	mux.HandleFunc("/api/workflows/replay", handleReplay)
 	mux.HandleFunc("/api/workflows/validate", handleValidate)
 	mux.HandleFunc("/api/workflows/visualize", handleVisualize)
+	mux.HandleFunc("/api/workflows/compensate/complete", handleCompensateComplete)
 
 	serverHandler := ServShared.TraceMiddleware("servflow", ServShared.AuthMiddleware(mux))
 
@@ -804,6 +807,71 @@ func executeTaskAction(t Task) error {
 	return nil
 }
 
+func publishStompMessage(addr string, topic string, body []byte) error {
+	conn, err := stomp.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Disconnect()
+
+	return conn.Send(topic, "text/plain", body, nil)
+}
+
+func handleCompensateComplete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		InstanceID string `json:"instance_id"`
+		TaskName   string `json:"task_name"`
+		Status     string `json:"status"` // success or failed
+		Error      string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	inst, exists := instances[req.InstanceID]
+	mu.Unlock()
+
+	if !exists {
+		http.Error(w, "Instance not found", http.StatusNotFound)
+		return
+	}
+
+	inst.mu.Lock()
+	tState, taskExists := inst.TaskStates[req.TaskName]
+	if !taskExists || tState.Status != "compensating" {
+		inst.mu.Unlock()
+		http.Error(w, "Task is not in compensating state", http.StatusBadRequest)
+		return
+	}
+
+	if req.Status == "success" {
+		tState.Status = "compensated"
+		inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation succeeded asynchronously for task %s", req.TaskName))
+	} else {
+		tState.Status = "failed"
+		tState.Error = req.Error
+		inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed asynchronously for task %s: %s", req.TaskName, req.Error))
+	}
+	inst.mu.Unlock()
+	saveCheckpoint(inst)
+
+	mu.RLock()
+	def := definitions[inst.WorkflowID]
+	mu.RUnlock()
+
+	go rollbackSaga(inst, def)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
 func rollbackSaga(inst *WorkflowInstance, def WorkflowDef) {
 	// Traverse tasks in reverse order
 	for i := len(def.Tasks) - 1; i >= 0; i-- {
@@ -811,26 +879,52 @@ func rollbackSaga(inst *WorkflowInstance, def WorkflowDef) {
 		
 		inst.mu.Lock()
 		tState := inst.TaskStates[t.Name]
-		if (tState.Status == "completed" || tState.Status == "compensating") && t.CompensateAction != "" {
+		
+		if tState.Status == "compensating" {
+			inst.mu.Unlock()
+			return
+		}
+		
+		if tState.Status == "completed" && t.CompensateAction != "" {
 			tState.Status = "compensating"
 			inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
 			inst.mu.Unlock()
 			saveCheckpoint(inst)
 			
-			// Execute compensation action
-			err := executeTaskAction(Task{Name: t.Name, Action: t.CompensateAction})
-			
-			inst.mu.Lock()
-			if err != nil {
-				tState.Status = "failed"
-				tState.Error = "compensation failed: " + err.Error()
-				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed for task %s: %v", t.Name, err))
+			if strings.HasPrefix(t.CompensateAction, "event://") {
+				topic := "/topic/" + strings.TrimPrefix(t.CompensateAction, "event://")
+				brokerAddr := os.Getenv("SERVQUEUE_ADDR")
+				if brokerAddr == "" {
+					brokerAddr = "localhost:8082"
+				}
+				payload := fmt.Sprintf(`{"instance_id": "%s", "task_name": "%s"}`, inst.ID, t.Name)
+				
+				err := publishStompMessage(brokerAddr, topic, []byte(payload))
+				if err != nil {
+					inst.mu.Lock()
+					tState.Status = "failed"
+					tState.Error = "STOMP publish failed: " + err.Error()
+					inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed to publish for task %s: %v", t.Name, err))
+					inst.mu.Unlock()
+					saveCheckpoint(inst)
+				}
+				return
 			} else {
-				tState.Status = "compensated"
-				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation succeeded for task %s", t.Name))
+				// Execute compensation action
+				err := executeTaskAction(Task{Name: t.Name, Action: t.CompensateAction})
+				
+				inst.mu.Lock()
+				if err != nil {
+					tState.Status = "failed"
+					tState.Error = "compensation failed: " + err.Error()
+					inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed for task %s: %v", t.Name, err))
+				} else {
+					tState.Status = "compensated"
+					inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation succeeded for task %s", t.Name))
+				}
+				inst.mu.Unlock()
+				saveCheckpoint(inst)
 			}
-			inst.mu.Unlock()
-			saveCheckpoint(inst)
 		} else {
 			inst.mu.Unlock()
 		}
