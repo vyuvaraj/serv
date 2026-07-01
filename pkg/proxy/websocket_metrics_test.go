@@ -1,10 +1,12 @@
 package proxy
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -62,13 +64,20 @@ func TestWebSocketMetricsFeed(t *testing.T) {
 		t.Fatalf("failed to write handshake request: %v", err)
 	}
 
-	// 3. Read response
-	buf := make([]byte, 1024)
-	n, err := conn.Read(buf)
-	if err != nil {
-		t.Fatalf("failed to read handshake response: %v", err)
+	// 3. Read response headers exactly using bufio.Reader
+	reader := bufio.NewReader(conn)
+	var respBuilder strings.Builder
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("failed to read handshake response: %v", err)
+		}
+		respBuilder.WriteString(line)
+		if line == "\r\n" || line == "\n" {
+			break
+		}
 	}
-	resp := string(buf[:n])
+	resp := respBuilder.String()
 
 	if !strings.Contains(resp, "101 Switching Protocols") {
 		t.Fatalf("expected 101 Switching Protocols, got: %s", resp)
@@ -85,7 +94,7 @@ func TestWebSocketMetricsFeed(t *testing.T) {
 	// Helper to read a WebSocket text frame
 	readFrame := func() ([]byte, error) {
 		header := make([]byte, 2)
-		_, err := conn.Read(header)
+		_, err := io.ReadFull(reader, header)
 		if err != nil {
 			return nil, err
 		}
@@ -96,7 +105,7 @@ func TestWebSocketMetricsFeed(t *testing.T) {
 		switch length {
 		case 126:
 			lenBytes := make([]byte, 2)
-			_, err = conn.Read(lenBytes)
+			_, err = io.ReadFull(reader, lenBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -106,7 +115,7 @@ func TestWebSocketMetricsFeed(t *testing.T) {
 		}
 
 		payload := make([]byte, length)
-		_, err = conn.Read(payload)
+		_, err = io.ReadFull(reader, payload)
 		return payload, err
 	}
 
