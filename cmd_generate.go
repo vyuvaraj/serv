@@ -13,6 +13,9 @@ func runGenerate() {
 		fmt.Println("Usage:")
 		fmt.Println("  serv generate client <file.srv> [--lang <typescript|python|go>] [-o <output-file>]")
 		fmt.Println("  serv generate routes <spec.yaml|spec.json> [-o <output.srv>]")
+		fmt.Println("  serv generate api <name>")
+		fmt.Println("  serv generate db <name>")
+		fmt.Println("  serv generate workflow <name>")
 		fmt.Println("  serv generate \"<natural-language-prompt>\"")
 		os.Exit(1)
 	}
@@ -23,6 +26,24 @@ func runGenerate() {
 		runGenerateClient()
 	case "routes":
 		runGenerateRoutes()
+	case "api":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: serv generate api <name>")
+			os.Exit(1)
+		}
+		runGenerateAPIScaffold(os.Args[3])
+	case "db":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: serv generate db <name>")
+			os.Exit(1)
+		}
+		runGenerateDBScaffold(os.Args[3])
+	case "workflow":
+		if len(os.Args) < 4 {
+			fmt.Println("Usage: serv generate workflow <name>")
+			os.Exit(1)
+		}
+		runGenerateWorkflowScaffold(os.Args[3])
 	case "code":
 		if len(os.Args) < 4 {
 			fmt.Println("Usage: serv generate code <prompt>")
@@ -152,4 +173,61 @@ func runGenerateClient() {
 	}
 
 	fmt.Printf("✓ Successfully generated %s client SDK at %s\n", *lang, *outputFile)
+}
+
+func runGenerateAPIScaffold(name string) {
+	code := fmt.Sprintf(`// API Route handler for %s
+route "GET" "/api/v1/%s" (req) {
+    let response = {
+        "status": "success",
+        "message": "hello from %s api endpoint"
+    }
+    return response
+}
+`, name, strings.ToLower(name), name)
+	outName := strings.ToLower(name) + "_api.srv"
+	if err := os.WriteFile(outName, []byte(code), 0644); err != nil {
+		fmt.Printf("Error writing api scaffold: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ Scaffolding complete: generated api route at %s\n", outName)
+}
+
+func runGenerateDBScaffold(name string) {
+	code := fmt.Sprintf(`// Database schema and helper for %s
+database %sDb {
+    engine: "sqlite"
+    connection: "file:%s.db?cache=shared&mode=rwc"
+}
+
+struct %s {
+    id: int
+    name: string
+    created_at: string
+}
+`, name, name, strings.ToLower(name), name)
+	outName := strings.ToLower(name) + "_db.srv"
+	if err := os.WriteFile(outName, []byte(code), 0644); err != nil {
+		fmt.Printf("Error writing db scaffold: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ Scaffolding complete: generated database helper at %s\n", outName)
+}
+
+func runGenerateWorkflowScaffold(name string) {
+	code := fmt.Sprintf(`// Stateful Workflow definition for %s
+workflow %sFlow (data) {
+    step1 = step(func() {
+        return "step1_success"
+    })
+    
+    return step1
+}
+`, name, name)
+	outName := strings.ToLower(name) + "_workflow.srv"
+	if err := os.WriteFile(outName, []byte(code), 0644); err != nil {
+		fmt.Printf("Error writing workflow scaffold: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ Scaffolding complete: generated workflow definition at %s\n", outName)
 }

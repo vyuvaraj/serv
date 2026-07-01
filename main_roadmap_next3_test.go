@@ -302,3 +302,38 @@ func TestDomainDrivenDecompositionLinter(t *testing.T) {
 		t.Errorf("Expected domain boundary violation warning, but none found")
 	}
 }
+
+func TestScaffoldingCLI(t *testing.T) {
+	apiFile := "user_api.srv"
+	defer os.Remove(apiFile)
+	runGenerateAPIScaffold("User")
+	content, err := os.ReadFile(apiFile)
+	if err != nil {
+		t.Fatalf("failed to read api scaffold file: %v", err)
+	}
+	if !strings.Contains(string(content), "route \"GET\" \"/api/v1/user\"") {
+		t.Errorf("scaffold missing route: %s", string(content))
+	}
+
+	dbFile := "user_db.srv"
+	defer os.Remove(dbFile)
+	runGenerateDBScaffold("User")
+	content, err = os.ReadFile(dbFile)
+	if err != nil {
+		t.Fatalf("failed to read db scaffold file: %v", err)
+	}
+	if !strings.Contains(string(content), "database UserDb") {
+		t.Errorf("scaffold missing database block: %s", string(content))
+	}
+
+	wfFile := "user_workflow.srv"
+	defer os.Remove(wfFile)
+	runGenerateWorkflowScaffold("User")
+	content, err = os.ReadFile(wfFile)
+	if err != nil {
+		t.Fatalf("failed to read workflow scaffold file: %v", err)
+	}
+	if !strings.Contains(string(content), "workflow UserFlow (data)") {
+		t.Errorf("scaffold missing workflow block: %s", string(content))
+	}
+}
