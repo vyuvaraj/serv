@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,7 @@ import (
 func TestServMeshLifecycle(t *testing.T) {
 	// Start Control Plane Registry
 	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
 	regServer := httptest.NewServer(reg.Handler())
 	defer regServer.Close()
 
@@ -132,6 +134,7 @@ func stringsContainsRecursive(s, sub string) bool {
 // Add a test for heartbeats
 func TestRegistryHeartbeats(t *testing.T) {
 	reg := registry.NewRegistry(500 * time.Millisecond)
+	defer reg.Close()
 	regURL := "http://localhost:9999" // dummy
 	_ = regURL
 
@@ -159,6 +162,7 @@ func TestRegistryHeartbeats(t *testing.T) {
 // Thread safety test
 func TestRegistryConcurrency(t *testing.T) {
 	reg := registry.NewRegistry(10 * time.Second)
+	defer reg.Close()
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
@@ -185,6 +189,7 @@ func TestRegistryJWTAuthentication(t *testing.T) {
 	defer os.Unsetenv("SERV_JWT_SECRET")
 
 	reg := registry.NewRegistry(10 * time.Second)
+	defer reg.Close()
 	ts := httptest.NewServer(reg.Handler())
 	defer ts.Close()
 
@@ -242,6 +247,7 @@ func TestRegistryJWTAuthentication(t *testing.T) {
 func TestDynamicMTLS(t *testing.T) {
 	// Start control plane registry
 	reg := registry.NewRegistry(10 * time.Second)
+	defer reg.Close()
 	regServer := httptest.NewServer(reg.Handler())
 	defer regServer.Close()
 
@@ -289,6 +295,7 @@ func TestDynamicMTLS(t *testing.T) {
 
 func TestCanaryTrafficSplitting(t *testing.T) {
 	reg := registry.NewRegistry(10 * time.Second)
+	defer reg.Close()
 	regServer := httptest.NewServer(reg.Handler())
 	defer regServer.Close()
 
@@ -355,6 +362,7 @@ func registerInstanceWithWeight(t *testing.T, regURL, serviceName, address, vers
 
 func TestDynamicRoutingRules(t *testing.T) {
 	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
 	regServer := httptest.NewServer(reg.Handler())
 	defer regServer.Close()
 
@@ -397,6 +405,7 @@ func TestDynamicRoutingRules(t *testing.T) {
 
 func TestRegionalGeoRouting(t *testing.T) {
 	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
 	regServer := httptest.NewServer(reg.Handler())
 	defer regServer.Close()
 
@@ -451,6 +460,7 @@ func TestRegionalGeoRouting(t *testing.T) {
 
 func TestChaosFaultInjection(t *testing.T) {
 	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
 	regServer := httptest.NewServer(reg.Handler())
 	defer regServer.Close()
 
@@ -505,4 +515,50 @@ func BenchmarkCircuitBreakerAllow(b *testing.B) {
 			_ = cb.Allow()
 		}
 	})
+}
+
+func TestMulticastServiceDiscovery(t *testing.T) {
+	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	addr, err := net.ResolveUDPAddr("udp4", "127.0.0.1:9999")
+	if err != nil {
+		t.Fatalf("failed to resolve UDP address: %v", err)
+	}
+
+	conn, err := net.DialUDP("udp4", nil, addr)
+	if err != nil {
+		t.Fatalf("failed to dial UDP: %v", err)
+	}
+	defer conn.Close()
+
+	announce := struct {
+		Type      string `json:"type"`
+		Service   string `json:"service"`
+		Address   string `json:"address"`
+		HealthURL string `json:"health_url"`
+	}{
+		Type:      "announce",
+		Service:   "multicast-auth",
+		Address:   "http://127.0.0.1:9098",
+		HealthURL: "http://127.0.0.1:9098/health",
+	}
+
+	data, _ := json.Marshal(announce)
+	_, err = conn.Write(data)
+	if err != nil {
+		t.Fatalf("failed to write announce packet: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	resolved := reg.Resolve("multicast-auth")
+	if len(resolved) == 0 {
+		t.Fatalf("expected resolved instance, got 0")
+	}
+
+	if resolved[0].Address != "http://127.0.0.1:9098" {
+		t.Errorf("expected address http://127.0.0.1:9098, got %q", resolved[0].Address)
+	}
 }

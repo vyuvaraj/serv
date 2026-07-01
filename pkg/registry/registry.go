@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -44,8 +45,9 @@ type Registry struct {
 	rules     map[string]RoutingRule
 	ttl       time.Duration
 
-	caCert    *x509.Certificate
-	caPrivKey *ecdsa.PrivateKey
+	caCert        *x509.Certificate
+	caPrivKey     *ecdsa.PrivateKey
+	multicastConn *net.UDPConn
 }
 
 func NewRegistry(ttl time.Duration) *Registry {
@@ -55,6 +57,7 @@ func NewRegistry(ttl time.Duration) *Registry {
 		ttl:       ttl,
 	}
 	r.generateRootCA()
+	r.startMulticastListener()
 	go r.startEvictionLoop(2 * time.Second)
 	return r
 }
@@ -405,4 +408,93 @@ func (r *Registry) Handler() http.Handler {
 	})
 
 	return ServShared.AuthMiddleware(mux)
+}
+
+func (r *Registry) startMulticastListener() {
+	addr, err := net.ResolveUDPAddr("udp4", "127.0.0.1:9999")
+	var conn *net.UDPConn
+	if err == nil {
+		conn, _ = net.ListenUDP("udp4", addr)
+	}
+
+	if conn == nil {
+		maddr, err := net.ResolveUDPAddr("udp4", "224.0.1.251:9999")
+		if err == nil {
+			conn, _ = net.ListenMulticastUDP("udp4", nil, maddr)
+		}
+	}
+
+	if conn == nil {
+		return
+	}
+	r.multicastConn = conn
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, _, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			var packet struct {
+				Type      string `json:"type"`
+				Service   string `json:"service"`
+				Address   string `json:"address"`
+				HealthURL string `json:"health_url"`
+			}
+			if err := json.Unmarshal(buf[:n], &packet); err == nil {
+				if packet.Type == "announce" && packet.Service != "" {
+					r.Register(Instance{
+						Service:   packet.Service,
+						Address:   packet.Address,
+						HealthURL: packet.HealthURL,
+					})
+				} else if packet.Type == "query" {
+					r.mu.RLock()
+					var instances []Instance
+					for _, list := range r.instances {
+						instances = append(instances, list...)
+					}
+					r.mu.RUnlock()
+
+					for _, inst := range instances {
+						respPacket := struct {
+							Type      string `json:"type"`
+							Service   string `json:"service"`
+							Address   string `json:"address"`
+							HealthURL string `json:"health_url"`
+						}{
+							Type:      "announce",
+							Service:   inst.Service,
+							Address:   inst.Address,
+							HealthURL: inst.HealthURL,
+						}
+						respBytes, _ := json.Marshal(respPacket)
+						_, _ = conn.WriteToUDP(respBytes, addr)
+					}
+				}
+			}
+		}
+	}()
+}
+
+func (r *Registry) BroadcastQuery() {
+	if r.multicastConn == nil {
+		return
+	}
+	addr, err := net.ResolveUDPAddr("udp4", "127.0.0.1:9999")
+	if err != nil {
+		return
+	}
+	query := map[string]string{"type": "query"}
+	data, _ := json.Marshal(query)
+	_, _ = r.multicastConn.WriteToUDP(data, addr)
+}
+
+func (r *Registry) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.multicastConn != nil {
+		r.multicastConn.Close()
+		r.multicastConn = nil
+	}
 }

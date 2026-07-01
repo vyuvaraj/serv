@@ -56,5 +56,6 @@ func main() {
 		log.Printf("Registry forced shutdown: %v", err)
 	}
 
+	r.Close()
 	log.Println("ServMesh Registry shutdown complete.")
 }
