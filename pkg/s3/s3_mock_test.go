@@ -1,13 +1,18 @@
 package s3
 
 import (
+	"context"
 	"encoding/xml"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"servstore/pkg/auth"
+	"servstore/pkg/storage"
 )
 
 func TestS3MockMode(t *testing.T) {
@@ -75,5 +80,52 @@ func TestS3MockMode(t *testing.T) {
 	}
 	if w.Body.String() != "mock-s3-data" {
 		t.Errorf("Expected content 'mock-s3-data', got %q", w.Body.String())
+	}
+}
+
+func TestS3ActiveActiveConflictResolution(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "s3-lww-test-*")
+	if err != nil {
+		t.Fatalf("failed to create tmp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	localStore, err := storage.NewLocalStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create local store: %v", err)
+	}
+
+	authProv := auth.NewAuthProvider("admin", "adminsecret", false)
+	gateway := NewGateway(localStore, authProv, nil, nil, 1, false, 1, 1)
+
+	ctx := context.Background()
+	_ = localStore.CreateBucket(ctx, "my-bucket")
+
+	// 1. Put newer local object
+	obj, err := localStore.PutObject(ctx, "my-bucket", "key.txt", strings.NewReader("local newer data"), 16, "text/plain")
+	if err != nil {
+		t.Fatalf("failed to put object: %v", err)
+	}
+
+	// 2. Make replication request with older timestamp header
+	req := httptest.NewRequest("PUT", "/my-bucket/key.txt", strings.NewReader("remote older data"))
+	req.Header.Set("X-ServStore-Replicated", "true")
+	req.Header.Set("X-ServStore-Timestamp", obj.LastModified.Add(-10 * time.Second).Format(time.RFC3339))
+	w := httptest.NewRecorder()
+	gateway.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d", w.Code)
+	}
+
+	// Read object back, verify conflict resolution retained local newer data
+	r, _, err := localStore.GetObject(ctx, "my-bucket", "key.txt", "")
+	if err != nil {
+		t.Fatalf("failed to get object: %v", err)
+	}
+	defer r.Close()
+	data, _ := io.ReadAll(r)
+	if string(data) != "local newer data" {
+		t.Errorf("Expected 'local newer data' (LWW), got %q", string(data))
 	}
 }

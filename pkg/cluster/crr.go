@@ -144,6 +144,7 @@ func (c *CRRManager) replicateVersionToNode(ctx context.Context, bucket, key, ve
 	req.Header.Set("X-ServStore-Replicated", "true")
 	req.Header.Set("X-ServStore-Region-Source", c.clusterMgr.localNode.Region)
 	req.Header.Set("X-ServStore-Version-Id", versionID)
+	req.Header.Set("X-ServStore-Timestamp", obj.LastModified.Format(time.RFC3339))
 
 	req.SetBasicAuth(c.accessKey, c.secretKey)
 

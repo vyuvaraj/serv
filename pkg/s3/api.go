@@ -1418,6 +1418,21 @@ func (g *Gateway) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 		ctx = context.WithValue(ctx, storage.VersionIDContextKey, headerVer)
 	}
 
+	if r.Header.Get("X-ServStore-Replicated") == "true" {
+		localMeta, err := g.store.HeadObject(ctx, bucket, key, "")
+		if err == nil {
+			if repTimeStr := r.Header.Get("X-ServStore-Timestamp"); repTimeStr != "" {
+				if repTime, err := time.Parse(time.RFC3339, repTimeStr); err == nil {
+					if localMeta.LastModified.After(repTime) {
+						slog.Info("Conflict: local object is newer than incoming replication request", "bucket", bucket, "key", key)
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+				}
+			}
+		}
+	}
+
 	obj, err := g.store.PutObject(ctx, bucket, key, r.Body, size, contentType)
 	if err != nil {
 		if errors.Is(err, storage.ErrBucketNotFound) {
