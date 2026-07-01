@@ -49,6 +49,9 @@ func Analyze(program *Program) []Diagnostic {
 	// Check for SQL injection risks
 	diags = append(diags, analyzeSQLInjection(program)...)
 
+	// ARCH.8: Bounded context domain boundaries checks
+	diags = append(diags, analyzeDomainBoundaries(program)...)
+
 	for _, stmt := range program.Statements {
 		diags = append(diags, analyzeStatement(stmt, program)...)
 	}
@@ -150,4 +153,132 @@ func FormatAnalysisDiagnostics(diags []Diagnostic, source string) string {
 	}
 
 	return out.String()
+}
+
+func analyzeDomainBoundaries(program *Program) []Diagnostic {
+	var diags []Diagnostic
+
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *RouteStmt:
+			diags = append(diags, checkBlockDomainBoundaries(s.Body, s.Path, s.Token.Line, s.Token.Col)...)
+		case *EveryStmt:
+			diags = append(diags, checkBlockDomainBoundaries(s.Body, "cron-every", s.Token.Line, s.Token.Col)...)
+		case *CronStmt:
+			diags = append(diags, checkBlockDomainBoundaries(s.Body, "cron-schedule", s.Token.Line, s.Token.Col)...)
+		case *SubscribeStmt:
+			diags = append(diags, checkBlockDomainBoundaries(s.Body, "subscribe-"+s.Topic.String(), s.Token.Line, s.Token.Col)...)
+		}
+	}
+
+	return diags
+}
+
+func checkBlockDomainBoundaries(block *BlockStmt, contextName string, line, col int) []Diagnostic {
+	var diags []Diagnostic
+	if block == nil {
+		return diags
+	}
+
+	for _, stmt := range block.Statements {
+		diags = append(diags, checkStmtDomainBoundaries(stmt, contextName, line, col)...)
+	}
+
+	return diags
+}
+
+func checkStmtDomainBoundaries(stmt Statement, contextName string, line, col int) []Diagnostic {
+	var diags []Diagnostic
+	if isNil(stmt) {
+		return diags
+	}
+
+	switch s := stmt.(type) {
+	case *BlockStmt:
+		diags = append(diags, checkBlockDomainBoundaries(s, contextName, line, col)...)
+	case *LetStmt:
+		diags = append(diags, checkExprDomainBoundaries(s.Value, contextName, line, col)...)
+	case *ReturnStmt:
+		diags = append(diags, checkExprDomainBoundaries(s.Value, contextName, line, col)...)
+	case *ExprStmt:
+		diags = append(diags, checkExprDomainBoundaries(s.Value, contextName, line, col)...)
+	case *IfStmt:
+		diags = append(diags, checkExprDomainBoundaries(s.Condition, contextName, line, col)...)
+		diags = append(diags, checkStmtDomainBoundaries(s.Body, contextName, line, col)...)
+		diags = append(diags, checkStmtDomainBoundaries(s.ElseBody, contextName, line, col)...)
+	case *ForStmt:
+		diags = append(diags, checkStmtDomainBoundaries(s.Body, contextName, line, col)...)
+	case *TryCatchStmt:
+		diags = append(diags, checkStmtDomainBoundaries(s.TryBody, contextName, line, col)...)
+		diags = append(diags, checkStmtDomainBoundaries(s.CatchBody, contextName, line, col)...)
+	case *MatchStmt:
+		for _, c := range s.Cases {
+			diags = append(diags, checkStmtDomainBoundaries(c.Body, contextName, line, col)...)
+		}
+	}
+
+	return diags
+}
+
+func checkExprDomainBoundaries(expr Expression, contextName string, line, col int) []Diagnostic {
+	var diags []Diagnostic
+	if isNil(expr) {
+		return diags
+	}
+
+	switch e := expr.(type) {
+	case *CallExpr:
+		if ident, ok := e.Function.(*Identifier); ok {
+			fnName := ident.Value
+			if strings.HasPrefix(fnName, "auth_private_") && !strings.Contains(contextName, "auth") {
+				diags = append(diags, Diagnostic{
+					Line:     line,
+					Col:      col,
+					Severity: "warning",
+					Message:  fmt.Sprintf("Domain boundary violation: handler for '%s' directly invokes internal helper '%s' belonging to another domain context.", contextName, fnName),
+				})
+			}
+			if strings.HasPrefix(fnName, "mail_internal_") && !strings.Contains(contextName, "mail") {
+				diags = append(diags, Diagnostic{
+					Line:     line,
+					Col:      col,
+					Severity: "warning",
+					Message:  fmt.Sprintf("Domain boundary violation: handler for '%s' directly invokes internal helper '%s' belonging to another domain context.", contextName, fnName),
+				})
+			}
+		}
+
+		for _, arg := range e.Arguments {
+			diags = append(diags, checkExprDomainBoundaries(arg, contextName, line, col)...)
+		}
+
+	case *InfixExpr:
+		diags = append(diags, checkExprDomainBoundaries(e.Left, contextName, line, col)...)
+		diags = append(diags, checkExprDomainBoundaries(e.Right, contextName, line, col)...)
+
+	case *PrefixExpr:
+		diags = append(diags, checkExprDomainBoundaries(e.Right, contextName, line, col)...)
+
+	case *IndexExpr:
+		diags = append(diags, checkExprDomainBoundaries(e.Left, contextName, line, col)...)
+		diags = append(diags, checkExprDomainBoundaries(e.Index, contextName, line, col)...)
+
+	case *MemberExpr:
+		diags = append(diags, checkExprDomainBoundaries(e.Object, contextName, line, col)...)
+
+	case *OptionalMemberExpr:
+		diags = append(diags, checkExprDomainBoundaries(e.Object, contextName, line, col)...)
+
+	case *MapLiteral:
+		for _, val := range e.Pairs {
+			diags = append(diags, checkExprDomainBoundaries(val, contextName, line, col)...)
+		}
+
+	case *ArrayLiteral:
+		for _, el := range e.Elements {
+			diags = append(diags, checkExprDomainBoundaries(el, contextName, line, col)...)
+		}
+	}
+
+	return diags
 }

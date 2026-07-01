@@ -272,3 +272,33 @@ func TestCompileTimeMacrosAndLspActions(t *testing.T) {
 	// Capture execution
 	runLspActionCmd([]string{"--file", tmpFile.Name(), "--line", "10", "--type", "quickfix"})
 }
+
+func TestDomainDrivenDecompositionLinter(t *testing.T) {
+	src := `
+	fn auth_private_validate() {
+		return "valid"
+	}
+	route "POST" "/api/v1/billing/pay" (req) {
+		let x = auth_private_validate()
+		return "paid"
+	}
+	`
+	lexer := compiler.NewLexer(src)
+	parser := compiler.NewParser(lexer)
+	prog := parser.ParseProgram()
+	if len(parser.Errors()) > 0 {
+		t.Fatalf("parser errors: %v", parser.Errors())
+	}
+
+	diags := compiler.Analyze(prog)
+	var boundaryViolationFound bool
+	for _, d := range diags {
+		if strings.Contains(d.Message, "Domain boundary violation") {
+			boundaryViolationFound = true
+		}
+	}
+
+	if !boundaryViolationFound {
+		t.Errorf("Expected domain boundary violation warning, but none found")
+	}
+}
