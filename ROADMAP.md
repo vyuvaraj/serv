@@ -25,3 +25,6 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 
 ## Phase 4: Architectural Depth (Completed)
 - [x] **Durable Sagas State Machine** — Durable execution rollback engine backed by ServStore (CORE.2) [July 1, 2026]
+
+## Phase 5: Event-Driven Sagas (Pending)
+- [ ] **Event-Driven Sagas Orchestration** — Asynchronous compensations triggered on STOMP topic events (CORE.3)
