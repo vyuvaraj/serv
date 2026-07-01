@@ -291,25 +291,38 @@ func handleResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reload instance and override state to running
-	inst.Status = "running"
-	inst.Logs = append(inst.Logs, "Workflow execution resumed from checkpoint.")
-	
-	// Reset any failed steps back to pending so they rerun
+	instPointer := &inst
+
+	isCompensating := false
 	for _, state := range inst.TaskStates {
-		if state.Status == "failed" {
-			state.Status = "pending"
-			state.Error = ""
+		if state.Status == "compensating" {
+			isCompensating = true
+			break
 		}
 	}
-
-	instPointer := &inst
 
 	mu.Lock()
 	instances[inst.ID] = instPointer
 	mu.Unlock()
 
-	go runWorkflow(instPointer, def)
+	if isCompensating {
+		instPointer.Logs = append(instPointer.Logs, "Resuming saga rollback execution from checkpoint.")
+		instPointer.Status = "failed"
+		go rollbackSaga(instPointer, def)
+	} else {
+		// Reload instance and override state to running
+		instPointer.Status = "running"
+		instPointer.Logs = append(instPointer.Logs, "Workflow execution resumed from checkpoint.")
+		
+		// Reset any failed steps back to pending so they rerun
+		for _, state := range instPointer.TaskStates {
+			if state.Status == "failed" {
+				state.Status = "pending"
+				state.Error = ""
+			}
+		}
+		go runWorkflow(instPointer, def)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -702,20 +715,11 @@ func runWorkflow(inst *WorkflowInstance, def WorkflowDef) {
 				inst.Status = "failed"
 				inst.FinishedAt = time.Now()
 				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s failed: %v. Initiating Saga compensation...", task.Name, err))
-				
-				// Saga Rollback logic:
-				// Traverse tasks in reverse order. For completed tasks, trigger Compensation action.
-				for i := len(def.Tasks) - 1; i >= 0; i-- {
-					t := def.Tasks[i]
-					tState := inst.TaskStates[t.Name]
-					if tState.Status == "completed" && t.CompensateAction != "" {
-						inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
-						tState.Status = "compensated"
-					}
-				}
-
 				inst.mu.Unlock()
 				saveCheckpoint(inst)
+
+				// Trigger durable saga rollback/compensations
+				go rollbackSaga(inst, def)
 				return
 			} else {
 				state.Status = "completed"
@@ -768,6 +772,25 @@ func saveCheckpoint(inst *WorkflowInstance) {
 }
 
 func executeTaskAction(t Task) error {
+	if strings.HasPrefix(t.Action, "http://") || strings.HasPrefix(t.Action, "https://") {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "POST", t.Action, strings.NewReader(`{}`))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("HTTP action failed with status %d", resp.StatusCode)
+		}
+		return nil
+	}
+
 	// Simple simulation
 	if t.Action == "sleep-100" {
 		time.Sleep(100 * time.Millisecond)
@@ -779,4 +802,37 @@ func executeTaskAction(t Task) error {
 		return errors.New("simulated action failure")
 	}
 	return nil
+}
+
+func rollbackSaga(inst *WorkflowInstance, def WorkflowDef) {
+	// Traverse tasks in reverse order
+	for i := len(def.Tasks) - 1; i >= 0; i-- {
+		t := def.Tasks[i]
+		
+		inst.mu.Lock()
+		tState := inst.TaskStates[t.Name]
+		if (tState.Status == "completed" || tState.Status == "compensating") && t.CompensateAction != "" {
+			tState.Status = "compensating"
+			inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
+			inst.mu.Unlock()
+			saveCheckpoint(inst)
+			
+			// Execute compensation action
+			err := executeTaskAction(Task{Name: t.Name, Action: t.CompensateAction})
+			
+			inst.mu.Lock()
+			if err != nil {
+				tState.Status = "failed"
+				tState.Error = "compensation failed: " + err.Error()
+				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed for task %s: %v", t.Name, err))
+			} else {
+				tState.Status = "compensated"
+				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation succeeded for task %s", t.Name))
+			}
+			inst.mu.Unlock()
+			saveCheckpoint(inst)
+		} else {
+			inst.mu.Unlock()
+		}
+	}
 }
