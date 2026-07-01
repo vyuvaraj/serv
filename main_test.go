@@ -1608,4 +1608,61 @@ func TestDynamicIAMPolicyHotReloading(t *testing.T) {
 	}
 }
 
+func TestAutomatedCanaryRollback(t *testing.T) {
+	tsV1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("v1_stable"))
+	}))
+	defer tsV1.Close()
+
+	tsV2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("v2_error"))
+	}))
+	defer tsV2.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix: "/api/auto-canary",
+			TargetsWeighted: []proxy.WeightedTarget{
+				{URL: tsV1.URL, Weight: 90},
+				{URL: tsV2.URL, Weight: 10},
+			},
+			CanaryAutoPromote:  true,
+			CanaryPromoteStep:  10,
+			CanaryPromoteSec:   2,
+			CanaryMaxErrorRate: 0.05,
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := proxy.NewGatewayHandler(routes, wasmManager, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{Timeout: 1 * time.Second}
+
+	for i := 0; i < 30; i++ {
+		resp, err := client.Get(gwServer.URL + "/api/auto-canary/test")
+		if err == nil {
+			resp.Body.Close()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	req, _ := http.NewRequest("GET", gwServer.URL+"/api/auto-canary/test", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	canaryTarget := resp.Header.Get("X-Canary-Target")
+	if canaryTarget != tsV1.URL {
+		t.Errorf("Expected rollback to stable target %s, got target %s", tsV1.URL, canaryTarget)
+	}
+}
+
 

@@ -59,6 +59,10 @@ type Route struct {
 	Target             string            `json:"target"`
 	Targets            []string          `json:"targets,omitempty"`             // Multiple backend targets
 	TargetsWeighted    []WeightedTarget  `json:"targets_weighted,omitempty"`    // Weighted canary/blue-green targets
+	CanaryAutoPromote  bool              `json:"canary_auto_promote,omitempty"`  // Enable automated promotion
+	CanaryPromoteStep  int               `json:"canary_promote_step,omitempty"`  // Increment step
+	CanaryPromoteSec   int               `json:"canary_promote_sec,omitempty"`   // Promotion interval
+	CanaryMaxErrorRate float64           `json:"canary_max_error_rate,omitempty"` // Rollback threshold
 	LoadBalancer       string            `json:"load_balancer,omitempty"`       // "round_robin" or "least_conn"
 	TranspileType      string            `json:"transpile_type,omitempty"`      // "rest_to_grpc" or "grpc_to_rest"
 	Middleware         string            `json:"middleware,omitempty"`          // Request Middleware
@@ -217,6 +221,10 @@ type GatewayHandler struct {
 	policyVersionMu  sync.RWMutex
 	revokedSessions  map[string]time.Time
 	revokedSessionsMu sync.RWMutex
+
+	// OPS.12: Automated Canary Deployment Engine
+	canaryStats   map[string]*canaryStatsRecord // key: canary target URL
+	canaryStatsMu sync.Mutex
 }
 
 func createMTLSTransport(clientCertPath, clientKeyPath, rootCAPath string) (http.RoundTripper, error) {
@@ -306,7 +314,7 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		}
 	}()
 
-	return &GatewayHandler{
+	h := &GatewayHandler{
 		routes:          routes,
 		wasm:            wasm,
 		authToken:       authToken,
@@ -323,7 +331,10 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		aiBilling:       NewAIBillingTracker(),
 		targetLoad:      make(map[string]int),
 		revokedSessions: make(map[string]time.Time),
+		canaryStats:     make(map[string]*canaryStatsRecord),
 	}
+	go h.startCanaryPromotionLoop()
+	return h
 }
 
 // GetAIBillingMetrics returns billing metrics for the admin API.
@@ -1415,6 +1426,20 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	proxy.ServeHTTP(rec, r)
 
+	if len(matchedRoute.TargetsWeighted) > 1 && selectedTarget == matchedRoute.TargetsWeighted[1].URL {
+		h.canaryStatsMu.Lock()
+		stats, ok := h.canaryStats[selectedTarget]
+		if !ok {
+			stats = &canaryStatsRecord{}
+			h.canaryStats[selectedTarget] = stats
+		}
+		stats.TotalCalls++
+		if rec.StatusCode >= 500 {
+			stats.ErrorCalls++
+		}
+		h.canaryStatsMu.Unlock()
+	}
+
 	if rec.StatusCode >= 500 {
 		h.metricsTracker.IncError()
 	}
@@ -2191,3 +2216,87 @@ const docsHTML = `<!DOCTYPE html>
 </body>
 </html>
 `
+
+type canaryStatsRecord struct {
+	TotalCalls int64
+	ErrorCalls int64
+}
+
+func (h *GatewayHandler) startCanaryPromotionLoop() {
+	ticker := time.NewTicker(200 * time.Millisecond) // Fast ticker for responsive testing
+	lastPromoted := make(map[string]time.Time)
+
+	for range ticker.C {
+		h.routesMu.Lock()
+		for i, route := range h.routes {
+			if !route.CanaryAutoPromote || len(route.TargetsWeighted) < 2 {
+				continue
+			}
+
+			stable := &h.routes[i].TargetsWeighted[0]
+			canary := &h.routes[i].TargetsWeighted[1]
+
+			if canary.Weight >= 100 {
+				h.routes[i].CanaryAutoPromote = false
+				continue
+			}
+
+			h.canaryStatsMu.Lock()
+			stats, exists := h.canaryStats[canary.URL]
+			var total, errors int64
+			if exists {
+				total = stats.TotalCalls
+				errors = stats.ErrorCalls
+			}
+			h.canaryStatsMu.Unlock()
+
+			maxErrRate := route.CanaryMaxErrorRate
+			if maxErrRate <= 0 {
+				maxErrRate = 0.01
+			}
+			if total >= 3 && float64(errors)/float64(total) > maxErrRate {
+				log.Printf("[CANARY ENGINE] WARNING: High error rate (%.2f%%) detected on canary target %s. Rolling back to stable!", float64(errors)/float64(total)*100, canary.URL)
+				stable.Weight = 100
+				canary.Weight = 0
+				h.routes[i].CanaryAutoPromote = false
+
+				h.canaryStatsMu.Lock()
+				delete(h.canaryStats, canary.URL)
+				h.canaryStatsMu.Unlock()
+				continue
+			}
+
+			interval := time.Duration(route.CanaryPromoteSec) * time.Second
+			if interval <= 0 {
+				interval = 1 * time.Second // Fast promote defaults for testing
+			}
+			lastTime, ok := lastPromoted[route.Prefix]
+			if !ok {
+				lastPromoted[route.Prefix] = time.Now()
+				continue
+			}
+
+			if time.Since(lastTime) >= interval {
+				step := route.CanaryPromoteStep
+				if step <= 0 {
+					step = 10
+				}
+				canary.Weight += step
+				if canary.Weight > 100 {
+					canary.Weight = 100
+				}
+				stable.Weight = 100 - canary.Weight
+				log.Printf("[CANARY ENGINE] Promoting canary %s weight to %d%% (stable %d%%)", canary.URL, canary.Weight, stable.Weight)
+				lastPromoted[route.Prefix] = time.Now()
+
+				h.canaryStatsMu.Lock()
+				if stats != nil {
+					stats.TotalCalls = 0
+					stats.ErrorCalls = 0
+				}
+				h.canaryStatsMu.Unlock()
+			}
+		}
+		h.routesMu.Unlock()
+	}
+}
