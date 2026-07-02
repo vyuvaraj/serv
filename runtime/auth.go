@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/hmac"
 	"crypto/rsa"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"strings"
@@ -135,19 +137,27 @@ func VerifyToken(token, secretOrProvider string) (map[string]interface{}, error)
 		if !hmac.Equal(sig, expectedSig) {
 			return nil, errors.New("invalid token signature")
 		}
-	} else if strings.HasPrefix(secretOrProvider, "oidc://") {
-		// For OIDC, check issuer matches
-		expectedIssuer := strings.TrimPrefix(secretOrProvider, "oidc://")
-		if iss, exists := claims["iss"]; exists {
-			if issStr, ok := iss.(string); ok && !strings.Contains(issStr, expectedIssuer) {
-				return nil, errors.New("token issuer mismatch")
+	} else if strings.HasPrefix(secretOrProvider, "oidc://") || strings.HasPrefix(secretOrProvider, "servauth://") {
+		var expectedIssuer string
+		if strings.HasPrefix(secretOrProvider, "oidc://") {
+			expectedIssuer = strings.TrimPrefix(secretOrProvider, "oidc://")
+		} else {
+			expectedIssuer = strings.TrimPrefix(secretOrProvider, "servauth://")
+		}
+
+		if strings.HasPrefix(secretOrProvider, "oidc://") {
+			// For OIDC, check issuer matches
+			if iss, exists := claims["iss"]; exists {
+				if issStr, ok := iss.(string); ok && !strings.Contains(issStr, expectedIssuer) {
+					return nil, errors.New("token issuer mismatch")
+				}
 			}
 		}
 
 		// Fetch public key for kid
 		pubKey, err := getOidcAesPublicKey(expectedIssuer, header.Kid)
 		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve OIDC public key: %w", err)
+			return nil, fmt.Errorf("failed to retrieve public key: %w", err)
 		}
 
 		// Verify RS256 signature
@@ -216,27 +226,35 @@ func getOidcAesPublicKey(issuer, kid string) (*rsa.PublicKey, error) {
 
 	// Fetch discovery if URI is not resolved
 	if jwksCacheURI == "" {
-		wellKnownURL := issuer
-		if !strings.HasPrefix(wellKnownURL, "http://") && !strings.HasPrefix(wellKnownURL, "https://") {
-			if strings.HasPrefix(wellKnownURL, "localhost") || strings.HasPrefix(wellKnownURL, "127.0.0.1") {
+		if strings.HasPrefix(authSecretOrProvider, "servauth://") {
+			wellKnownURL := issuer
+			if !strings.HasPrefix(wellKnownURL, "http://") && !strings.HasPrefix(wellKnownURL, "https://") {
 				wellKnownURL = "http://" + wellKnownURL
-			} else {
-				wellKnownURL = "https://" + wellKnownURL
 			}
-		}
-		wellKnownURL = strings.TrimSuffix(wellKnownURL, "/") + "/.well-known/openid-configuration"
+			jwksCacheURI = strings.TrimSuffix(wellKnownURL, "/") + "/.well-known/jwks.json"
+		} else {
+			wellKnownURL := issuer
+			if !strings.HasPrefix(wellKnownURL, "http://") && !strings.HasPrefix(wellKnownURL, "https://") {
+				if strings.HasPrefix(wellKnownURL, "localhost") || strings.HasPrefix(wellKnownURL, "127.0.0.1") {
+					wellKnownURL = "http://" + wellKnownURL
+				} else {
+					wellKnownURL = "https://" + wellKnownURL
+				}
+			}
+			wellKnownURL = strings.TrimSuffix(wellKnownURL, "/") + "/.well-known/openid-configuration"
 
-		resp, err := http.Get(wellKnownURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch OIDC discovery: %w", err)
-		}
-		defer resp.Body.Close()
+			resp, err := http.Get(wellKnownURL)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch OIDC discovery: %w", err)
+			}
+			defer resp.Body.Close()
 
-		var config oidcConfig
-		if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
-			return nil, fmt.Errorf("failed to decode OIDC discovery JSON: %w", err)
+			var config oidcConfig
+			if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+				return nil, fmt.Errorf("failed to decode OIDC discovery JSON: %w", err)
+			}
+			jwksCacheURI = config.JwksURI
 		}
-		jwksCacheURI = config.JwksURI
 	}
 
 	// Fetch JWKS keys
@@ -295,6 +313,45 @@ func AuthRegister(usernameVal, emailVal, passwordVal interface{}) interface{} {
 	email := fmt.Sprint(emailVal)
 	LogInfo(fmt.Sprintf("[Serv-lang] [auth.register] Registering user: %s (%s)", username, email))
 
+	if strings.HasPrefix(authSecretOrProvider, "servauth://") {
+		baseURL := strings.Replace(authSecretOrProvider, "servauth://", "http://", 1)
+		registerURL := strings.TrimSuffix(baseURL, "/") + "/api/auth/register"
+
+		payloadMap := map[string]string{
+			"username": username,
+			"email":    email,
+			"password": fmt.Sprint(passwordVal),
+		}
+		payloadBytes, err := json.Marshal(payloadMap)
+		if err != nil {
+			return &SafeMap{m: map[string]interface{}{"error": err.Error(), "status": 500}}
+		}
+
+		resp, err := http.Post(registerURL, "application/json", bytes.NewReader(payloadBytes))
+		if err != nil {
+			return &SafeMap{m: map[string]interface{}{"error": err.Error(), "status": 500}}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return &SafeMap{m: map[string]interface{}{"error": string(bodyBytes), "status": resp.StatusCode}}
+		}
+
+		m := map[string]interface{}{
+			"username": username,
+			"email":    email,
+			"status":   "registered",
+		}
+		var respMap map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&respMap); err == nil {
+			for k, v := range respMap {
+				m[k] = v
+			}
+		}
+		return &SafeMap{m: m}
+	}
+
 	return &SafeMap{
 		m: map[string]interface{}{
 			"username": username,
@@ -308,6 +365,43 @@ func AuthLogin(usernameVal, passwordVal interface{}) interface{} {
 	username := fmt.Sprint(usernameVal)
 	LogInfo(fmt.Sprintf("[Serv-lang] [auth.login] Logging in user: %s", username))
 
+	if strings.HasPrefix(authSecretOrProvider, "servauth://") {
+		baseURL := strings.Replace(authSecretOrProvider, "servauth://", "http://", 1)
+		loginURL := strings.TrimSuffix(baseURL, "/") + "/api/auth/login"
+
+		payloadMap := map[string]string{
+			"username": username,
+			"password": fmt.Sprint(passwordVal),
+		}
+		payloadBytes, err := json.Marshal(payloadMap)
+		if err != nil {
+			return &SafeMap{m: map[string]interface{}{"error": err.Error(), "status": 500}}
+		}
+
+		resp, err := http.Post(loginURL, "application/json", bytes.NewReader(payloadBytes))
+		if err != nil {
+			return &SafeMap{m: map[string]interface{}{"error": err.Error(), "status": 500}}
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return &SafeMap{m: map[string]interface{}{"error": string(bodyBytes), "status": resp.StatusCode}}
+		}
+
+		m := map[string]interface{}{
+			"token":    "mock-token-for-" + username,
+			"username": username,
+		}
+		var respMap map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&respMap); err == nil {
+			for k, v := range respMap {
+				m[k] = v
+			}
+		}
+		return &SafeMap{m: m}
+	}
+
 	return &SafeMap{
 		m: map[string]interface{}{
 			"token":    "mock-token-for-" + username,
@@ -318,10 +412,70 @@ func AuthLogin(usernameVal, passwordVal interface{}) interface{} {
 
 func AuthCurrentUser(reqVal interface{}) interface{} {
 	LogInfo("[Serv-lang] [auth.currentUser] Resolving current user")
+
+	if strings.HasPrefix(authSecretOrProvider, "servauth://") {
+		token := extractToken(reqVal)
+		if token != "" {
+			claims, err := VerifyToken(token, authSecretOrProvider)
+			if err == nil {
+				username := "guest"
+				if u, ok := claims["sub"].(string); ok {
+					username = u
+				} else if u, ok := claims["username"].(string); ok {
+					username = u
+				}
+				role := "user"
+				if roles, ok := claims["roles"].([]interface{}); ok && len(roles) > 0 {
+					role = fmt.Sprint(roles[0])
+				} else if roles, ok := claims["roles"].([]string); ok && len(roles) > 0 {
+					role = roles[0]
+				}
+				return &SafeMap{
+					m: map[string]interface{}{
+						"username": username,
+						"role":     role,
+						"claims":   claims,
+					},
+				}
+			}
+		}
+	}
+
 	return &SafeMap{
 		m: map[string]interface{}{
 			"username": "guest",
 			"role":     "anonymous",
 		},
 	}
+}
+
+func extractToken(reqVal interface{}) string {
+	if reqVal == nil {
+		return ""
+	}
+	var headers interface{}
+	for _, field := range []string{"headers", "Headers", "params", "Params"} {
+		if val := GetField(reqVal, field); val != nil {
+			headers = val
+			break
+		}
+	}
+	if headers == nil {
+		return ""
+	}
+	var authVal interface{}
+	for _, key := range []string{"authorization", "Authorization"} {
+		authVal = GetField(headers, key)
+		if authVal != nil {
+			break
+		}
+	}
+	if authVal == nil {
+		return ""
+	}
+	authStr := fmt.Sprint(authVal)
+	if strings.HasPrefix(authStr, "Bearer ") {
+		return strings.TrimPrefix(authStr, "Bearer ")
+	}
+	return authStr
 }

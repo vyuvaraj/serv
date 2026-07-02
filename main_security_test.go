@@ -704,6 +704,96 @@ func generateRS256JWT(claims map[string]interface{}, privateKey *rsa.PrivateKey,
 	return signingInput + "." + sigEnc
 }
 
+func TestServAuthConnectionString(t *testing.T) {
+	// Generate RSA key pair for JWKS
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	pubKey := &privKey.PublicKey
+	kid := "test-key-id"
+
+	// Mock server for ServAuth
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/register" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"username":"alice", "email":"alice@example.com", "created_at":"2026-07-02T12:00:00Z"}`))
+			return
+		}
+		if r.URL.Path == "/api/auth/login" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token":"test-jwt-token", "username":"alice"}`))
+			return
+		}
+		if r.URL.Path == "/.well-known/jwks.json" {
+			nStr := base64.RawURLEncoding.EncodeToString(pubKey.N.Bytes())
+			eBytes := big.NewInt(int64(pubKey.E)).Bytes()
+			eStr := base64.RawURLEncoding.EncodeToString(eBytes)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `{"keys":[{"kty":"RSA","use":"sig","alg":"RS256","kid":%q,"n":%q,"e":%q}]}`, kid, nStr, eStr)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	// Parse host/port
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("failed to parse test server URL: %v", err)
+	}
+
+	// Initialize runtime auth with servauth:// connection string
+	connStr := "servauth://" + u.Host
+	runtime.InitAuth(connStr)
+
+	// 1. Test Register
+	regRes := runtime.AuthRegister("alice", "alice@example.com", "password123")
+	smReg, ok := regRes.(*runtime.SafeMap)
+	if !ok {
+		t.Fatalf("expected *runtime.SafeMap, got %T", regRes)
+	}
+	if smReg.Get("username") != "alice" || smReg.Get("status") != "registered" {
+		t.Errorf("unexpected register response: %+v", smReg)
+	}
+
+	// 2. Test Login
+	loginRes := runtime.AuthLogin("alice", "password123")
+	smLogin, ok := loginRes.(*runtime.SafeMap)
+	if !ok {
+		t.Fatalf("expected *runtime.SafeMap, got %T", loginRes)
+	}
+	if smLogin.Get("token") != "test-jwt-token" || smLogin.Get("username") != "alice" {
+		t.Errorf("unexpected login response: %+v", smLogin)
+	}
+
+	// 3. Test CurrentUser with valid token
+	claims := map[string]interface{}{
+		"sub":      "alice",
+		"username": "alice",
+		"roles":    []string{"admin"},
+		"exp":      time.Now().Add(1 * time.Hour).Unix(),
+	}
+	token := generateRS256JWT(claims, privKey, kid)
+
+	req := runtime.NewSafeMap()
+	headers := runtime.NewSafeMap()
+	headers.Set("authorization", "Bearer "+token)
+	req.Set("headers", headers)
+
+	userRes := runtime.AuthCurrentUser(req)
+	smUser, ok := userRes.(*runtime.SafeMap)
+	if !ok {
+		t.Fatalf("expected *runtime.SafeMap, got %T", userRes)
+	}
+	if smUser.Get("username") != "alice" || smUser.Get("role") != "admin" {
+		t.Errorf("unexpected current user response: %+v", smUser)
+	}
+}
+
 
 
 
