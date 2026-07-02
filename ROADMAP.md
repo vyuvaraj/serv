@@ -33,4 +33,17 @@ This roadmap outlines the planned development phases for the ServRegistry packag
 - [ ] **Mirror & Offline Cache** — Local proxy mode that caches the public registry to a ServStore bucket; enables air-gapped builds and faster CI pipelines with zero external fetches (DevOps)
 - [ ] **Provenance Attestation** — Record build provenance (commit SHA, CI run ID, builder identity) alongside the package; verify with `serv verify --attestation` for supply-chain security (Security)
 
-> See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
+## Phase 5: Package Extraction & Scale (Pending — July 2026)
+
+> **Issue:** `main.go` is 1,007 lines. Monolithic structure prevents independent testing and extension.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 5.1 | **Extract `pkg/registry/`** | Medium | Move package storage, versioning, and metadata management into dedicated package | [ ] |
+| 5.2 | **Extract `pkg/resolution/`** | Medium | Move dependency resolution, semver matching, and BFS tree traversal into dedicated package | [ ] |
+| 5.3 | **Extract `pkg/web/`** | Small | Move embedded dashboard handlers and asset serving into dedicated package | [ ] |
+| 5.4 | **Package download stats** | Small | Track download counts per package/version. Surface in dashboard and `serv packages --stats` | [ ] |
+| 5.5 | **Webhook notifications** | Small | Notify on new package publish via configurable webhooks. Useful for CI triggers | [ ] |
+| 5.6 | **Package license scanning** | Medium | Detect and surface package license metadata. Warn on incompatible licenses during `serv install` | [ ] |
+
+> See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
