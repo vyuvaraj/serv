@@ -4,3 +4,5 @@ servqueue.exe
 dist/
 vendor/
 queue.wal
+.wazero-cache-servqueue/
+**/wazero-cache-servqueue/
