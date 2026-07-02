@@ -32,10 +32,8 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [x] **Shared OIDC Authentication**: Enforce bearer token validation via shared `SERV_JWT_SECRET`. [June 29, 2026]
 
 
-## Phase 3: Production-Ready PaaS (Next Level)
-- [x] **Rolling Deployments**: Zero-downtime deploys with health-check gates. Automatic rollback on failure. [June 29, 2026]
+## Phase 5: Production PaaS Features (Next Level — Pending)
 - [ ] **Resource Quotas & Limits**: Per-deployment CPU/memory caps with OOM protection.
-- [x] **Environment Variables Management**: Encrypted env var store per deployment. Secret injection at runtime. [June 29, 2026]
 - [ ] **Secret Injection from ServStore**: Resolve `${{secrets.KEY}}` references from encrypted ServStore bucket at deploy time. Rotate secrets without redeployment.
 - [ ] **ServAuth Integration**: Auto-provision ServAuth OIDC configuration for deployed services. Services get identity management out of the box.
 - [ ] **Build Packs**: Auto-detect project type (Go, Node, Python, Serv) and build without user-provided Dockerfile.
@@ -44,10 +42,10 @@ This roadmap outlines the planned development phases for the ServCloud managed d
 - [ ] **Integrated CI Pipeline**: Run `serv test` before deploy. Reject deploys that fail tests.
 - [ ] **Multi-region Deployment**: Deploy to multiple regions with ServMesh-based global load balancing.
 
-## Phase 4: Architectural Depth & DevOps (Pending)
+## Phase 6: Architectural Depth & DevOps (Pending)
 - [ ] **GitOps Deployment Sync** — Trigger deploys automatically on git push via webhook; store deployment manifest in repository for auditability (OPS.5)
 - [ ] **`serv cloud diff`** — Preview infrastructure changes (environment vars, resources, routes) before applying a deploy — like `terraform plan` for ServCloud (DevOps)
 - [ ] **Deploy Annotations** — Annotate each deploy with commit SHA, author, and changelog; surface in ServConsole timeline and in ServTrace spans for change correlation (DX)
 - [ ] **Local `serv cloud emulate`** — Emulate the full production deploy pipeline locally: health checks, rolling update, rollback — catching breakage before pushing (DX)
 
-> See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
+> See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
