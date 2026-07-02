@@ -253,14 +253,14 @@ func main() {
 	mailProxy := httputil.NewSingleHostReverseProxy(mURL)
 
 	// Adjust Director to rewrite request path and set Authorization headers
-	proxy.ConfigureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken)
-	proxy.ConfigureProxyDirector(storeProxy, sURL, "/api/proxy/store", "")
-	proxy.ConfigureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token")
-	proxy.ConfigureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "")
-	proxy.ConfigureProxyDirector(tunnelProxy, tunURL, "/api/proxy/tunnel", "")
-	proxy.ConfigureProxyDirector(authProxy, aURL, "/api/proxy/auth", "")
-	proxy.ConfigureProxyDirector(dbProxy, dURL, "/api/proxy/db", "")
-	proxy.ConfigureProxyDirector(mailProxy, mURL, "/api/proxy/mail", "")
+	proxy.ConfigureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken, getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(storeProxy, sURL, "/api/proxy/store", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(queueProxy, qURL, "/api/proxy/queue", "secret-token", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(traceProxy, tURL, "/api/proxy/trace", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(tunnelProxy, tunURL, "/api/proxy/tunnel", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(authProxy, aURL, "/api/proxy/auth", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(dbProxy, dURL, "/api/proxy/db", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(mailProxy, mURL, "/api/proxy/mail", "", getProxyActionName, addAuditLog)
 
 	mux := http.NewServeMux()
 
@@ -379,36 +379,7 @@ func main() {
 	}
 }
 
-func configureProxyDirector(proxy *httputil.ReverseProxy, target *url.URL, prefix string, defaultToken string) {
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		// Rewrite Path: remove prefix
-		req.URL.Path = strings.TrimPrefix(req.URL.Path, prefix)
-		if req.URL.Path == "" {
-			req.URL.Path = "/"
-		}
-		// Set Target Host
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.Host = target.Host
 
-		// Set Auth Header if not present
-		if defaultToken != "" && req.Header.Get("Authorization") == "" {
-			req.Header.Set("Authorization", "Bearer "+defaultToken)
-		}
-	}
-
-	proxy.ModifyResponse = func(resp *http.Response) error {
-		req := resp.Request
-		if req != nil && (req.Method == "POST" || req.Method == "PUT" || req.Method == "DELETE") {
-			user := req.Header.Get("X-Console-User")
-			action := getProxyActionName(prefix, req.URL.Path)
-			addAuditLog(user, action, req.Method, req.URL.Path, resp.StatusCode)
-		}
-		return nil
-	}
-}
 
 type APIError struct {
 	Error   string `json:"error"`
