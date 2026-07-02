@@ -28,6 +28,9 @@ type Server struct {
 
 	peers   []string
 	peersMu sync.RWMutex
+
+	activeTables   map[string]bool
+	activeTablesMu sync.RWMutex
 }
 
 func NewServer(primary, replica PoolManager, store *ServShared.StoreClient) *Server {
@@ -39,6 +42,7 @@ func NewServer(primary, replica PoolManager, store *ServShared.StoreClient) *Ser
 		migrations:     make([]Migration, 0),
 		queryCache:     make(map[string]CachedResult),
 		peers:          make([]string, 0),
+		activeTables:   make(map[string]bool),
 	}
 	srv.loadMigrationsFromStore()
 	return srv
@@ -253,12 +257,67 @@ func (srv *Server) handleMigrate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Version int    `json:"version"`
-		Name    string `json:"name"`
-		SQL     string `json:"sql"`
+		Version  int    `json:"version"`
+		Name     string `json:"name"`
+		SQL      string `json:"sql"`
+		Rollback string `json:"rollback"`
+		Action   string `json:"action"` // "migrate" or "rollback"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Action == "rollback" {
+		srv.migrationsMu.Lock()
+		defer srv.migrationsMu.Unlock()
+
+		var targetIdx = -1
+		if req.Version > 0 {
+			for i, m := range srv.migrations {
+				if m.Version == req.Version {
+					targetIdx = i
+					break
+				}
+			}
+		} else if len(srv.migrations) > 0 {
+			targetIdx = len(srv.migrations) - 1
+		}
+
+		if targetIdx == -1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"not_found","message":"Migration version not found to rollback"}`))
+			return
+		}
+
+		targetMigration := srv.migrations[targetIdx]
+		rollbackSQL := targetMigration.Rollback
+		if rollbackSQL == "" {
+			rollbackSQL = req.Rollback
+		}
+
+		created, dropped := ParseTablesFromSQL(rollbackSQL)
+		srv.activeTablesMu.Lock()
+		for _, tbl := range created {
+			srv.activeTables[tbl] = true
+		}
+		for _, tbl := range dropped {
+			delete(srv.activeTables, tbl)
+		}
+		srv.activeTablesMu.Unlock()
+
+		srv.migrations = append(srv.migrations[:targetIdx], srv.migrations[targetIdx+1:]...)
+		srv.saveMigrationsToStore()
+		_ = ServShared.EmitAuditEvent("ServDB", "MIGRATION_ROLLBACK", "system", map[string]interface{}{"version": targetMigration.Version, "name": targetMigration.Name})
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "rolled_back",
+			"version": targetMigration.Version,
+			"name":    targetMigration.Name,
+		})
 		return
 	}
 
@@ -273,14 +332,27 @@ func (srv *Server) handleMigrate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	created, dropped := ParseTablesFromSQL(req.SQL)
+	srv.activeTablesMu.Lock()
+	for _, tbl := range created {
+		srv.activeTables[tbl] = true
+	}
+	for _, tbl := range dropped {
+		delete(srv.activeTables, tbl)
+	}
+	srv.activeTablesMu.Unlock()
+
 	newMigration := Migration{
 		Version:   req.Version,
 		Name:      req.Name,
 		AppliedAt: time.Now(),
+		SQL:       req.SQL,
+		Rollback:  req.Rollback,
 	}
 	srv.migrations = append(srv.migrations, newMigration)
 	srv.migrationsMu.Unlock()
 	srv.saveMigrationsToStore()
+	_ = ServShared.EmitAuditEvent("ServDB", "MIGRATION_APPLY", "system", map[string]interface{}{"version": req.Version, "name": req.Name})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

@@ -592,3 +592,56 @@ func TestDatabaseQueryReplication(t *testing.T) {
 		t.Errorf("expected replicated query %q, got %q", expectedQuery, gotQuery)
 	}
 }
+
+func TestDatabaseMigrationsRollback(t *testing.T) {
+	primaryPool := NewConnectionPool(2, "postgres")
+	replicaPool := NewConnectionPool(2, "postgres")
+	srv := NewServer(primaryPool, replicaPool, nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/db/migrate", srv.handleMigrate)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// 1. Post a new migration creating 'customers' table
+	migratePayload := map[string]interface{}{
+		"version":  10,
+		"name":     "create_customers",
+		"sql":      "CREATE TABLE customers (id INT);",
+		"rollback": "DROP TABLE customers;",
+	}
+	body, _ := json.Marshal(migratePayload)
+	resp, err := http.Post(server.URL+"/api/db/migrate", "application/json", bytes.NewReader(body))
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("failed migration: %v", err)
+	}
+	resp.Body.Close()
+
+	// Check table was registered
+	srv.activeTablesMu.RLock()
+	hasCustomers := srv.activeTables["customers"]
+	srv.activeTablesMu.RUnlock()
+	if !hasCustomers {
+		t.Errorf("expected 'customers' table to be tracked after migration")
+	}
+
+	// 2. Post rollback action for version 10
+	rollbackPayload := map[string]interface{}{
+		"action":  "rollback",
+		"version": 10,
+	}
+	bodyRb, _ := json.Marshal(rollbackPayload)
+	respRb, err := http.Post(server.URL+"/api/db/migrate", "application/json", bytes.NewReader(bodyRb))
+	if err != nil || respRb.StatusCode != http.StatusOK {
+		t.Fatalf("failed rollback request: %v", err)
+	}
+	respRb.Body.Close()
+
+	// Check table was dropped
+	srv.activeTablesMu.RLock()
+	hasCustomersAfterRb := srv.activeTables["customers"]
+	srv.activeTablesMu.RUnlock()
+	if hasCustomersAfterRb {
+		t.Errorf("expected 'customers' table to be untracked after rollback")
+	}
+}
+
