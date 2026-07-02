@@ -141,7 +141,17 @@ var (
 	jwtRSAPrivateKey *rsa.PrivateKey
 	jwtRSAPublicKey  *rsa.PublicKey
 	jwtKeyID         = "servverse-key-v1"
+
+	jwkKeyPairs   []JWKKeyPair
+	jwkKeyPairsMu sync.RWMutex
 )
+
+type JWKKeyPair struct {
+	KeyID      string
+	PrivateKey *rsa.PrivateKey
+	PublicKey  *rsa.PublicKey
+	CreatedAt  time.Time
+}
 
 // hashPassword hashes password using bcrypt
 func hashPassword(password string) (string, error) {
@@ -238,7 +248,7 @@ func encryptAES(plaintext string) (string, error) {
 	return version + ":" + hex.EncodeToString(ciphertext), nil
 }
 
-// decryptAES decrypts versioned ciphertext using AES-GCM
+// decryptAES decrypts versioned ciphertext using AES-GCM, with multi-version fallback.
 func decryptAES(prefixedCiphertext string) (string, error) {
 	parts := strings.SplitN(prefixedCiphertext, ":", 2)
 	var version string
@@ -252,11 +262,39 @@ func decryptAES(prefixedCiphertext string) (string, error) {
 		hexCiphertext = prefixedCiphertext
 	}
 
-	key := getKMSKeyForVersion(version)
 	ciphertext, err := hex.DecodeString(hexCiphertext)
 	if err != nil {
 		return "", err
 	}
+
+	key := getKMSKeyForVersion(version)
+	plaintext, err := decryptWithKey(ciphertext, key)
+	if err == nil {
+		return plaintext, nil
+	}
+
+	kmsMu.RLock()
+	activeVersions := make([]string, 0, len(kmsKeys))
+	for k := range kmsKeys {
+		if k != version {
+			activeVersions = append(activeVersions, k)
+		}
+	}
+	kmsMu.RUnlock()
+
+	for _, v := range activeVersions {
+		key = getKMSKeyForVersion(v)
+		plaintext, err = decryptWithKey(ciphertext, key)
+		if err == nil {
+			log.Printf("[INFO] Decrypted ciphertext with fallback KMS key version %s", v)
+			return plaintext, nil
+		}
+	}
+
+	return "", fmt.Errorf("decryption failed for all active KMS versions")
+}
+
+func decryptWithKey(ciphertext []byte, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
@@ -387,12 +425,7 @@ func main() {
 	}
 
 	// Initialize RSA key pair for JWKS
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		log.Fatalf("Failed to generate RSA key pair: %v", err)
-	}
-	jwtRSAPrivateKey = privKey
-	jwtRSAPublicKey = &privKey.PublicKey
+	initJWKS()
 
 	initStore()
 
@@ -413,6 +446,8 @@ func main() {
 	mux.HandleFunc("/api/auth/register", handleRegister)
 	mux.HandleFunc("/api/auth/login", handleLogin)
 	mux.HandleFunc("/api/auth/jwks", handleJWKS)
+	mux.HandleFunc("/.well-known/jwks.json", handleJWKS)
+	mux.HandleFunc("/api/auth/rotate-keys", handleRotateJWKS)
 	mux.HandleFunc("/api/auth/reset-password/request", handleResetRequest)
 	mux.HandleFunc("/api/auth/reset-password/confirm", handleResetConfirm)
 	mux.HandleFunc("/oauth/token", handleToken)
@@ -1243,25 +1278,85 @@ func handleJWKS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nStr := base64.RawURLEncoding.EncodeToString(jwtRSAPublicKey.N.Bytes())
-	eBytes := big.NewInt(int64(jwtRSAPublicKey.E)).Bytes()
-	eStr := base64.RawURLEncoding.EncodeToString(eBytes)
+	jwkKeyPairsMu.RLock()
+	defer jwkKeyPairsMu.RUnlock()
+
+	var keys []map[string]interface{}
+	for _, pair := range jwkKeyPairs {
+		nStr := base64.RawURLEncoding.EncodeToString(pair.PublicKey.N.Bytes())
+		eBytes := big.NewInt(int64(pair.PublicKey.E)).Bytes()
+		eStr := base64.RawURLEncoding.EncodeToString(eBytes)
+
+		keys = append(keys, map[string]interface{}{
+			"kty": "RSA",
+			"use": "sig",
+			"alg": "RS256",
+			"kid": pair.KeyID,
+			"n":   nStr,
+			"e":   eStr,
+		})
+	}
 
 	jwks := map[string]interface{}{
-		"keys": []map[string]interface{}{
-			{
-				"kty": "RSA",
-				"use": "sig",
-				"alg": "RS256",
-				"kid": jwtKeyID,
-				"n":   nStr,
-				"e":   eStr,
-			},
-		},
+		"keys": keys,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(jwks)
+}
+
+func initJWKS() {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		log.Fatalf("failed to generate RSA key pair: %v", err)
+	}
+	pub := &priv.PublicKey
+	kid := fmt.Sprintf("servverse-key-%d", time.Now().UnixNano())
+
+	jwkKeyPairsMu.Lock()
+	jwkKeyPairs = append(jwkKeyPairs, JWKKeyPair{
+		KeyID:      kid,
+		PrivateKey: priv,
+		PublicKey:  pub,
+		CreatedAt:  time.Now(),
+	})
+	jwtRSAPrivateKey = priv
+	jwtRSAPublicKey = pub
+	jwtKeyID = kid
+	jwkKeyPairsMu.Unlock()
+}
+
+func handleRotateJWKS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		http.Error(w, "Key generation failed", http.StatusInternalServerError)
+		return
+	}
+	pub := &priv.PublicKey
+	kid := fmt.Sprintf("servverse-key-%d", time.Now().UnixNano())
+
+	jwkKeyPairsMu.Lock()
+	jwkKeyPairs = append(jwkKeyPairs, JWKKeyPair{
+		KeyID:      kid,
+		PrivateKey: priv,
+		PublicKey:  pub,
+		CreatedAt:  time.Now(),
+	})
+	jwtRSAPrivateKey = priv
+	jwtRSAPublicKey = pub
+	jwtKeyID = kid
+	jwkKeyPairsMu.Unlock()
+
+	_ = ServShared.EmitAuditEvent("ServAuth", "JWKS_ROTATE", "system", nil)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf(`{"status":"success","rotated_to":"%s"}`, kid)))
 }
 
