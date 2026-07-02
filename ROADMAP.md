@@ -122,7 +122,25 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 
 
 ## Phase 11: Production Readiness (External Audit - Completed)
-- [x] **ServConsole Package Decomposition** — Split 3,277-line main.go into pkg/proxy/, pkg/ws/, pkg/ai/, pkg/incidents/, each independently testable (ARCH.6)
-- [x] **Plugin Panel Architecture** — Console panels as independently compiled WASM modules loaded at runtime; adding a panel doesn't require recompiling core (ARCH.7)
-- [x] **Tenant Admin Console** — Tenant selector UI; switching tenants invalidates the current session scope and re-fetches tenant-scoped data (SEC.14)
-- [x] **SLO Baseline Definitions** — Default SLOs (p99 latency, error rate) for each service surfaced in the SLO dashboard with pre-configured error budgets (OPS.8)
+- [x] **ServConsole Package Decomposition** â€” Split 3,277-line main.go into pkg/proxy/, pkg/ws/, pkg/ai/, pkg/incidents/, each independently testable (ARCH.6)
+- [x] **Plugin Panel Architecture** â€” Console panels as independently compiled WASM modules loaded at runtime; adding a panel doesn't require recompiling core (ARCH.7)
+- [x] **Tenant Admin Console** â€” Tenant selector UI; switching tenants invalidates the current session scope and re-fetches tenant-scoped data (SEC.14)
+- [x] **SLO Baseline Definitions** â€” Default SLOs (p99 latency, error rate) for each service surfaced in the SLO dashboard with pre-configured error budgets (OPS.8)
+
+---
+
+## Phase 12: Structural Depth & Real Decomposition (Pending â€” July 2026)
+
+> **Issue identified:** Despite Phase 11 marking ARCH.6 complete, `main.go` remains 3,441 lines and `pkg/` contains only 126 lines of stubs. True extraction is required.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 12.1 | **Extract proxy handlers** | Large | Move all service proxy logic (ServGate, ServStore, ServQueue, ServAuth, etc.) from main.go into `pkg/proxy/` with proper handler structs and interfaces | [ ] |
+| 12.2 | **Extract WebSocket push engine** | Medium | Move real-time dashboard push (metrics, logs, traces) into `pkg/ws/` with subscriber management | [ ] |
+| 12.3 | **Extract dashboard tab controllers** | Large | Each dashboard tab (Gateway, Storage, Queue, Auth, DB, etc.) becomes its own package under `pkg/tabs/` | [ ] |
+| 12.4 | **Extract AI/incident panels** | Medium | Move AI agent observatory and incident timeline logic into `pkg/ai/` and `pkg/incidents/` properly | [ ] |
+| 12.5 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to auto-build dependency graph (7.3). Requires dedicated `pkg/topology/` | [ ] |
+| 12.6 | **Plugin architecture completion** | Large | Full plugin loading runtime (7.10). WASM-based console panels with sandboxed rendering | [ ] |
+| 12.7 | **main.go target: <300 lines** | â€” | After extraction, main.go should only contain server setup, route registration, and startup/shutdown | [ ] |
+
+> See [UNIFIED_ROADMAP.md](../../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
