@@ -179,9 +179,10 @@ func ParseServToml(content string) (string, string, []string, error) {
 		if inDependenciesSection {
 			dependencies = append(dependencies, fmt.Sprintf("%s@%s", k, v))
 		} else {
-			if k == "name" {
+			switch k {
+			case "name":
 				name = v
-			} else if k == "version" {
+			case "version":
 				version = v
 			}
 		}
