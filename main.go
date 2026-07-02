@@ -1,9 +1,7 @@
 package main
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/ed25519"
 	"crypto/hmac"
@@ -20,7 +18,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,6 +29,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/vyuvaraj/ServShared"
+	"servregistry/pkg/registry"
+	"servregistry/pkg/resolution"
 )
 
 //go:embed web/*
@@ -42,37 +41,8 @@ var (
 	bucketName = "serv-packages"
 
 	packageIndexMu sync.RWMutex
-	packageIndex   = make(map[string]*PackageIndexItem)
+	packageIndex   = make(map[string]*registry.PackageIndexItem)
 )
-
-type PackageIndexItem struct {
-	Name         string    `json:"name"`
-	Latest       string    `json:"latest"`
-	Versions     []string  `json:"versions"`
-	LastModified time.Time `json:"lastModified"`
-}
-
-type PackageMetadata struct {
-	Name           string                    `json:"name"`
-	Versions       map[string]VersionDetails `json:"versions"`
-	Deprecated     bool                      `json:"deprecated,omitempty"`
-	DeprecationMsg string                    `json:"deprecationMsg,omitempty"`
-}
-
-type VersionDetails struct {
-	Version        string   `json:"version"`
-	Dependencies   []string `json:"dependencies"`
-	Size           int64    `json:"size"`
-	PublishedAt    string   `json:"publishedAt"`
-	Deprecated     bool     `json:"deprecated,omitempty"`
-	DeprecationMsg string   `json:"deprecationMsg,omitempty"`
-}
-
-type PackageInfo struct {
-	Name         string    `json:"name"`
-	Size         int64     `json:"size"`
-	LastModified time.Time `json:"lastModified"`
-}
 
 func main() {
 	addr := flag.String("addr", ":8088", "Registry server listen address")
@@ -258,7 +228,7 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Parse serv.toml from uploaded tar.gz
-	name, version, deps, err := parseServTomlFromTarGz(data)
+	name, version, deps, err := resolution.ParseServTomlFromTarGz(data)
 	if err != nil {
 		// Fallback to query parameter name & default version
 		log.Printf("Manifest parsing failed or not found: %v. Using fallback", err)
@@ -286,9 +256,9 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 
 	// 3. Update metadata.json on S3
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
-	var metadata PackageMetadata
+	var metadata registry.PackageMetadata
 	metadata.Name = name
-	metadata.Versions = make(map[string]VersionDetails)
+	metadata.Versions = make(map[string]registry.VersionDetails)
 
 	// Try to load existing metadata.json
 	metaResp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
@@ -304,7 +274,7 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add/update version details
-	metadata.Versions[version] = VersionDetails{
+	metadata.Versions[version] = registry.VersionDetails{
 		Version:      version,
 		Dependencies: deps,
 		Size:         int64(len(data)),
@@ -371,7 +341,7 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 			latest = v
 		}
 	}
-	packageIndex[name] = &PackageIndexItem{
+	packageIndex[name] = &registry.PackageIndexItem{
 		Name:         name,
 		Latest:       latest,
 		Versions:     versions,
@@ -418,10 +388,10 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 			})
 			if err == nil {
 				defer metaResp.Body.Close()
-				var metadata PackageMetadata
+				var metadata registry.PackageMetadata
 				metaData, merr := io.ReadAll(metaResp.Body)
 				if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
-					version = resolveBestVersion(version, metadata.Versions)
+					version = resolution.ResolveBestVersion(version, metadata.Versions)
 				}
 			}
 		}
@@ -437,7 +407,7 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 			s3Key = path
 		} else {
 			defer metaResp.Body.Close()
-			var metadata PackageMetadata
+			var metadata registry.PackageMetadata
 			metaData, merr := io.ReadAll(metaResp.Body)
 			if merr == nil && json.Unmarshal(metaData, &metadata) == nil && len(metadata.Versions) > 0 {
 				var latest string
@@ -494,7 +464,7 @@ func handleListPackages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	packageIndexMu.RLock()
-	packages := make([]PackageIndexItem, 0, len(packageIndex))
+	packages := make([]registry.PackageIndexItem, 0, len(packageIndex))
 	for _, item := range packageIndex {
 		packages = append(packages, *item)
 	}
@@ -560,7 +530,7 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var metadata PackageMetadata
+	var metadata registry.PackageMetadata
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		WriteJSONError(w, r, "Failed to parse metadata", "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
@@ -577,7 +547,7 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
-		version = resolveBestVersion(version, metadata.Versions)
+		version = resolution.ResolveBestVersion(version, metadata.Versions)
 	}
 
 	versionDetails, ok := metadata.Versions[version]
@@ -628,7 +598,7 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 		depData, _ := io.ReadAll(depResp.Body)
 		depResp.Body.Close()
 
-		var depMeta PackageMetadata
+		var depMeta registry.PackageMetadata
 		if err := json.Unmarshal(depData, &depMeta); err != nil {
 			continue
 		}
@@ -700,7 +670,7 @@ func handleSearchPackages(w http.ResponseWriter, r *http.Request) {
 	query := strings.ToLower(r.URL.Query().Get("q"))
 
 	packageIndexMu.RLock()
-	results := []*PackageIndexItem{}
+	results := []*registry.PackageIndexItem{}
 	for name, item := range packageIndex {
 		if query == "" || strings.Contains(strings.ToLower(name), query) {
 			results = append(results, item)
@@ -724,7 +694,7 @@ func buildPackageIndex(ctx context.Context) {
 	packageIndexMu.Lock()
 	defer packageIndexMu.Unlock()
 
-	packageIndex = make(map[string]*PackageIndexItem)
+	packageIndex = make(map[string]*registry.PackageIndexItem)
 
 	for _, obj := range resp.Contents {
 		key := *obj.Key
@@ -742,7 +712,7 @@ func buildPackageIndex(ctx context.Context) {
 				continue
 			}
 
-			var meta PackageMetadata
+			var meta registry.PackageMetadata
 			if err := json.Unmarshal(data, &meta); err == nil {
 				versions := []string{}
 				var latest string
@@ -757,7 +727,7 @@ func buildPackageIndex(ctx context.Context) {
 						latest = v
 					}
 				}
-				packageIndex[meta.Name] = &PackageIndexItem{
+				packageIndex[meta.Name] = &registry.PackageIndexItem{
 					Name:         meta.Name,
 					Latest:       latest,
 					Versions:     versions,
@@ -769,80 +739,7 @@ func buildPackageIndex(ctx context.Context) {
 	log.Printf("Package index built: %d packages found", len(packageIndex))
 }
 
-func parseServTomlFromTarGz(data []byte) (string, string, []string, error) {
-	gr, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return "", "", nil, err
-	}
-	defer gr.Close()
 
-	tr := tar.NewReader(gr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", "", nil, err
-		}
-
-		if filepath.Base(hdr.Name) == "serv.toml" {
-			var buf bytes.Buffer
-			if _, err := io.Copy(&buf, tr); err != nil {
-				return "", "", nil, err
-			}
-			return parseServToml(buf.String())
-		}
-	}
-	return "", "", nil, fmt.Errorf("serv.toml not found in package archive")
-}
-
-func parseServToml(content string) (string, string, []string, error) {
-	var name, version string
-	var dependencies []string
-
-	lines := strings.Split(content, "\n")
-	inDependenciesSection := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section := strings.TrimSpace(line[1 : len(line)-1])
-			if section == "dependencies" {
-				inDependenciesSection = true
-			} else {
-				inDependenciesSection = false
-			}
-			continue
-		}
-
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		k := strings.TrimSpace(parts[0])
-		v := strings.TrimSpace(parts[1])
-		if (strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"")) ||
-			(strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'")) {
-			v = v[1 : len(v)-1]
-		}
-
-		if inDependenciesSection {
-			dependencies = append(dependencies, fmt.Sprintf("%s@%s", k, v))
-		} else {
-			if k == "name" {
-				name = v
-			} else if k == "version" {
-				version = v
-			}
-		}
-	}
-	return name, version, dependencies, nil
-}
 
 func validateJWT(tokenStr string, secret []byte) (string, bool) {
 	parts := strings.Split(tokenStr, ".")
@@ -996,7 +893,7 @@ func handleDeprecate(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	metaData, _ := io.ReadAll(resp.Body)
-	var metadata PackageMetadata
+	var metadata registry.PackageMetadata
 	_ = json.Unmarshal(metaData, &metadata)
 
 	vd, ok := metadata.Versions[version]
@@ -1025,106 +922,7 @@ func handleDeprecate(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"success":true,"message":"Version deprecated successfully"}`))
 }
 
-func parseSemver(v string) (int, int, int, error) {
-	v = strings.TrimPrefix(v, "v")
-	parts := strings.Split(v, ".")
-	if len(parts) != 3 {
-		return 0, 0, 0, fmt.Errorf("invalid semver: %s", v)
-	}
-	major, err1 := strconv.Atoi(parts[0])
-	minor, err2 := strconv.Atoi(parts[1])
-	patch, err3 := strconv.Atoi(parts[2])
-	if err1 != nil || err2 != nil || err3 != nil {
-		return 0, 0, 0, fmt.Errorf("invalid semver integers: %s", v)
-	}
-	return major, minor, patch, nil
-}
 
-func matchSemver(rangeStr, versionStr string) bool {
-	if rangeStr == "" || rangeStr == "*" || rangeStr == "latest" {
-		return true
-	}
-	if rangeStr == versionStr {
-		return true
-	}
-
-	vMaj, vMin, vPat, err := parseSemver(versionStr)
-	if err != nil {
-		return false
-	}
-
-	if strings.HasPrefix(rangeStr, "^") {
-		rStr := strings.TrimPrefix(rangeStr, "^")
-		rMaj, rMin, rPat, err := parseSemver(rStr)
-		if err != nil {
-			return false
-		}
-		if vMaj != rMaj {
-			return false
-		}
-		if vMin < rMin {
-			return false
-		}
-		if vMin == rMin && vPat < rPat {
-			return false
-		}
-		return true
-	}
-
-	if strings.HasPrefix(rangeStr, "~") {
-		rStr := strings.TrimPrefix(rangeStr, "~")
-		rMaj, rMin, rPat, err := parseSemver(rStr)
-		if err != nil {
-			return false
-		}
-		if vMaj != rMaj || vMin != rMin {
-			return false
-		}
-		if vPat < rPat {
-			return false
-		}
-		return true
-	}
-
-	return false
-}
-
-func resolveBestVersion(rangeStr string, versions map[string]VersionDetails) string {
-	var bestVersion string
-	var bestMaj, bestMin, bestPat int
-	found := false
-
-	for v := range versions {
-		if matchSemver(rangeStr, v) {
-			maj, min, pat, err := parseSemver(v)
-			if err != nil {
-				continue
-			}
-			if !found {
-				bestVersion = v
-				bestMaj, bestMin, bestPat = maj, min, pat
-				found = true
-				continue
-			}
-			if maj > bestMaj {
-				bestVersion = v
-				bestMaj, bestMin, bestPat = maj, min, pat
-			} else if maj == bestMaj {
-				if min > bestMin {
-					bestVersion = v
-					bestMaj, bestMin, bestPat = maj, min, pat
-				} else if min == bestMin {
-					if pat > bestPat {
-						bestVersion = v
-						bestMaj, bestMin, bestPat = maj, min, pat
-					}
-				}
-			}
-		}
-	}
-
-	return bestVersion
-}
 
 func checkDeprecationsAndAddHeader(w http.ResponseWriter, ctx context.Context, name, version string) {
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
@@ -1134,7 +932,7 @@ func checkDeprecationsAndAddHeader(w http.ResponseWriter, ctx context.Context, n
 	})
 	if err == nil {
 		defer resp.Body.Close()
-		var metadata PackageMetadata
+		var metadata registry.PackageMetadata
 		metaData, merr := io.ReadAll(resp.Body)
 		if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
 			if vd, ok := metadata.Versions[version]; ok && vd.Deprecated {

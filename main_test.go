@@ -14,6 +14,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"servregistry/pkg/registry"
+	"servregistry/pkg/resolution"
 )
 
 func TestParseServToml(t *testing.T) {
@@ -25,7 +28,7 @@ version = "1.2.3"
 pkg1 = "0.1.0"
 pkg2 = "1.0.0"
 `
-	name, version, deps, err := parseServToml(tomlContent)
+	name, version, deps, err := resolution.ParseServToml(tomlContent)
 	if err != nil {
 		t.Fatalf("Failed to parse TOML: %v", err)
 	}
@@ -66,7 +69,7 @@ version = "3.2.1"
 	tw.Close()
 	gw.Close()
 
-	name, version, _, err := parseServTomlFromTarGz(buf.Bytes())
+	name, version, _, err := resolution.ParseServTomlFromTarGz(buf.Bytes())
 	if err != nil {
 		t.Fatalf("Failed to parse from tar.gz: %v", err)
 	}
@@ -163,27 +166,27 @@ func TestSemverMatching(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		got := matchSemver(tc.rangeStr, tc.versionStr)
+		got := resolution.MatchSemver(tc.rangeStr, tc.versionStr)
 		if got != tc.expected {
-			t.Errorf("matchSemver(%q, %q) = %t; want %t", tc.rangeStr, tc.versionStr, got, tc.expected)
+			t.Errorf("resolution.MatchSemver(%q, %q) = %t; want %t", tc.rangeStr, tc.versionStr, got, tc.expected)
 		}
 	}
 }
 
 func TestResolveBestVersion(t *testing.T) {
-	versions := map[string]VersionDetails{
+	versions := map[string]registry.VersionDetails{
 		"1.2.0": {Version: "1.2.0"},
 		"1.2.5": {Version: "1.2.5"},
 		"1.3.0": {Version: "1.3.0"},
 		"2.0.0": {Version: "2.0.0"},
 	}
 
-	best := resolveBestVersion("^1.2.0", versions)
+	best := resolution.ResolveBestVersion("^1.2.0", versions)
 	if best != "1.3.0" {
 		t.Errorf("Expected best version to be '1.3.0', got '%s'", best)
 	}
 
-	bestTilde := resolveBestVersion("~1.2.0", versions)
+	bestTilde := resolution.ResolveBestVersion("~1.2.0", versions)
 	if bestTilde != "1.2.5" {
 		t.Errorf("Expected best version to be '1.2.5', got '%s'", bestTilde)
 	}
@@ -266,7 +269,7 @@ func BenchmarkPackageIndexLookup(b *testing.B) {
 	packageIndexMu.Lock()
 	for i := 0; i < 500; i++ {
 		name := fmt.Sprintf("pkg-%d", i)
-		packageIndex[name] = &PackageIndexItem{
+		packageIndex[name] = &registry.PackageIndexItem{
 			Name:   name,
 			Latest: "1.0.0",
 			Versions: []string{"0.9.0", "1.0.0"},
