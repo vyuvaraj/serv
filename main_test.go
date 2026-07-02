@@ -11,12 +11,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"servflow/pkg/storage"
 )
 
 func setupTest() {
 	mu.Lock()
-	definitions = make(map[string]WorkflowDef)
-	instances = make(map[string]*WorkflowInstance)
+	definitions = make(map[string]storage.WorkflowDef)
+	instances = make(map[string]*storage.WorkflowInstance)
 	mu.Unlock()
 }
 
@@ -30,10 +32,10 @@ func TestServFlowDAGExecution(t *testing.T) {
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 
-	// 1. Define DAG Workflow: Task A -> Task B (depends on A)
-	defPayload := WorkflowDef{
+	// 1. Define DAG Workflow: storage.Task A -> storage.Task B (depends on A)
+	defPayload := storage.WorkflowDef{
 		ID: "onboarding-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "CreateUser", DependsOn: nil, Action: "success"},
 			{Name: "SendWelcomeEmail", DependsOn: []string{"CreateUser"}, Action: "success"},
 		},
@@ -57,7 +59,7 @@ func TestServFlowDAGExecution(t *testing.T) {
 		t.Fatalf("failed to execute workflow: %v", err)
 	}
 
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
@@ -66,7 +68,7 @@ func TestServFlowDAGExecution(t *testing.T) {
 	}
 
 	// Poll for workflow completion (up to 1.5 seconds)
-	var finalInst WorkflowInstance
+	var finalInst storage.WorkflowInstance
 	for i := 0; i < 30; i++ {
 		getResp, err := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
 		if err == nil {
@@ -99,10 +101,10 @@ func TestServFlowDurableExecution(t *testing.T) {
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 
-	// 1. Define Workflow: Task 1 -> Task 2 (designed to fail first!)
-	defPayload := WorkflowDef{
+	// 1. Define Workflow: storage.Task 1 -> storage.Task 2 (designed to fail first!)
+	defPayload := storage.WorkflowDef{
 		ID: "durable-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "Task1", DependsOn: nil, Action: "success"},
 			{Name: "Task2", DependsOn: []string{"Task1"}, Action: "fail"}, // will fail!
 		},
@@ -115,7 +117,7 @@ func TestServFlowDurableExecution(t *testing.T) {
 	execPayload := map[string]string{"workflow_id": "durable-flow"}
 	execBody, _ := json.Marshal(execPayload)
 	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
@@ -124,7 +126,7 @@ func TestServFlowDurableExecution(t *testing.T) {
 
 	// Verify failed status
 	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst WorkflowInstance
+	var finalInst storage.WorkflowInstance
 	json.NewDecoder(getResp.Body).Decode(&finalInst)
 	getResp.Body.Close()
 
@@ -132,7 +134,7 @@ func TestServFlowDurableExecution(t *testing.T) {
 		t.Fatalf("expected workflow to fail, got %q", finalInst.Status)
 	}
 
-	// 3. Fix Task 2 Action in the definition so it succeeds on retry
+	// 3. Fix storage.Task 2 Action in the definition so it succeeds on retry
 	defPayload.Tasks[1].Action = "success"
 	body2, _ := json.Marshal(defPayload)
 	resp2, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body2))
@@ -146,7 +148,7 @@ func TestServFlowDurableExecution(t *testing.T) {
 		t.Fatalf("failed to resume workflow: %v", err)
 	}
 
-	var resumedInst WorkflowInstance
+	var resumedInst storage.WorkflowInstance
 	json.NewDecoder(resumeResp.Body).Decode(&resumedInst)
 	resumeResp.Body.Close()
 
@@ -159,7 +161,7 @@ func TestServFlowDurableExecution(t *testing.T) {
 
 	// Verify completed successfully!
 	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst2 WorkflowInstance
+	var finalInst2 storage.WorkflowInstance
 	json.NewDecoder(getResp2.Body).Decode(&finalInst2)
 	getResp2.Body.Close()
 
@@ -182,10 +184,10 @@ func TestServFlowSagaCompensation(t *testing.T) {
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 
-	// Define DAG with compensation actions: Task A (success, with rollback) -> Task B (fail)
-	defPayload := WorkflowDef{
+	// Define DAG with compensation actions: storage.Task A (success, with rollback) -> storage.Task B (fail)
+	defPayload := storage.WorkflowDef{
 		ID: "saga-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "ChargeCard", DependsOn: nil, Action: "success", CompensateAction: "RefundCard"},
 			{Name: "ReserveSeat", DependsOn: []string{"ChargeCard"}, Action: "fail"}, // triggers failure and rollback
 		},
@@ -198,7 +200,7 @@ func TestServFlowSagaCompensation(t *testing.T) {
 	execPayload := map[string]string{"workflow_id": "saga-flow"}
 	execBody, _ := json.Marshal(execPayload)
 	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
@@ -207,7 +209,7 @@ func TestServFlowSagaCompensation(t *testing.T) {
 
 	// Query Instance status
 	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst WorkflowInstance
+	var finalInst storage.WorkflowInstance
 	json.NewDecoder(getResp.Body).Decode(&finalInst)
 	getResp.Body.Close()
 
@@ -247,10 +249,10 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 
-	// 1. Define DAG Workflow with Retry: Task A fails, but retries up to 2 times
-	defPayloadRetry := WorkflowDef{
+	// 1. Define DAG Workflow with Retry: storage.Task A fails, but retries up to 2 times
+	defPayloadRetry := storage.WorkflowDef{
 		ID: "retry-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "RetryTask", DependsOn: nil, Action: "fail", RetryCount: 2},
 		},
 	}
@@ -262,7 +264,7 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 	execPayload := map[string]string{"workflow_id": "retry-flow"}
 	execBody, _ := json.Marshal(execPayload)
 	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
@@ -271,7 +273,7 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 
 	// Query Instance status
 	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst WorkflowInstance
+	var finalInst storage.WorkflowInstance
 	json.NewDecoder(getResp.Body).Decode(&finalInst)
 	getResp.Body.Close()
 
@@ -292,10 +294,10 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 	}
 	_ = os.Remove(inst.ID + ".state")
 
-	// 2. Define DAG Workflow with Timeout: Task A sleeps 100ms, but has a 30ms timeout
-	defPayloadTimeout := WorkflowDef{
+	// 2. Define DAG Workflow with Timeout: storage.Task A sleeps 100ms, but has a 30ms timeout
+	defPayloadTimeout := storage.WorkflowDef{
 		ID: "timeout-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "SlowTask", DependsOn: nil, Action: "sleep-100", TimeoutMs: 30},
 		},
 	}
@@ -307,7 +309,7 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 	execPayload2 := map[string]string{"workflow_id": "timeout-flow"}
 	execBody2, _ := json.Marshal(execPayload2)
 	execResp2, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody2))
-	var inst2 WorkflowInstance
+	var inst2 storage.WorkflowInstance
 	json.NewDecoder(execResp2.Body).Decode(&inst2)
 	execResp2.Body.Close()
 
@@ -316,7 +318,7 @@ func TestServFlowRetriesAndTimeouts(t *testing.T) {
 
 	// Query Instance status
 	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst2.ID)
-	var finalInst2 WorkflowInstance
+	var finalInst2 storage.WorkflowInstance
 	json.NewDecoder(getResp2.Body).Decode(&finalInst2)
 	getResp2.Body.Close()
 
@@ -349,10 +351,10 @@ func TestServFlowHumanApprovalGates(t *testing.T) {
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 
-	// Define DAG Workflow with Approval: Task A (success) -> Task B (approval) -> Task C (success)
-	defPayload := WorkflowDef{
+	// Define DAG Workflow with Approval: storage.Task A (success) -> storage.Task B (approval) -> storage.Task C (success)
+	defPayload := storage.WorkflowDef{
 		ID: "approval-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "TaskA", DependsOn: nil, Action: "success"},
 			{Name: "TaskB", DependsOn: []string{"TaskA"}, Action: "approval"},
 			{Name: "TaskC", DependsOn: []string{"TaskB"}, Action: "success"},
@@ -366,16 +368,16 @@ func TestServFlowHumanApprovalGates(t *testing.T) {
 	execPayload := map[string]string{"workflow_id": "approval-flow"}
 	execBody, _ := json.Marshal(execPayload)
 	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
-	// Wait briefly for Task A to complete and Task B to pause
+	// Wait briefly for storage.Task A to complete and storage.Task B to pause
 	time.Sleep(100 * time.Millisecond)
 
 	// Query Instance status - should be "paused"
 	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst WorkflowInstance
+	var finalInst storage.WorkflowInstance
 	json.NewDecoder(getResp.Body).Decode(&finalInst)
 	getResp.Body.Close()
 
@@ -386,7 +388,7 @@ func TestServFlowHumanApprovalGates(t *testing.T) {
 		t.Errorf("expected TaskB to be pending_approval, got %q", finalInst.TaskStates["TaskB"].Status)
 	}
 
-	// Approve task manually
+	// Approve storage.Task manually
 	approvePayload := map[string]string{
 		"instance_id": inst.ID,
 		"task_name":   "TaskB",
@@ -401,7 +403,7 @@ func TestServFlowHumanApprovalGates(t *testing.T) {
 
 	// Verify completed successfully!
 	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst2 WorkflowInstance
+	var finalInst2 storage.WorkflowInstance
 	json.NewDecoder(getResp2.Body).Decode(&finalInst2)
 	getResp2.Body.Close()
 
@@ -428,9 +430,9 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 	defer testServer.Close()
 
 	// 1. Define DAG Workflow
-	defPayload := WorkflowDef{
+	defPayload := storage.WorkflowDef{
 		ID: "replay-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "Task1", DependsOn: nil, Action: "success"},
 		},
 	}
@@ -442,7 +444,7 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 	execPayload := map[string]string{"workflow_id": "replay-flow"}
 	execBody, _ := json.Marshal(execPayload)
 	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
@@ -456,7 +458,7 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 	}
 	defer histResp.Body.Close()
 
-	var history []WorkflowInstance
+	var history []storage.WorkflowInstance
 	json.NewDecoder(histResp.Body).Decode(&history)
 
 	found := false
@@ -483,7 +485,7 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 		t.Fatalf("expected StatusCreated, got %d", replayResp.StatusCode)
 	}
 
-	var replayInst WorkflowInstance
+	var replayInst storage.WorkflowInstance
 	json.NewDecoder(replayResp.Body).Decode(&replayInst)
 
 	if replayInst.ID == "" || replayInst.ID == inst.ID {
@@ -495,7 +497,7 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 
 	// Verify replay completed successfully!
 	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + replayInst.ID)
-	var finalReplay WorkflowInstance
+	var finalReplay storage.WorkflowInstance
 	json.NewDecoder(getResp.Body).Decode(&finalReplay)
 	getResp.Body.Close()
 
@@ -517,9 +519,9 @@ func TestServFlowDAGValidationAndVisualization(t *testing.T) {
 	defer testServer.Close()
 
 	// 1. Send cyclic workflow def -> should fail validation (400 Bad Request)
-	cyclicPayload := WorkflowDef{
+	cyclicPayload := storage.WorkflowDef{
 		ID: "cyclic-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "TaskA", DependsOn: []string{"TaskB"}},
 			{Name: "TaskB", DependsOn: []string{"TaskA"}},
 		},
@@ -545,9 +547,9 @@ func TestServFlowDAGValidationAndVisualization(t *testing.T) {
 	}
 
 	// 2. Send valid DAG -> should succeed validation (200 OK)
-	validPayload := WorkflowDef{
+	validPayload := storage.WorkflowDef{
 		ID: "valid-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "TaskA", DependsOn: nil},
 			{Name: "TaskB", DependsOn: []string{"TaskA"}},
 		},
@@ -587,13 +589,13 @@ func TestTableDrivenWorkflowValidation(t *testing.T) {
 	tests := []struct {
 		name       string
 		id         string
-		tasks      []Task
+		tasks      []storage.Task
 		wantStatus int
 	}{
 		{
 			name:       "Missing ID",
 			id:         "",
-			tasks:      []Task{{Name: "TaskA"}},
+			tasks:      []storage.Task{{Name: "TaskA"}},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
@@ -606,7 +608,7 @@ func TestTableDrivenWorkflowValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			payload := WorkflowDef{
+			payload := storage.WorkflowDef{
 				ID:    tt.id,
 				Tasks: tt.tasks,
 			}
@@ -630,9 +632,9 @@ func BenchmarkWorkflowDefinitionLookup(b *testing.B) {
 	for i := 0; i < 1000; i++ {
 		wfID := fmt.Sprintf("workflow-%d", i)
 		mu.Lock()
-		definitions[wfID] = WorkflowDef{
+		definitions[wfID] = storage.WorkflowDef{
 			ID: wfID,
-			Tasks: []Task{
+			Tasks: []storage.Task{
 				{Name: "step-a", Action: "mock-success"},
 				{Name: "step-b", DependsOn: []string{"step-a"}, Action: "mock-success"},
 			},
@@ -702,9 +704,9 @@ func TestEventDrivenSagaCompensation(t *testing.T) {
 	testServer := httptest.NewServer(mux)
 	defer testServer.Close()
 
-	defPayload := WorkflowDef{
+	defPayload := storage.WorkflowDef{
 		ID: "event-saga-flow",
-		Tasks: []Task{
+		Tasks: []storage.Task{
 			{Name: "ChargeCard", DependsOn: nil, Action: "success", CompensateAction: "event://RefundCard"},
 			{Name: "ReserveSeat", DependsOn: []string{"ChargeCard"}, Action: "fail"},
 		},
@@ -716,14 +718,14 @@ func TestEventDrivenSagaCompensation(t *testing.T) {
 	execPayload := map[string]string{"workflow_id": "event-saga-flow"}
 	execBody, _ := json.Marshal(execPayload)
 	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
-	var inst WorkflowInstance
+	var inst storage.WorkflowInstance
 	json.NewDecoder(execResp.Body).Decode(&inst)
 	execResp.Body.Close()
 
 	time.Sleep(150 * time.Millisecond)
 
 	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var intermediateInst WorkflowInstance
+	var intermediateInst storage.WorkflowInstance
 	json.NewDecoder(getResp.Body).Decode(&intermediateInst)
 	getResp.Body.Close()
 
@@ -743,7 +745,7 @@ func TestEventDrivenSagaCompensation(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	getResp2, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
-	var finalInst WorkflowInstance
+	var finalInst storage.WorkflowInstance
 	json.NewDecoder(getResp2.Body).Decode(&finalInst)
 	getResp2.Body.Close()
 
