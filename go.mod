@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/vyuvaraj/ServShared v0.0.0-20260627072934-fdbc3a616721
+	github.com/vyuvaraj/ServShared v0.0.0-20260630111408-9e466aadce49
 	golang.org/x/crypto v0.53.0
 )
 
