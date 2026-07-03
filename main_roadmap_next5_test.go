@@ -66,3 +66,46 @@ func TestServLangNext5RoadmapItems(t *testing.T) {
 		t.Error("Expected no tests to fail")
 	}
 }
+
+func TestServQueueStreamDSL(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_stream_dsl_*.srv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	srvContent := `
+	test "verify stream DSL compiles and runs" {
+		let orders = stream "orders" |> filter(fn(o) { return true }) |> window("1s") |> count()
+		assert orders != nil
+	}
+	`
+	if _, err := tmpFile.WriteString(srvContent); err != nil {
+		t.Fatalf("failed to write srv file: %v", err)
+	}
+	tmpFile.Close()
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	done := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
+
+	runTests(tmpFile.Name(), false, "")
+
+	w.Close()
+	os.Stdout = oldStdout
+	output := <-done
+
+	t.Logf("Stream DSL Exec Output:\n%s", output)
+
+	if !strings.Contains(output, "PASS") {
+		t.Error("Expected tests to pass")
+	}
+}

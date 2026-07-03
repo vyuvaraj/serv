@@ -220,6 +220,13 @@ func main() {
 	case "doctor":
 		runDoctor()
 
+	case "cache":
+		if len(os.Args) >= 3 && os.Args[2] == "inspect" {
+			runCacheInspect()
+		} else {
+			fmt.Println("Usage: serv cache inspect [--host <host>]")
+		}
+
 	case "status":
 		runStatus()
 
@@ -238,6 +245,9 @@ func main() {
 
 	case "tunnel":
 		runTunnelCmd()
+
+	case "trace":
+		runTraceCmd()
 
 	case "dev":
 		runDevCmd()

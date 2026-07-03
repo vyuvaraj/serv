@@ -685,6 +685,24 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			args = append(args, argStr)
 		}
 
+		// Stream Processing Builtins
+		if funcStr == "stream" && len(args) == 1 {
+			return fmt.Sprintf("runtime.NewStream(%s)", args[0]), nil
+		}
+		if funcStr == "filter" && len(args) == 2 {
+			cbStr, err := c.genCollectionCallback(e.Arguments[1])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s.Filter(%s)", args[0], cbStr), nil
+		}
+		if funcStr == "window" && len(args) == 2 {
+			return fmt.Sprintf("%s.Window(%s)", args[0], args[1]), nil
+		}
+		if funcStr == "count" && len(args) == 1 {
+			return fmt.Sprintf("%s.Count()", args[0]), nil
+		}
+
 		// Builtin conversions for Env and Config
 		if funcStr == "env" {
 			return fmt.Sprintf("runtime.Env(%s)", strings.Join(args, ", ")), nil

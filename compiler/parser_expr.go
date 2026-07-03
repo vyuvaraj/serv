@@ -589,4 +589,15 @@ func (p *Parser) parsePipeExpression(left Expression) Expression {
 	}
 }
 
+func (p *Parser) parseStreamExpression() Expression {
+	tok := p.curToken
+	p.nextToken() // consume stream keyword
+	val := p.parseExpression(PRODUCT)
+	return &CallExpr{
+		Token: Token{Type: TOKEN_LPAREN, Literal: "(", Line: tok.Line, Col: tok.Col},
+		Function: &Identifier{Token: tok, Value: "stream"},
+		Arguments: []Expression{val},
+	}
+}
+
 

@@ -403,7 +403,19 @@ func RegisterServQueueDLQ(topic string, dlqTopic string) {
 	}
 }
 
-func Publish(topic string, msg interface{}) {
+func Publish(topicOrStream interface{}, msg interface{}) {
+	if s, ok := topicOrStream.(*Stream); ok {
+		if tStr, ok := msg.(string); ok {
+			PublishStream(s, tStr)
+			return
+		}
+	}
+
+	topic, ok := topicOrStream.(string)
+	if !ok {
+		return
+	}
+
 	endSpan := TracePubSub("Publish", topic)
 	defer endSpan()
 

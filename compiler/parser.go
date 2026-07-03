@@ -89,6 +89,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(TOKEN_STORE, p.parseStoreIdentifier)
 	p.registerPrefix(TOKEN_SEARCH, p.parseSearchIdentifier)
 	p.registerPrefix(TOKEN_WORKFLOW, p.parseWorkflowIdentifier)
+	p.registerPrefix(TOKEN_STREAM, p.parseStreamExpression)
 	p.registerPrefix(TOKEN_ASSERT, p.parseAssertExpression)
 	p.registerPrefix(TOKEN_TRUE, p.parseBooleanLiteral)
 	p.registerPrefix(TOKEN_FALSE, p.parseBooleanLiteral)
