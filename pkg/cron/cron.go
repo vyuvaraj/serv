@@ -24,6 +24,7 @@ type Job struct {
 	Cron      string    `json:"cron,omitempty"`      // standard 5-field cron e.g. "0 9 * * 1-5"
 	TargetURL string    `json:"target_url"`
 	Payload   string    `json:"payload,omitempty"`
+	NextTopic string    `json:"next_topic,omitempty"`
 	NextRun   time.Time `json:"next_run"`
 	LastRun   time.Time `json:"last_run,omitempty"`
 	Status    string    `json:"status"`              // "active", "paused"
@@ -375,6 +376,71 @@ func (s *Scheduler) executeJob(job *Job) {
 
 	ServShared.EndSpan(&span, err, attrs)
 	go s.saveAuditLogToS3(job.ID, startTime, duration, statusCode, errStr, respBody)
+
+	if job.NextTopic != "" && err == nil && statusCode >= 200 && statusCode < 300 {
+		go s.publishToQueue(job.NextTopic, job.ID)
+	}
+}
+
+func (s *Scheduler) publishToQueue(topic, jobID string) {
+	queueURL := os.Getenv("SERV_QUEUE_URL")
+	if queueURL == "" {
+		if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+			var manifest struct {
+				Queue string `json:"queue"`
+			}
+			if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.Queue != "" {
+				queueURL = manifest.Queue
+			}
+		}
+	}
+	if queueURL == "" {
+		queueURL = "http://localhost:8082"
+	}
+
+	url := fmt.Sprintf("%s/api/v1/publish", strings.TrimSuffix(queueURL, "/"))
+	payloadMap := map[string]interface{}{
+		"topic":   topic,
+		"payload": fmt.Sprintf(`{"job_id":%q,"status":"completed","timestamp":%q}`, jobID, time.Now().Format(time.RFC3339)),
+	}
+	bodyBytes, _ := json.Marshal(payloadMap)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		log.Printf("[JOB_CHAIN] Failed to create request to ServQueue: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	authToken := os.Getenv("SERV_QUEUE_AUTH_TOKEN")
+	if authToken == "" {
+		if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+			var manifest struct {
+				AuthToken string `json:"auth_token"`
+			}
+			if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.AuthToken != "" {
+				authToken = manifest.AuthToken
+			}
+		}
+	}
+	if authToken == "" {
+		authToken = "secret-token"
+	}
+	req.Header.Set("Authorization", "Bearer "+authToken)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		log.Printf("[JOB_CHAIN] Failed to publish to ServQueue topic %s: %v", topic, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("[JOB_CHAIN] ServQueue returned status %d: %s", resp.StatusCode, string(body))
+	} else {
+		log.Printf("[JOB_CHAIN] Successfully triggered next job by publishing to topic %s on ServQueue", topic)
+	}
 }
 
 func (s *Scheduler) calculateNextRun(job *Job, from time.Time) (time.Time, error) {
