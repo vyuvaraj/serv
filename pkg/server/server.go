@@ -99,7 +99,7 @@ func (s *Server) handleJobsItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listJobs(w http.ResponseWriter, _ *http.Request) {
 	jobs := s.scheduler.GetJobs()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobs)
