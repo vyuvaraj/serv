@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"servcache/pkg/cache"
@@ -17,8 +19,12 @@ import (
 )
 
 type Server struct {
-	cache cache.Cache
-	peers []string
+	cache     cache.Cache
+	peers     []string
+	hits      uint64
+	misses    uint64
+	hotKeys   map[string]uint64
+	hotKeysMu sync.Mutex
 }
 
 func NewServer(c cache.Cache) *Server {
@@ -31,8 +37,9 @@ func NewServer(c cache.Cache) *Server {
 		}
 	}
 	return &Server{
-		cache: c,
-		peers: peers,
+		cache:   c,
+		peers:   peers,
+		hotKeys: make(map[string]uint64),
 	}
 }
 
@@ -72,6 +79,11 @@ func (s *Server) Handler() http.Handler {
 		}
 		key := parts[2]
 
+		if key == "inspect" {
+			s.handleInspect(w, req)
+			return
+		}
+
 		switch req.Method {
 		case http.MethodGet:
 			s.handleGet(w, req, key)
@@ -90,6 +102,14 @@ func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string)
 	span := otel.StartSpan(fmt.Sprintf("servcache:GET %s", key), traceparent)
 
 	val, found, err := s.cache.Get(key)
+	if err == nil {
+		if found {
+			atomic.AddUint64(&s.hits, 1)
+		} else {
+			atomic.AddUint64(&s.misses, 1)
+		}
+		s.trackHotKey(key)
+	}
 	
 	if span != nil {
 		otel.EndSpan(span, err, map[string]interface{}{
@@ -266,4 +286,70 @@ func (s *Server) replicate(method string, path string, body []byte) {
 			}
 		}(peer)
 	}
+}
+
+func (s *Server) trackHotKey(key string) {
+	s.hotKeysMu.Lock()
+	defer s.hotKeysMu.Unlock()
+	if s.hotKeys == nil {
+		s.hotKeys = make(map[string]uint64)
+	}
+	s.hotKeys[key]++
+}
+
+func (s *Server) handleInspect(w http.ResponseWriter, req *http.Request) {
+	s.hotKeysMu.Lock()
+	hot := make(map[string]uint64)
+	for k, v := range s.hotKeys {
+		hot[k] = v
+	}
+	s.hotKeysMu.Unlock()
+
+	var totalKeys int
+	namespaces := make(map[string]int)
+
+	type keysLister interface {
+		Keys() []string
+	}
+	if lister, ok := s.cache.(keysLister); ok {
+		keys := lister.Keys()
+		totalKeys = len(keys)
+		for _, k := range keys {
+			parts := strings.Split(k, ":")
+			ns := "default"
+			if len(parts) > 1 {
+				ns = parts[0]
+			}
+			namespaces[ns]++
+		}
+	} else {
+		totalKeys = len(hot)
+		for k := range hot {
+			parts := strings.Split(k, ":")
+			ns := "default"
+			if len(parts) > 1 {
+				ns = parts[0]
+			}
+			namespaces[ns]++
+		}
+	}
+
+	h := atomic.LoadUint64(&s.hits)
+	m := atomic.LoadUint64(&s.misses)
+	ratio := 0.0
+	if h+m > 0 {
+		ratio = float64(h) / float64(h+m)
+	}
+
+	resp := map[string]interface{}{
+		"total_keys": totalKeys,
+		"namespaces": namespaces,
+		"hits":       h,
+		"misses":     m,
+		"hit_ratio":  ratio,
+		"hot_keys":   hot,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

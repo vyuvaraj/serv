@@ -73,3 +73,11 @@ func (r *RedisCache) DeletePattern(pattern string) error {
 	}
 	return nil
 }
+
+func (r *RedisCache) Keys() []string {
+	keys, err := r.client.Keys(r.ctx, "*").Result()
+	if err != nil {
+		return []string{}
+	}
+	return keys
+}

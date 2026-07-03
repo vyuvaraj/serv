@@ -185,3 +185,13 @@ func (c *InMemoryCache) startEvictionLoop() {
 		c.EvictExpired()
 	}
 }
+
+func (c *InMemoryCache) Keys() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	keys := make([]string, 0, len(c.items))
+	for k := range c.items {
+		keys = append(keys, k)
+	}
+	return keys
+}
