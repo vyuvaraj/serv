@@ -100,6 +100,7 @@ func main() {
 	// Health probes
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("servregistry", "1.0.0"))
 
 	// Publish API
 	mux.HandleFunc("/publish", handlePublish)
