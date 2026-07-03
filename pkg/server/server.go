@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcache", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
