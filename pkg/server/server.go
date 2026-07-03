@@ -298,7 +298,7 @@ func (s *Server) trackHotKey(key string) {
 	s.hotKeys[key]++
 }
 
-func (s *Server) handleInspect(w http.ResponseWriter, req *http.Request) {
+func (s *Server) handleInspect(w http.ResponseWriter, _ *http.Request) {
 	s.hotKeysMu.Lock()
 	hot := make(map[string]uint64)
 	for k, v := range s.hotKeys {
