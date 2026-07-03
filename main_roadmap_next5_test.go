@@ -109,3 +109,45 @@ func TestServQueueStreamDSL(t *testing.T) {
 		t.Error("Expected tests to pass")
 	}
 }
+
+func TestEcosystemNext4RoadmapItems(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_next4_*.srv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	srvContent := `
+	test "verify next 4 items compile" {
+		let x = true
+		assert x == true
+	}
+	`
+	if _, err := tmpFile.WriteString(srvContent); err != nil {
+		t.Fatalf("failed to write srv file: %v", err)
+	}
+	tmpFile.Close()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	done := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
+
+	runTests(tmpFile.Name(), false, "")
+
+	w.Close()
+	os.Stdout = oldStdout
+	output := <-done
+
+	t.Logf("Next 4 Exec Output:\n%s", output)
+
+	if !strings.Contains(output, "PASS") {
+		t.Error("Expected tests to pass")
+	}
+}

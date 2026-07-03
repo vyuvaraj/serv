@@ -1,18 +1,28 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
+
 	"servtunnel/pkg/client"
 )
 
 func runTunnelCmd() {
+	if len(os.Args) >= 3 && os.Args[2] == "inspect" {
+		runTunnelInspect()
+		return
+	}
+
 	tunnelCmd := flag.NewFlagSet("tunnel", flag.ExitOnError)
 	relayFlag := tunnelCmd.String("relay", "ws://localhost:8443/ws/connect", "Relay server WebSocket URL")
 	subdomainFlag := tunnelCmd.String("subdomain", "", "Requested subdomain")
@@ -122,4 +132,105 @@ func getGitBranchSubdomainForServ() string {
 	sanitized = strings.Trim(sanitized, "-")
 
 	return sanitized
+}
+
+func runTunnelInspect() {
+	relayHost := "http://localhost:8443"
+	if envHost := os.Getenv("SERVTUNNEL_URL"); envHost != "" {
+		relayHost = envHost
+	}
+
+	for i := 3; i < len(os.Args); i++ {
+		if (os.Args[i] == "--relay" || os.Args[i] == "-r" || os.Args[i] == "--host") && i+1 < len(os.Args) {
+			relayHost = os.Args[i+1]
+			relayHost = strings.Replace(relayHost, "ws://", "http://", 1)
+			relayHost = strings.Replace(relayHost, "wss://", "https://", 1)
+			relayHost = strings.TrimSuffix(relayHost, "/ws/connect")
+			i++
+		}
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	tunnelsURL := fmt.Sprintf("%s/api/tunnels", strings.TrimSuffix(relayHost, "/"))
+	tReq, _ := http.NewRequest("GET", tunnelsURL, nil)
+	authToken := os.Getenv("SERVTUNNEL_TOKEN")
+	if authToken != "" {
+		tReq.Header.Set("Authorization", "Bearer "+authToken)
+	}
+	tResp, err := client.Do(tReq)
+	if err != nil {
+		fmt.Printf("Failed to connect to ServTunnel relay at %s: %v\n", relayHost, err)
+		os.Exit(1)
+	}
+	defer tResp.Body.Close()
+
+	if tResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(tResp.Body)
+		fmt.Printf("ServTunnel relay returned error status %d: %s\n", tResp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	var tData struct {
+		Tunnels []map[string]interface{} `json:"tunnels"`
+		Count   int                      `json:"count"`
+	}
+	if err := json.NewDecoder(tResp.Body).Decode(&tData); err != nil {
+		fmt.Printf("Failed to parse tunnels response: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("=== ServTunnel Active Connections ===")
+	if len(tData.Tunnels) == 0 {
+		fmt.Println("  No active tunnel connections.")
+	} else {
+		for _, t := range tData.Tunnels {
+			sub := t["subdomain"]
+			pub := t["public_url"]
+			read := t["bytes_read"]
+			write := t["bytes_written"]
+			fmt.Printf("  Subdomain:  %s\n", sub)
+			fmt.Printf("  Public URL: %s\n", pub)
+			fmt.Printf("  Throughput: Read: %v bytes | Written: %v bytes\n", read, write)
+			fmt.Println("  ---------------------------------")
+		}
+	}
+
+	inspectURL := fmt.Sprintf("%s/api/inspect?limit=10", strings.TrimSuffix(relayHost, "/"))
+	iReq, _ := http.NewRequest("GET", inspectURL, nil)
+	if authToken != "" {
+		iReq.Header.Set("Authorization", "Bearer "+authToken)
+	}
+	iResp, err := client.Do(iReq)
+	if err != nil {
+		fmt.Printf("Failed to fetch inspection logs: %v\n", err)
+		return
+	}
+	defer iResp.Body.Close()
+
+	if iResp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var iData struct {
+		Entries []map[string]interface{} `json:"entries"`
+		Total   int64                    `json:"total"`
+	}
+	if err := json.NewDecoder(iResp.Body).Decode(&iData); err != nil {
+		return
+	}
+
+	fmt.Println("\n=== Recent Tunnel Requests ===")
+	if len(iData.Entries) == 0 {
+		fmt.Println("  No requests captured yet.")
+	} else {
+		fmt.Printf("  %-6s %-10s %-30s %-8s %-10s\n", "ID", "METHOD", "PATH", "STATUS", "LATENCY")
+		fmt.Println("  " + strings.Repeat("-", 70))
+		for idx := len(iData.Entries) - 1; idx >= 0; idx-- {
+			e := iData.Entries[idx]
+			fmt.Printf("  %-6v %-10v %-30v %-8v %-10vms\n",
+				e["id"], e["method"], e["path"], e["status_code"], e["latency_ms"])
+		}
+		fmt.Printf("\n  Total requests captured: %d\n", iData.Total)
+	}
 }

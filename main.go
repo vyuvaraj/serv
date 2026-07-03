@@ -227,6 +227,13 @@ func main() {
 			fmt.Println("Usage: serv cache inspect [--host <host>]")
 		}
 
+	case "cron":
+		if len(os.Args) >= 3 && os.Args[2] == "list" {
+			runCronList()
+		} else {
+			fmt.Println("Usage: serv cron list [--host <host>]")
+		}
+
 	case "status":
 		runStatus()
 
