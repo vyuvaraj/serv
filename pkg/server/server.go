@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -244,9 +245,34 @@ func (s *Server) handleListTraces(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	serviceFilter := req.URL.Query().Get("service")
+	operationFilter := req.URL.Query().Get("operation")
+	errorFilter := req.URL.Query().Get("error")
+	durationFilter := req.URL.Query().Get("min_duration_ms")
+
 	traces := s.traceStore.ListTraces()
+	filtered := make([]store.TraceSummary, 0)
+
+	for _, t := range traces {
+		if serviceFilter != "" && !strings.Contains(strings.ToLower(t.Service), strings.ToLower(serviceFilter)) {
+			continue
+		}
+		if operationFilter != "" && !strings.Contains(strings.ToLower(t.RootName), strings.ToLower(operationFilter)) {
+			continue
+		}
+		if errorFilter == "true" && t.ErrorCount == 0 {
+			continue
+		}
+		if durationFilter != "" {
+			if limit, err := strconv.ParseFloat(durationFilter, 64); err == nil && t.DurationMs < limit {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(traces)
+	json.NewEncoder(w).Encode(filtered)
 }
 
 func (s *Server) handleGetTraceTree(w http.ResponseWriter, req *http.Request, traceID string) {
