@@ -224,9 +224,6 @@ func unwrapTemplateData(val interface{}) interface{} {
 	if sm, ok := val.(*SafeMap); ok {
 		return unwrapTemplateData(sm.ToMap())
 	}
-	if sm, ok := val.(SafeMap); ok {
-		return unwrapTemplateData(sm.ToMap())
-	}
 	if m, ok := val.(map[string]interface{}); ok {
 		res := make(map[string]interface{}, len(m))
 		for k, v := range m {
