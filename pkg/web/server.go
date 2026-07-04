@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"servqueue/pkg/broker"
+	"servqueue/pkg/otel"
 	"servqueue/pkg/storage"
 
 	"github.com/gorilla/websocket"
@@ -682,7 +683,17 @@ func (s *Server) handleTail(w http.ResponseWriter, r *http.Request) {
 			if regex != nil && !regex.MatchString(msg) {
 				continue
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+			parentTrace := r.Header.Get("traceparent")
+			span := otel.StartSpan(fmt.Sprintf("Consumer Consume %s", topic), parentTrace)
+			err := conn.WriteMessage(websocket.TextMessage, []byte(msg))
+			if span != nil {
+				otel.EndSpan(span, err, map[string]interface{}{
+					"messaging.system":      "servqueue",
+					"messaging.destination": namespacedTopic,
+					"messaging.consumer":    "websocket-tail",
+				})
+			}
+			if err != nil {
 				return
 			}
 		case <-r.Context().Done():

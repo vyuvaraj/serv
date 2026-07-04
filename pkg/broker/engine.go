@@ -457,8 +457,20 @@ func (e *BrokerEngine) GetDLQ(topic string) (string, bool) {
 func (e *BrokerEngine) routeToDLQ(ctx context.Context, sourceTopic string, payload string, reason string) {
 	dlqTopic, ok := e.GetDLQ(sourceTopic)
 	if !ok {
-		// No DLQ configured — message is dropped (legacy behaviour)
 		return
+	}
+
+	var parentTrace string
+	if traceparentVal, ok := ctx.Value("traceparent").(string); ok {
+		parentTrace = traceparentVal
+	}
+	span := otel.StartSpan(fmt.Sprintf("DLQ Redirect %s -> %s", sourceTopic, dlqTopic), parentTrace)
+	if span != nil {
+		defer otel.EndSpan(span, nil, map[string]interface{}{
+			"dlq.reason": reason,
+			"dlq.source": sourceTopic,
+			"dlq.target": dlqTopic,
+		})
 	}
 
 	envelope := fmt.Sprintf(`{"dlq":true,"source_topic":%q,"reason":%q,"payload":%q}`,
@@ -1150,5 +1162,9 @@ func getExpiryFromContext(ctx context.Context) time.Time {
 		return time.Now().Add(time.Duration(ttlMs) * time.Millisecond)
 	}
 	return time.Time{}
+}
+
+func (e *BrokerEngine) RouteToDLQForTest(ctx context.Context, sourceTopic string, payload string, reason string) {
+	e.routeToDLQ(ctx, sourceTopic, payload, reason)
 }
 

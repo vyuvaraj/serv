@@ -1203,6 +1203,30 @@ func TestEventBusFederation(t *testing.T) {
 	}
 }
 
+func TestEndToEndMessageTracing(t *testing.T) {
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	// Register DLQ to trigger the tracing path in routeToDLQ
+	engine.SetDLQ(context.Background(), "source-topic", "dlq-topic")
+
+	subChan := engine.Subscribe("dlq-topic")
+
+	// Trigger DLQ routing
+	ctx := context.WithValue(context.Background(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	engine.RouteToDLQForTest(ctx, "source-topic", "test-dlq-payload", "validation failed")
+
+	// Verify delivery to DLQ
+	select {
+	case msg := <-subChan:
+		if !strings.Contains(msg, "test-dlq-payload") {
+			t.Errorf("Expected message to contain payload, got %q", msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for DLQ redirect")
+	}
+}
+
 
 
 
