@@ -400,4 +400,12 @@ func TraceExtern(source, funcName string) func()                   { return func
 func ResetDBState() {}
 func ClearCache()   {}
 
+func HTMLTemplate(tpl string, data interface{}) interface{} {
+	return "HTMLTemplate is not supported in the WebAssembly target"
+}
+
+func HTMLRender(filePath string, data interface{}) interface{} {
+	return "HTMLRender is not supported in the WebAssembly target"
+}
+
 // ── Metrics Stubs ────────────────────────────────────────────────────────────

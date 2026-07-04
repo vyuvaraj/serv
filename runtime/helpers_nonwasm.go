@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"sync"
@@ -214,4 +215,30 @@ func RegistryHas(name interface{}) interface{} {
 	_, exists := registryFuncs[key]
 	registryFuncsMu.RUnlock()
 	return exists
+}
+
+// HTMLTemplate parses and executes a string-based HTML template.
+func HTMLTemplate(tpl string, data interface{}) interface{} {
+	t, err := template.New("web").Parse(tpl)
+	if err != nil {
+		return fmt.Sprintf("Template parse error: %s", err.Error())
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return fmt.Sprintf("Template execution error: %s", err.Error())
+	}
+	return buf.String()
+}
+
+// HTMLRender loads and renders a template file.
+func HTMLRender(filePath string, data interface{}) interface{} {
+	t, err := template.ParseFiles(filePath)
+	if err != nil {
+		return fmt.Sprintf("Failed to load template file %s: %s", filePath, err.Error())
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return fmt.Sprintf("Template execution error: %s", err.Error())
+	}
+	return buf.String()
 }

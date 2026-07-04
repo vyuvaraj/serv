@@ -121,6 +121,14 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.HTTPPost", nil
 			}
 		}
+		if objStr == "html" {
+			switch e.Field {
+			case "render":
+				return "runtime.HTMLRender", nil
+			case "template":
+				return "runtime.HTMLTemplate", nil
+			}
+		}
 		if objStr == "json" {
 			switch e.Field {
 			case "parse":
@@ -1366,6 +1374,11 @@ func (c *Codegen) genFString(str string) (string, error) {
 
 	for i < n {
 		if runes[i] == '{' {
+			if i+1 < n && runes[i+1] == '{' {
+				currentText += "{"
+				i += 2
+				continue
+			}
 			if currentText != "" {
 				formatParts = append(formatParts, currentText)
 				currentText = ""
@@ -1390,6 +1403,14 @@ func (c *Codegen) genFString(str string) (string, error) {
 			} else {
 				args = append(args, exprCode)
 			}
+		} else if runes[i] == '}' {
+			if i+1 < n && runes[i+1] == '}' {
+				currentText += "}"
+				i += 2
+				continue
+			}
+			currentText += "}"
+			i++
 		} else {
 			currentText += string(runes[i])
 			i++
