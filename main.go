@@ -173,6 +173,9 @@ var configMu sync.Mutex
 func main() {
 	flag.Parse()
 
+	// Verify cryptographic license if building Enterprise Edition
+	verifyEnterpriseLicense()
+
 	// Load service discovery (SERVVERSE_DISCOVERY env var > CLI flags > defaults)
 	activeDiscovery = loadDiscovery()
 
