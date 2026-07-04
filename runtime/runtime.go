@@ -327,6 +327,19 @@ func StartServer() interface{} {
 	}
 	wsHandlersMu.RUnlock()
 
+	// Static file routes
+	staticRoutesMu.RLock()
+	for _, sr := range staticRoutes {
+		prefix := sr.prefix
+		dir := sr.dir
+		// Ensure prefix ends with "/" for StripPrefix to work correctly
+		if !strings.HasSuffix(prefix, "/") {
+			prefix = prefix + "/"
+		}
+		mux.Handle(prefix, http.StripPrefix(prefix, http.FileServer(http.Dir(dir))))
+	}
+	staticRoutesMu.RUnlock()
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// 1. CORS check
 		if corsEnabled {

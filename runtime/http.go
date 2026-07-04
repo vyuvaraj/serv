@@ -20,7 +20,26 @@ var (
 	// Middleware registry
 	middlewareRegistry   = make(map[string]func(Request) interface{})
 	middlewareRegistryMu sync.RWMutex
+
+	// Static file routes: routePrefix -> directory path
+	staticRoutes   []staticRoute
+	staticRoutesMu sync.RWMutex
 )
+
+// staticRoute holds a URL prefix and the local directory to serve.
+type staticRoute struct {
+	prefix string
+	dir    string
+}
+
+// AddStaticRoute registers a directory to be served at a URL prefix.
+// Call this from init() via html.static("/assets", "./public").
+func AddStaticRoute(prefix, dir string) {
+	staticRoutesMu.Lock()
+	defer staticRoutesMu.Unlock()
+	staticRoutes = append(staticRoutes, staticRoute{prefix: prefix, dir: dir})
+	LogInfo("Registered static route: ", prefix, " -> ", dir)
+}
 
 // Rate limiter per route
 type routeRateLimiter struct {

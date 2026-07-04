@@ -127,6 +127,8 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.HTMLRender", nil
 			case "template":
 				return "runtime.HTMLTemplate", nil
+			case "static":
+				return "runtime.AddStaticRoute", nil
 			}
 		}
 		if objStr == "json" {

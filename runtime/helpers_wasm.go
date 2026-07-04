@@ -367,7 +367,9 @@ func ValidateBody(args ...interface{}) interface{}    { return nil }
 
 func RegisterMiddleware(name string, handler func(Request) interface{}) {}
 func AddRoute(method, path string, rate int, period string, handler func(Request) interface{}) {}
-func AddRouteWithMiddleware(method, path string, rate int, period string, middleware []string, handler func(Request) interface{}) {}
+func AddRouteWithMiddleware(method, path string, rate int, period string, middleware []string, handler func(Request) interface{}) {
+}
+func AddStaticRoute(prefix, dir string) {}
 func AddMCPTool(name, description string, handler func(interface{}) interface{}) {}
 func RegisterMigration(name string, handler func() interface{}) {}
 func RegisterDBSchema(schemaJSON string) {}
