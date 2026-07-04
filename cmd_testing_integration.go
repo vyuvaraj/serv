@@ -19,7 +19,7 @@ type integrationService struct {
 }
 
 // runIntegrationTests starts real infrastructure services, runs tests, then stops them.
-func runIntegrationTests(srvFile string, withCoverage bool, filter string) {
+func runIntegrationTests(srvFile string, withCoverage bool, filter string) bool {
 	fmt.Println()
 	fmt.Println("  ▲ Integration Test Mode")
 	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━━")
@@ -99,7 +99,7 @@ func runIntegrationTests(srvFile string, withCoverage bool, filter string) {
 	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━━")
 	fmt.Println()
 
-	runTests(srvFile, withCoverage, filter)
+	success := runTests(srvFile, withCoverage, filter)
 
 	// Cleanup
 	fmt.Println()
@@ -110,6 +110,7 @@ func runIntegrationTests(srvFile string, withCoverage bool, filter string) {
 		}
 	}
 	fmt.Println("  ✓  All services stopped.")
+	return success
 }
 
 func findFreePort() int {

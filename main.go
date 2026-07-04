@@ -124,9 +124,13 @@ func main() {
 		if *watchFlag {
 			runTestsWatch(args[0], *coverFlag, *filterFlag, *integrationFlag)
 		} else if *integrationFlag {
-			runIntegrationTests(args[0], *coverFlag, *filterFlag)
+			if !runIntegrationTests(args[0], *coverFlag, *filterFlag) {
+				os.Exit(1)
+			}
 		} else {
-			runTests(args[0], *coverFlag, *filterFlag)
+			if !runTests(args[0], *coverFlag, *filterFlag) {
+				os.Exit(1)
+			}
 		}
 
 	case "lint":
