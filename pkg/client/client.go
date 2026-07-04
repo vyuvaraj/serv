@@ -43,6 +43,8 @@ type MeshTransport struct {
 	rrIndex     map[string]int
 	rules       map[string]registry.RoutingRule
 	rulesExpiry map[string]time.Time
+	latencies   map[string]time.Duration
+	errorRates  map[string]float64
 	
 	cacheTTL    time.Duration
 	tlsConfig   *tls.Config
@@ -64,6 +66,8 @@ func NewMeshTransport(registryURL string, cacheTTL time.Duration) *MeshTransport
 		rrIndex:     make(map[string]int),
 		rules:       make(map[string]registry.RoutingRule),
 		rulesExpiry: make(map[string]time.Time),
+		latencies:   make(map[string]time.Duration),
+		errorRates:  make(map[string]float64),
 		cacheTTL:    cacheTTL,
 	}
 }
@@ -161,6 +165,7 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		var resp *http.Response
+		startTime := time.Now()
 		if os.Getenv("SERV_MESH_GRPC") == "true" {
 			grpcHost := getGRPCHost(target)
 			conn, grpcErr := grpc.Dial(grpcHost, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(1*time.Second))
@@ -198,6 +203,23 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		} else {
 			resp, err = t.base.RoundTrip(clonedReq)
 		}
+
+		elapsed := time.Since(startTime)
+
+		t.mu.Lock()
+		oldLatency := t.latencies[target]
+		if oldLatency == 0 {
+			t.latencies[target] = elapsed
+		} else {
+			t.latencies[target] = time.Duration(0.9*float64(oldLatency) + 0.1*float64(elapsed))
+		}
+		oldErrRate := t.errorRates[target]
+		isErr := 0.0
+		if err != nil || (resp != nil && resp.StatusCode >= 500) {
+			isErr = 1.0
+		}
+		t.errorRates[target] = 0.9*oldErrRate + 0.1*isErr
+		t.mu.Unlock()
 
 		if cancel != nil && (err != nil || (resp != nil && resp.StatusCode >= 500)) {
 			cancel()
@@ -290,35 +312,97 @@ func (t *MeshTransport) selectTarget(serviceName string, targets []registry.Inst
 		return ""
 	}
 
-	// Calculate sum of weights and check if they are all default
-	totalWeight := 0
-	allDefault := true
+	// Calculate average latency among available targets
+	var totalLat time.Duration
+	var latCount int
 	for _, inst := range available {
-		w := inst.Weight
-		if w <= 0 {
-			w = 100
-		} else {
-			allDefault = false
+		if lat, ok := t.latencies[inst.Address]; ok && lat > 0 {
+			totalLat += lat
+			latCount++
 		}
-		totalWeight += w
+	}
+	var avgLat time.Duration
+	if latCount > 0 {
+		avgLat = totalLat / time.Duration(latCount)
 	}
 
-	if allDefault {
+	// Check if any target is degraded
+	degraded := false
+	if avgLat > 0 {
+		for _, inst := range available {
+			if errRate, ok := t.errorRates[inst.Address]; ok && errRate > 0.05 {
+				degraded = true
+				break
+			}
+			if lat, ok := t.latencies[inst.Address]; ok && lat > 0 {
+				ratio := float64(lat) / float64(avgLat)
+				if ratio > 1.3 {
+					degraded = true
+					break
+				}
+			}
+		}
+	} else {
+		for _, inst := range available {
+			if errRate, ok := t.errorRates[inst.Address]; ok && errRate > 0.05 {
+				degraded = true
+				break
+			}
+		}
+	}
+
+	// Check if weights are all default
+	allDefault := true
+	for _, inst := range available {
+		if inst.Weight > 0 {
+			allDefault = false
+			break
+		}
+	}
+
+	if !degraded && allDefault {
 		idx := t.rrIndex[serviceName]
 		selected := available[idx%len(available)].Address
 		t.rrIndex[serviceName] = (idx + 1) % len(available)
 		return selected
 	}
 
-	// Perform weighted selection
-	val := mrand.Intn(totalWeight)
-	current := 0
-	for _, inst := range available {
+	// Calculate adjusted weights based on OTel health feedback
+	adjustedWeights := make([]int, len(available))
+	totalWeight := 0
+	for idx, inst := range available {
 		w := inst.Weight
 		if w <= 0 {
 			w = 100
 		}
-		current += w
+		
+		multiplier := 1.0
+		if errRate, ok := t.errorRates[inst.Address]; ok {
+			multiplier *= (1.0 - errRate)
+		}
+		if avgLat > 0 {
+			if lat, ok := t.latencies[inst.Address]; ok && lat > 0 {
+				ratio := float64(lat) / float64(avgLat)
+				multiplier *= (1.0 / (1.0 + (ratio-1.0)*0.5))
+			}
+		}
+		if multiplier < 0.05 {
+			multiplier = 0.05 // Floor at 5%
+		}
+
+		adjW := int(float64(w) * multiplier)
+		if adjW < 1 {
+			adjW = 1
+		}
+		adjustedWeights[idx] = adjW
+		totalWeight += adjW
+	}
+
+	// Perform weighted selection
+	val := mrand.Intn(totalWeight)
+	current := 0
+	for idx, inst := range available {
+		current += adjustedWeights[idx]
 		if val < current {
 			return inst.Address
 		}
@@ -618,4 +702,19 @@ func (p *grpcProxyServer) Forward(ctx context.Context, in *pb.MeshRequest) (*pb.
 		Headers:    respHeaders,
 		Body:       w.Body.Bytes(),
 	}, nil
+}
+
+func (t *MeshTransport) SelectTargetForTest(serviceName string, targets []registry.Instance) string {
+	return t.selectTarget(serviceName, targets)
+}
+
+func (t *MeshTransport) UpdateTargetMetricsForTest(target string, elapsed time.Duration, isErr bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.latencies[target] = elapsed
+	errVal := 0.0
+	if isErr {
+		errVal = 1.0
+	}
+	t.errorRates[target] = errVal
 }

@@ -702,3 +702,34 @@ func TestZeroTrustNetworkPolicies(t *testing.T) {
 		t.Errorf("expected 403 Forbidden, got %d", resp3.StatusCode)
 	}
 }
+
+func TestHealthAwareLoadBalancing(t *testing.T) {
+	transport := client.NewMeshTransport("http://localhost:8080", 5*time.Second)
+
+	targets := []registry.Instance{
+		{Address: "http://10.0.0.1:8080", Weight: 100},
+		{Address: "http://10.0.0.2:8080", Weight: 100},
+	}
+
+	selected := make(map[string]int)
+	for i := 0; i < 100; i++ {
+		tgt := transport.SelectTargetForTest("test-svc", targets)
+		selected[tgt]++
+	}
+	if selected["http://10.0.0.1:8080"] == 0 || selected["http://10.0.0.2:8080"] == 0 {
+		t.Errorf("Expected traffic on both targets when healthy, got: %+v", selected)
+	}
+
+	transport.UpdateTargetMetricsForTest("http://10.0.0.1:8080", 500*time.Millisecond, true)
+	transport.UpdateTargetMetricsForTest("http://10.0.0.2:8080", 10*time.Millisecond, false)
+
+	selectedDegraded := make(map[string]int)
+	for i := 0; i < 100; i++ {
+		tgt := transport.SelectTargetForTest("test-svc", targets)
+		selectedDegraded[tgt]++
+	}
+	t.Logf("Degraded traffic distribution: %+v", selectedDegraded)
+	if selectedDegraded["http://10.0.0.2:8080"] < 80 {
+		t.Errorf("Expected healthier target to get majority of traffic, got: %+v", selectedDegraded)
+	}
+}
