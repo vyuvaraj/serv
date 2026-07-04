@@ -28,6 +28,8 @@ func HTTPGet(url string) interface{} {
 		return [2]interface{}{nil, fmt.Sprintf("HTTP GET request failed for %s: %s", url, err.Error())}
 	}
 
+	req.Header.Set("User-Agent", "Serv-Compiler/0.1")
+
 	// Inject traceparent if active
 	if active := GetActiveTrace(); active != nil {
 		req.Header.Set("traceparent", Traceparent(active))
@@ -72,6 +74,7 @@ func HTTPPost(url string, body interface{}) interface{} {
 		return [2]interface{}{nil, fmt.Sprintf("HTTP POST request failed for %s: %s", url, err.Error())}
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Serv-Compiler/0.1")
 
 	// Inject traceparent if active
 	if active := GetActiveTrace(); active != nil {
