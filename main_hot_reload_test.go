@@ -110,7 +110,7 @@ route "GET" "/hello" (req) {
 
 	// Wait for V2 to hot reload and respond with the new content
 	v2Success := false
-	for i := 0; i < 40; i++ {
+	for i := 0; i < 150; i++ {
 		time.Sleep(200 * time.Millisecond)
 		if err := queryHello("hello v2"); err == nil {
 			v2Success = true

@@ -29,6 +29,9 @@ func buildServ(srvFile, outputBinary, target, goos, goarch string) string {
 }
 
 func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string, error) {
+	// Clear the parser cache before compilation
+	parsedFilesCache = make(map[string]*compiler.Program)
+
 	absPath, program, err := parseProject(srvFile)
 	if err != nil {
 		return "", err
@@ -39,11 +42,9 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 		return "", err
 	}
 
-	// --- Incremental compilation: check if source changed ---
 	cache := loadBuildCache(buildDir)
 	sourceFiles, _ := collectSourceFiles(srvFile)
 
-	// Determine output path early for cache check
 	var targetOutPath string
 	if filepath.IsAbs(outputBinary) {
 		targetOutPath = outputBinary
@@ -51,7 +52,6 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 		targetOutPath = filepath.Join(filepath.Dir(absPath), outputBinary)
 	}
 
-	// Fast path: if source unchanged AND output binary exists, skip everything
 	if isSourceUnchanged(cache, sourceFiles) {
 		if _, statErr := os.Stat(targetOutPath); statErr == nil {
 			fmt.Println("[cache] Source unchanged, binary up-to-date. Skipping build.")
@@ -59,7 +59,6 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 		}
 	}
 
-	// Validate target support for WASM
 	if target == "wasm" || target == "wasm-edge" {
 		for _, stmt := range program.Statements {
 			switch stmt.(type) {
@@ -70,7 +69,6 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 		}
 	}
 
-	// Run static analysis — show warnings but don't fail build
 	source, _ := os.ReadFile(absPath)
 	diags := compiler.Analyze(program)
 	hasErrors := false
@@ -86,35 +84,135 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 		return "", fmt.Errorf("compilation failed due to type errors")
 	}
 
-	codegen := compiler.NewCodegen(program)
-	goCode, err := codegen.Generate()
-	if err != nil {
-		return "", err
+	// Clean stale Go files (e.g. service.go or old files from previous project shapes)
+	expectedGoFiles := map[string]bool{
+		"main_entry.go": true,
+	}
+	for filePath := range parsedFilesCache {
+		outName := filepath.Base(filePath)
+		outName = strings.TrimSuffix(outName, filepath.Ext(outName)) + ".go"
+		expectedGoFiles[outName] = true
 	}
 
-	goCode += "\n" + codegen.GenerateHelpers()
-	if target == "wasm" || target == "wasm-edge" {
-		goCode += "\nfunc main() {}\n"
-	} else {
-		goCode += "\n" + codegen.GenerateMainFunc()
-	}
-
-	// --- Incremental: check if generated code changed ---
-	if isGeneratedCodeUnchanged(cache, goCode) {
-		if _, statErr := os.Stat(targetOutPath); statErr == nil {
-			fmt.Println("[cache] Generated code unchanged, binary up-to-date. Skipping go build.")
-			updateCacheEntries(cache, sourceFiles)
-			saveBuildCache(buildDir, cache)
-			return targetOutPath, nil
+	if files, err := os.ReadDir(buildDir); err == nil {
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".go") {
+				if !expectedGoFiles[f.Name()] {
+					_ = os.Remove(filepath.Join(buildDir, f.Name()))
+				}
+			}
 		}
 	}
 
-	// Remove stale test files from previous test runs
-	_ = os.Remove(filepath.Join(buildDir, "service.go"))
-	_ = os.Remove(filepath.Join(buildDir, "serv_test.go"))
+	codegen := compiler.NewCodegen(program)
+	codegen.RunPrePass()
 
-	genGoFile := filepath.Join(buildDir, "main.go")
-	if err := os.WriteFile(genGoFile, []byte(goCode), 0644); err != nil {
+	// Write separate Go files for each source .srv file in the project
+	for filePath, fileProg := range parsedFilesCache {
+		outName := filepath.Base(filePath)
+		outName = strings.TrimSuffix(outName, filepath.Ext(outName)) + ".go"
+		outPath := filepath.Join(buildDir, outName)
+
+		hash, _ := hashFile(filePath)
+		entry, exists := cache.Entries[filePath]
+		_, statErr := os.Stat(outPath)
+
+		if exists && entry.SourceHash == hash && statErr == nil {
+			// Unchanged - skip writing this file
+			continue
+		}
+
+		fileGoCode, err := codegen.GenerateStatements(fileProg.Statements)
+		if err != nil {
+			return "", err
+		}
+
+		fileImports := make(map[string]bool)
+		if strings.Contains(fileGoCode, "runtime.") {
+			fileImports[`"serv/runtime"`] = true
+		}
+		if strings.Contains(fileGoCode, "time.") {
+			fileImports[`"time"`] = true
+		}
+		if strings.Contains(fileGoCode, "fmt.") {
+			fileImports[`"fmt"`] = true
+		}
+		if strings.Contains(fileGoCode, "strings.") {
+			fileImports[`"strings"`] = true
+		}
+		if strings.Contains(fileGoCode, "strconv.") {
+			fileImports[`"strconv"`] = true
+		}
+		if strings.Contains(fileGoCode, "regexp.") {
+			fileImports[`"regexp"`] = true
+		}
+
+		for _, stmt := range fileProg.Statements {
+			if ext, ok := stmt.(*compiler.ExternFnStmt); ok {
+				if strings.HasPrefix(ext.Source, "go:") {
+					parts := strings.Split(strings.TrimPrefix(ext.Source, "go:"), ":")
+					if len(parts) >= 2 {
+						fileImports[`"`+parts[0]+`"`] = true
+					}
+				}
+			}
+		}
+
+		fileHeader := codegen.GenerateFileHeader(fileImports)
+		if err := os.WriteFile(outPath, []byte(fileHeader+fileGoCode), 0644); err != nil {
+			return "", err
+		}
+	}
+
+	// Generate _main.go
+	var mainCode strings.Builder
+	mainCode.WriteString("// Code generated by Serv compiler. DO NOT EDIT.\n")
+	mainCode.WriteString("package main\n\n")
+
+	mainImports := map[string]bool{
+		`"fmt"`:          true,
+		`"serv/runtime"`: true,
+	}
+	hasNonTestStmts := false
+	for _, stmt := range program.Statements {
+		if _, isTest := stmt.(*compiler.TestStmt); !isTest {
+			hasNonTestStmts = true
+			break
+		}
+	}
+	if hasNonTestStmts {
+		mainImports[`"time"`] = true
+	}
+	if len(program.Statements) > 0 { // Check if we need database/strings imports
+		mainImports[`"strings"`] = true
+	}
+
+	mainCode.WriteString("import (\n")
+	for imp := range mainImports {
+		mainCode.WriteString("\t" + imp + "\n")
+	}
+	mainCode.WriteString(")\n\n")
+	mainCode.WriteString("var _ = fmt.Sprintf\nvar _ = runtime.Noop\n")
+	if mainImports[`"time"`] {
+		mainCode.WriteString("var _ = time.Second\n")
+	}
+	if mainImports[`"strings"`] {
+		mainCode.WriteString("var _ = strings.Join\n")
+	}
+	mainCode.WriteString("\n")
+
+	mainCode.WriteString(codegen.GenerateHelpers())
+	mainCode.WriteString("\n")
+	if target == "wasm" || target == "wasm-edge" {
+		mainCode.WriteString("func main() {}\n")
+	} else {
+		mainCode.WriteString(codegen.GenerateMainFunc())
+	}
+
+	mainCode.WriteString(codegen.GenerateORMHelpers())
+
+	mainGoFile := filepath.Join(buildDir, "main_entry.go")
+	if err := os.WriteFile(mainGoFile, []byte(mainCode.String()), 0644); err != nil {
 		return "", err
 	}
 
@@ -156,7 +254,8 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	if err != nil {
 		// If go build fails because go.mod needs updating, run go mod tidy and retry
 		if strings.Contains(stderr.String(), "go mod tidy") {
 			if tidyErr := runGoModTidy(buildDir); tidyErr == nil {
@@ -186,7 +285,7 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 
 	// --- Save build cache on success ---
 	updateCacheEntries(cache, sourceFiles)
-	cache.GeneratedHash = hashString(goCode)
+	cache.GeneratedHash = hashString(mainCode.String())
 	saveBuildCache(buildDir, cache)
 
 	return filepath.Join(filepath.Dir(absPath), outputBinary), nil
@@ -580,9 +679,10 @@ func resolveImportPath(importerPath, importStr string) string {
 		}
 	}
 
-	// Default: resolve relative to the importing file's directory
 	return filepath.Join(filepath.Dir(importerPath), importStr)
 }
+
+var parsedFilesCache = make(map[string]*compiler.Program)
 
 func parseWithDependencies(filePath string, visited map[string]int) (*compiler.Program, error) {
 	if visited[filePath] == 1 {
@@ -608,6 +708,10 @@ func parseWithDependencies(filePath string, visited map[string]int) (*compiler.P
 		diagnostics := compiler.FormatDiagnostics(parser.Errors(), string(content))
 		return nil, fmt.Errorf("errors parsing %s:\n%s", filePath, diagnostics)
 	}
+
+	localProg := &compiler.Program{Statements: make([]compiler.Statement, len(program.Statements))}
+	copy(localProg.Statements, program.Statements)
+	parsedFilesCache[filePath] = localProg
 
 	var mergedStatements []compiler.Statement
 
@@ -939,7 +1043,8 @@ func runServHot(srvFile string, env string) {
 	var currentCmd *exec.Cmd
 
 	startNewInstance := func() (*exec.Cmd, string, error) {
-		binPath, err := buildServNoExit(srvFile, "hot_service.exe", "", "", "")
+		binName := fmt.Sprintf("hot_service_%d.exe", time.Now().UnixNano())
+		binPath, err := buildServNoExit(srvFile, binName, "", "", "")
 		if err != nil {
 			return nil, "", err
 		}

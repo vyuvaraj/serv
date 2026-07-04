@@ -65,16 +65,13 @@ func NewCodegen(program *Program) *Codegen {
 }
 
 
-func (c *Codegen) Generate() (string, error) {
-	// Run AOT optimizations
+func (c *Codegen) RunPrePass() {
+	if len(c.structTypes) > 0 {
+		return
+	}
 	c.program = Optimize(c.program)
-
-	// Run escape analysis to annotate MapLiteral nodes
 	AnalyzeMapConcurrency(c.program)
 
-	var body bytes.Buffer
-
-	// Pre-pass: collect struct type names and function return types
 	for _, stmt := range c.program.Statements {
 		switch s := stmt.(type) {
 		case *StructDecl:
@@ -114,6 +111,25 @@ func (c *Codegen) Generate() (string, error) {
 			}
 		}
 	}
+}
+
+func (c *Codegen) GenerateStatements(statements []Statement) (string, error) {
+	var body bytes.Buffer
+	for _, stmt := range statements {
+		if tok := stmtToken(stmt); tok.Line > 0 {
+			body.WriteString(fmt.Sprintf("// .srv line %d\n", tok.Line))
+		}
+		gen, err := c.genStatement(stmt)
+		if err != nil {
+			return "", err
+		}
+		body.WriteString(gen)
+	}
+	return body.String(), nil
+}
+
+func (c *Codegen) Generate() (string, error) {
+	c.RunPrePass()
 
 	// Check if there are any non-test statements that would use the runtime
 	hasNonTestStmts := false
@@ -156,193 +172,14 @@ func (c *Codegen) Generate() (string, error) {
 		}
 	}
 
-	// Generate body
-	for _, stmt := range c.program.Statements {
-		// Emit source line reference for traceability
-		if tok := stmtToken(stmt); tok.Line > 0 {
-			body.WriteString(fmt.Sprintf("// .srv line %d\n", tok.Line))
-		}
-		gen, err := c.genStatement(stmt)
-		if err != nil {
-			return "", err
-		}
-		body.WriteString(gen)
-	}
-
-	// Generate Database ORM wrappers if any tables exist
-	if len(c.dbTables) > 0 {
-		var dbHelperCode strings.Builder
-		dbHelperCode.WriteString("\n// --- Database ORM Structures and Helpers ---\n")
-		
-		// Generate global db fields struct
-		dbHelperCode.WriteString("type dbClientStruct struct {\n")
-		for tableName := range c.dbTables {
-			dbHelperCode.WriteString(fmt.Sprintf("\t%s *dbTableClient_%s\n", capitalizeFirst(tableName), tableName))
-		}
-		dbHelperCode.WriteString("}\n\n")
-		dbHelperCode.WriteString("var db = &dbClientStruct{\n")
-		for tableName := range c.dbTables {
-			dbHelperCode.WriteString(fmt.Sprintf("\t%s: &dbTableClient_%s{},\n", capitalizeFirst(tableName), tableName))
-		}
-		dbHelperCode.WriteString("}\n\n")
-
-		for tableName, table := range c.dbTables {
-			// Row Struct
-			rowStructName := capitalizeFirst(tableName) + "Row"
-			dbHelperCode.WriteString(fmt.Sprintf("type %s struct {\n", rowStructName))
-			for _, col := range table.Columns {
-				goType := toGoType(col.Type)
-				dbHelperCode.WriteString(fmt.Sprintf("\t%s %s\n", capitalizeFirst(col.Name), goType))
-			}
-			dbHelperCode.WriteString("}\n\n")
-
-			// Client Struct
-			clientStructName := "dbTableClient_" + tableName
-			dbHelperCode.WriteString(fmt.Sprintf("type %s struct{}\n\n", clientStructName))
-
-			// Methods: find, findOne, insert, update, delete
-			// 1. find
-			dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) Find(filter map[string]interface{}) ([]%s, error) {
-	// Build where clause
-	query := "SELECT * FROM %s"
-	var args []interface{}
-	if len(filter) > 0 {
-		var clauses []string
-		for k, v := range filter {
-			clauses = append(clauses, k + " = ?")
-			args = append(args, v)
-		}
-		query += " WHERE " + strings.Join(clauses, " AND ")
-	}
-	res := runtime.DBQuery(query, args...)
-	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
-		return nil, fmt.Errorf("%%v", tuple[1])
-	}
-	slice, ok := res.([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid result format")
-	}
-	var rows []%s
-	for _, item := range slice {
-		sm, ok := item.(*runtime.SafeMap)
-		if !ok {
-			continue
-		}
-		var r %s
-`, clientStructName, rowStructName, tableName, rowStructName, rowStructName))
-
-			for _, col := range table.Columns {
-				goType := toGoType(col.Type)
-				dbHelperCode.WriteString(fmt.Sprintf("\t\tif val := sm.Get(%q); val != nil {\n", col.Name))
-				switch goType {
-				case "int":
-					dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toInt(val)\n", capitalizeFirst(col.Name)))
-				case "float64":
-					dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toFloat64(val)\n", capitalizeFirst(col.Name)))
-				case "bool":
-					dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toBool(val)\n", capitalizeFirst(col.Name)))
-				default:
-					dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toString(val)\n", capitalizeFirst(col.Name)))
-				}
-				dbHelperCode.WriteString("\t\t}\n")
-			}
-			dbHelperCode.WriteString(`		rows = append(rows, r)
-	}
-	return rows, nil
-}
-
-`)
-
-			// 2. findOne
-			dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) FindOne(filter map[string]interface{}) (*%s, error) {
-	rows, err := c.Find(filter)
+	var body bytes.Buffer
+	bodyStr, err := c.GenerateStatements(c.program.Statements)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return &rows[0], nil
-}
+	body.WriteString(bodyStr)
 
-`, clientStructName, rowStructName))
-
-			// 3. insert
-			var colNames []string
-			var colPlaceholders []string
-			var colValues []string
-			for _, col := range table.Columns {
-				colNames = append(colNames, col.Name)
-				colPlaceholders = append(colPlaceholders, "?")
-				colValues = append(colValues, fmt.Sprintf("row.%s", capitalizeFirst(col.Name)))
-			}
-			dbHelperCode.WriteString(fmt.Sprintf(`func (c *dbTableClient_%s) Insert(row *%s) error {
-	query := "INSERT INTO %s (%s) VALUES (%s)"
-	res := runtime.DBQuery(query, %s)
-	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
-		return fmt.Errorf("%%v", tuple[1])
-	}
-	return nil
-}
-
-`, tableName, rowStructName, tableName, strings.Join(colNames, ", "), strings.Join(colPlaceholders, ", "), strings.Join(colValues, ", ")))
-
-
-			// 4. update
-			dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) Update(filter map[string]interface{}, update map[string]interface{}) error {
-	if len(update) == 0 {
-		return nil
-	}
-	query := "UPDATE %s SET "
-	var args []interface{}
-	var setClauses []string
-	for k, v := range update {
-		setClauses = append(setClauses, k + " = ?")
-		args = append(args, v)
-	}
-	query += strings.Join(setClauses, ", ")
-	if len(filter) > 0 {
-		var whereClauses []string
-		for k, v := range filter {
-			whereClauses = append(whereClauses, k + " = ?")
-			args = append(args, v)
-		}
-		query += " WHERE " + strings.Join(whereClauses, " AND ")
-	}
-	res := runtime.DBQuery(query, args...)
-	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
-		return fmt.Errorf("%%v", tuple[1])
-	}
-	return nil
-}
-
-`, clientStructName, tableName))
-
-			// 5. delete
-			dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) Delete(filter map[string]interface{}) error {
-	query := "DELETE FROM %s"
-	var args []interface{}
-	if len(filter) > 0 {
-		var clauses []string
-		for k, v := range filter {
-			clauses = append(clauses, k + " = ?")
-			args = append(args, v)
-		}
-		query += " WHERE " + strings.Join(clauses, " AND ")
-	}
-	res := runtime.DBQuery(query, args...)
-	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
-		return fmt.Errorf("%%v", tuple[1])
-	}
-	return nil
-}
-
-`, clientStructName, tableName))
-
-
-		}
-		body.WriteString(dbHelperCode.String())
-	}
+	body.WriteString(c.GenerateORMHelpers())
 
 	// Build final output with imports
 	var out bytes.Buffer
@@ -379,7 +216,6 @@ func (c *Codegen) Generate() (string, error) {
 		out.WriteString("var _ = strings.Join // ensure strings is used\n\n")
 	}
 
-
 	// Pre-compiled regex variables
 	if len(c.regexDecls) > 0 {
 		for _, rDecl := range c.regexDecls {
@@ -392,6 +228,171 @@ func (c *Codegen) Generate() (string, error) {
 	out.WriteString(body.String())
 
 	return out.String(), nil
+}
+
+func (c *Codegen) GenerateORMHelpers() string {
+	if len(c.dbTables) == 0 {
+		return ""
+	}
+	var dbHelperCode strings.Builder
+	dbHelperCode.WriteString("\n// --- Database ORM Structures and Helpers ---\n")
+
+	dbClientStructName := "dbClientStruct"
+	dbHelperCode.WriteString(fmt.Sprintf("type %s struct {\n", dbClientStructName))
+	for tableName := range c.dbTables {
+		dbHelperCode.WriteString(fmt.Sprintf("\t%s *dbTableClient_%s\n", capitalizeFirst(tableName), tableName))
+	}
+	dbHelperCode.WriteString("}\n\n")
+	dbHelperCode.WriteString(fmt.Sprintf("var db = &%s{\n", dbClientStructName))
+	for tableName := range c.dbTables {
+		dbHelperCode.WriteString(fmt.Sprintf("\t%s: &dbTableClient_%s{},\n", capitalizeFirst(tableName), tableName))
+	}
+	dbHelperCode.WriteString("}\n\n")
+
+	for tableName, table := range c.dbTables {
+		rowStructName := capitalizeFirst(tableName) + "Row"
+		dbHelperCode.WriteString(fmt.Sprintf("type %s struct {\n", rowStructName))
+		for _, col := range table.Columns {
+			goType := toGoType(col.Type)
+			dbHelperCode.WriteString(fmt.Sprintf("\t%s %s\n", capitalizeFirst(col.Name), goType))
+		}
+		dbHelperCode.WriteString("}\n\n")
+
+		clientStructName := "dbTableClient_" + tableName
+		dbHelperCode.WriteString(fmt.Sprintf("type %s struct{}\n\n", clientStructName))
+
+		dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) Find(filter map[string]interface{}) ([]%s, error) {
+	query := "SELECT * FROM %s"
+	var args []interface{}
+	if len(filter) > 0 {
+		var clauses []string
+		for k, v := range filter {
+			clauses = append(clauses, k + " = ?")
+			args = append(args, v)
+		}
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	res := runtime.DBQuery(query, args...)
+	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
+		return nil, fmt.Errorf("%%v", tuple[1])
+	}
+	slice, ok := res.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid result format")
+	}
+	var rows []%s
+	for _, item := range slice {
+		sm, ok := item.(*runtime.SafeMap)
+		if !ok {
+			continue
+		}
+		var r %s
+`, clientStructName, rowStructName, tableName, rowStructName, rowStructName))
+
+		for _, col := range table.Columns {
+			goType := toGoType(col.Type)
+			dbHelperCode.WriteString(fmt.Sprintf("\t\tif val := sm.Get(%q); val != nil {\n", col.Name))
+			switch goType {
+			case "int":
+				dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toInt(val)\n", capitalizeFirst(col.Name)))
+			case "float64":
+				dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toFloat64(val)\n", capitalizeFirst(col.Name)))
+			case "bool":
+				dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toBool(val)\n", capitalizeFirst(col.Name)))
+			default:
+				dbHelperCode.WriteString(fmt.Sprintf("\t\t\tr.%s = toString(val)\n", capitalizeFirst(col.Name)))
+			}
+			dbHelperCode.WriteString("\t\t}\n")
+		}
+		dbHelperCode.WriteString(`		rows = append(rows, r)
+	}
+	return rows, nil
+}
+
+`)
+
+		dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) FindOne(filter map[string]interface{}) (*%s, error) {
+	rows, err := c.Find(filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+`, clientStructName, rowStructName))
+
+		var colNames []string
+		var colPlaceholders []string
+		var colValues []string
+		for _, col := range table.Columns {
+			colNames = append(colNames, col.Name)
+			colPlaceholders = append(colPlaceholders, "?")
+			colValues = append(colValues, fmt.Sprintf("row.%s", capitalizeFirst(col.Name)))
+		}
+		dbHelperCode.WriteString(fmt.Sprintf(`func (c *dbTableClient_%s) Insert(row *%s) error {
+	query := "INSERT INTO %s (%s) VALUES (%s)"
+	res := runtime.DBQuery(query, %s)
+	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
+		return fmt.Errorf("%%v", tuple[1])
+	}
+	return nil
+}
+
+`, tableName, rowStructName, tableName, strings.Join(colNames, ", "), strings.Join(colPlaceholders, ", "), strings.Join(colValues, ", ")))
+
+		dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) Update(filter map[string]interface{}, update map[string]interface{}) error {
+	if len(update) == 0 {
+		return nil
+	}
+	query := "UPDATE %s SET "
+	var args []interface{}
+	var setClauses []string
+	for k, v := range update {
+		setClauses = append(setClauses, k + " = ?")
+		args = append(args, v)
+	}
+	query += strings.Join(setClauses, ", ")
+	if len(filter) > 0 {
+		var whereClauses []string
+		for k, v := range filter {
+			whereClauses = append(whereClauses, k + " = ?")
+			args = append(args, v)
+		}
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	res := runtime.DBQuery(query, args...)
+	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
+		return fmt.Errorf("%%v", tuple[1])
+	}
+	return nil
+}
+
+`, clientStructName, tableName))
+
+		dbHelperCode.WriteString(fmt.Sprintf(`func (c *%s) Delete(filter map[string]interface{}) error {
+	query := "DELETE FROM %s"
+	var args []interface{}
+	if len(filter) > 0 {
+		var clauses []string
+		for k, v := range filter {
+			clauses = append(clauses, k + " = ?")
+			args = append(args, v)
+		}
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	res := runtime.DBQuery(query, args...)
+	if tuple, ok := res.([2]interface{}); ok && tuple[1] != nil {
+		return fmt.Errorf("%%v", tuple[1])
+	}
+	return nil
+}
+
+`, clientStructName, tableName))
+	}
+	return dbHelperCode.String()
 }
 
 
@@ -549,4 +550,40 @@ for _, line := range lines {
 }
 out.WriteString("}")
 return out.String(), nil
+}
+
+func (c *Codegen) GenerateFileHeader(fileImports map[string]bool) string {
+	var out bytes.Buffer
+	out.WriteString("// Code generated by Serv compiler. DO NOT EDIT.\n")
+	out.WriteString("package main\n\n")
+
+	if len(fileImports) > 0 {
+		out.WriteString("import (\n")
+		for imp := range fileImports {
+			out.WriteString("\t")
+			out.WriteString(imp)
+			out.WriteString("\n")
+		}
+		out.WriteString(")\n\n")
+	}
+
+	if fileImports[`"time"`] {
+		out.WriteString("var _ = time.Second // ensure time is used\n\n")
+	}
+	if fileImports[`"fmt"`] {
+		out.WriteString("var _ = fmt.Sprintf // ensure fmt is used\n\n")
+	}
+	if fileImports[`"serv/runtime"`] {
+		out.WriteString("var _ = runtime.Noop // ensure runtime is used\n\n")
+	}
+	if fileImports[`"strconv"`] {
+		out.WriteString("var _ = strconv.Atoi // ensure strconv is used\n\n")
+	}
+	if fileImports[`"regexp"`] {
+		out.WriteString("var _ = regexp.MustCompile // ensure regexp is used\n\n")
+	}
+	if fileImports[`"strings"`] {
+		out.WriteString("var _ = strings.Join // ensure strings is used\n\n")
+	}
+	return out.String()
 }
