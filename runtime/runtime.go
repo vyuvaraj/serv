@@ -518,7 +518,10 @@ func StartServer() interface{} {
 					statusCode = code
 				}
 			}
-			if htmlStr, hasHtml := resMap["html"].(string); hasHtml {
+			// Redirect sentinel: html.redirect(url, code) returns {"redirect": url, "status": code}
+			if redirectURL, hasRedirect := resMap["redirect"].(string); hasRedirect {
+				http.Redirect(w, r, redirectURL, statusCode)
+			} else if htmlStr, hasHtml := resMap["html"].(string); hasHtml {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(statusCode)
 				w.Write([]byte(htmlStr))

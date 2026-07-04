@@ -217,6 +217,19 @@ func RegistryHas(name interface{}) interface{} {
 	return exists
 }
 
+// HTMLRedirect returns a redirect sentinel map that the runtime dispatcher
+// converts into an HTTP redirect response. Defaults to 302 if code is 0.
+func HTMLRedirect(url interface{}, code interface{}) interface{} {
+	statusCode := 302
+	if c, ok := code.(int); ok && c != 0 {
+		statusCode = c
+	}
+	return map[string]interface{}{
+		"redirect": fmt.Sprint(url),
+		"status":   statusCode,
+	}
+}
+
 func unwrapTemplateData(val interface{}) interface{} {
 	if val == nil {
 		return nil

@@ -410,4 +410,8 @@ func HTMLRender(filePath string, data interface{}) interface{} {
 	return "HTMLRender is not supported in the WebAssembly target"
 }
 
+func HTMLRedirect(url interface{}, code interface{}) interface{} {
+	return nil
+}
+
 // ── Metrics Stubs ────────────────────────────────────────────────────────────
