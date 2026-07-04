@@ -168,6 +168,16 @@ func (s *SafeMap) Delete(key string) {
 	delete(s.m, key)
 }
 
+func (s *SafeMap) ToMap() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make(map[string]interface{}, len(s.m))
+	for k, v := range s.m {
+		res[k] = v
+	}
+	return res
+}
+
 func (s *SafeMap) MarshalJSON() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

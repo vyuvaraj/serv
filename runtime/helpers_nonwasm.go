@@ -217,14 +217,49 @@ func RegistryHas(name interface{}) interface{} {
 	return exists
 }
 
+func unwrapTemplateData(val interface{}) interface{} {
+	if val == nil {
+		return nil
+	}
+	if sm, ok := val.(*SafeMap); ok {
+		return unwrapTemplateData(sm.ToMap())
+	}
+	if sm, ok := val.(SafeMap); ok {
+		return unwrapTemplateData(sm.ToMap())
+	}
+	if m, ok := val.(map[string]interface{}); ok {
+		res := make(map[string]interface{}, len(m))
+		for k, v := range m {
+			res[k] = unwrapTemplateData(v)
+		}
+		return res
+	}
+	if m, ok := val.(map[interface{}]interface{}); ok {
+		res := make(map[string]interface{}, len(m))
+		for k, v := range m {
+			res[fmt.Sprint(k)] = unwrapTemplateData(v)
+		}
+		return res
+	}
+	if s, ok := val.([]interface{}); ok {
+		res := make([]interface{}, len(s))
+		for i, v := range s {
+			res[i] = unwrapTemplateData(v)
+		}
+		return res
+	}
+	return val
+}
+
 // HTMLTemplate parses and executes a string-based HTML template.
 func HTMLTemplate(tpl string, data interface{}) interface{} {
 	t, err := template.New("web").Parse(tpl)
 	if err != nil {
 		return fmt.Sprintf("Template parse error: %s", err.Error())
 	}
+	unwrapped := unwrapTemplateData(data)
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
+	if err := t.Execute(&buf, unwrapped); err != nil {
 		return fmt.Sprintf("Template execution error: %s", err.Error())
 	}
 	return buf.String()
@@ -236,8 +271,9 @@ func HTMLRender(filePath string, data interface{}) interface{} {
 	if err != nil {
 		return fmt.Sprintf("Failed to load template file %s: %s", filePath, err.Error())
 	}
+	unwrapped := unwrapTemplateData(data)
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
+	if err := t.Execute(&buf, unwrapped); err != nil {
 		return fmt.Sprintf("Template execution error: %s", err.Error())
 	}
 	return buf.String()
