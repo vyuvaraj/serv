@@ -1,4 +1,4 @@
-project_name: servcloud
+﻿project_name: servcloud
 version: 2
 
 before:
@@ -47,7 +47,7 @@ dockers:
   - image_templates:
       - "ghcr.io/vyuvaraj/servcloud:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servcloud:latest"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServCloud"
       - "--label=org.opencontainers.image.version={{.Version}}"
