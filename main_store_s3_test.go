@@ -31,7 +31,7 @@ test "store s3 pipeline transform call compilation" {
 	tmpFile.Close()
 
 	// Compile it to check parsing, type-checking and code generation
-	_, err = buildServNoExit(tmpFile.Name(), "temp_store_s3_pipeline.exe", "", "", "")
+	_, err = buildServNoExit(tmpFile.Name(), "temp_store_s3_pipeline.exe", "", "", "", "")
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}

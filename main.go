@@ -20,6 +20,7 @@ func main() {
 		target := ""
 		goos := ""
 		goarch := ""
+		tags := ""
 		var buildArgs []string
 		rawArgs := os.Args[2:]
 		for i := 0; i < len(rawArgs); i++ {
@@ -35,6 +36,9 @@ func main() {
 			} else if (rawArgs[i] == "--arch" || rawArgs[i] == "-arch") && i+1 < len(rawArgs) {
 				goarch = rawArgs[i+1]
 				i++
+			} else if (rawArgs[i] == "--tags" || rawArgs[i] == "-tags") && i+1 < len(rawArgs) {
+				tags = rawArgs[i+1]
+				i++
 			} else {
 				buildArgs = append(buildArgs, rawArgs[i])
 			}
@@ -49,7 +53,7 @@ func main() {
 				outputBinary = "service.exe"
 			}
 		}
-		buildServ(buildArgs[0], outputBinary, target, goos, goarch)
+		buildServ(buildArgs[0], outputBinary, target, goos, goarch, tags)
 
 	case "run":
 		runCmd := flag.NewFlagSet("run", flag.ExitOnError)

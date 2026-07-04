@@ -162,7 +162,7 @@ func TestResiliencyAndCrossCompilationIntegration(t *testing.T) {
 	runTests(tmpFile.Name(), false, "")
 
 	// 2. Verify Cross-Compilation target build succeeds
-	binPath, err := buildServNoExit(tmpFile.Name(), "test_service_linux", "", "linux", "amd64")
+	binPath, err := buildServNoExit(tmpFile.Name(), "test_service_linux", "", "linux", "amd64", "")
 	if err != nil {
 		t.Fatalf("failed cross-compiling to linux/amd64: %v", err)
 	}

@@ -18,8 +18,8 @@ import (
 	"serv/compiler"
 )
 
-func buildServ(srvFile, outputBinary, target, goos, goarch string) string {
-	absPath, err := buildServNoExit(srvFile, outputBinary, target, goos, goarch)
+func buildServ(srvFile, outputBinary, target, goos, goarch, tags string) string {
+	absPath, err := buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags)
 	if err != nil {
 		fmt.Printf("Build failed: %v\n", err)
 		os.Exit(1)
@@ -28,7 +28,7 @@ func buildServ(srvFile, outputBinary, target, goos, goarch string) string {
 	return absPath
 }
 
-func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string, error) {
+func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (string, error) {
 	// Clear the parser cache before compilation
 	parsedFilesCache = make(map[string]*compiler.Program)
 
@@ -238,7 +238,13 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 		relOutPath = targetOutPath
 	}
 
-	cmd := exec.Command(goPath, "build", "-o", relOutPath, ".")
+	buildArgs := []string{"build"}
+	if tags != "" {
+		buildArgs = append(buildArgs, "-tags", tags)
+	}
+	buildArgs = append(buildArgs, "-o", relOutPath, ".")
+
+	cmd := exec.Command(goPath, buildArgs...)
 	cmd.Dir = buildDir
 	cmd.Env = filterEnv(os.Environ(), "GOWORK")
 	cmd.Env = append(cmd.Env, "GOWORK=off")
@@ -261,7 +267,13 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 			if tidyErr := runGoModTidy(buildDir); tidyErr == nil {
 				// Retry the build
 				stderr.Reset()
-				retryCmd := exec.Command(goPath, "build", "-o", relOutPath, ".")
+				retryBuildArgs := []string{"build"}
+				if tags != "" {
+					retryBuildArgs = append(retryBuildArgs, "-tags", tags)
+				}
+				retryBuildArgs = append(retryBuildArgs, "-o", relOutPath, ".")
+				
+				retryCmd := exec.Command(goPath, retryBuildArgs...)
 				retryCmd.Dir = buildDir
 				retryCmd.Env = filterEnv(os.Environ(), "GOWORK")
 				retryCmd.Env = append(retryCmd.Env, "GOWORK=off")
@@ -292,7 +304,7 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch string) (string
 }
 
 func runServ(srvFile string, extraArgs []string, profile bool, env string) {
-	binPath, err := buildServNoExit(srvFile, "temp_service.exe", "", "", "")
+	binPath, err := buildServNoExit(srvFile, "temp_service.exe", "", "", "", "")
 	if err != nil {
 		fmt.Printf("Build failed: %v\n", err)
 		os.Exit(1)
@@ -360,7 +372,7 @@ func runServWatch(srvFile string, env string) {
 			cmd.Wait()
 		}
 
-		binPath, err := buildServNoExit(srvFile, "watch_service.exe", "", "", "")
+		binPath, err := buildServNoExit(srvFile, "watch_service.exe", "", "", "", "")
 		if err != nil {
 			fmt.Printf("[WATCH] Rebuild failed:\n%v\n", err)
 			return
@@ -1044,7 +1056,7 @@ func runServHot(srvFile string, env string) {
 
 	startNewInstance := func() (*exec.Cmd, string, error) {
 		binName := fmt.Sprintf("hot_service_%d.exe", time.Now().UnixNano())
-		binPath, err := buildServNoExit(srvFile, binName, "", "", "")
+		binPath, err := buildServNoExit(srvFile, binName, "", "", "", "")
 		if err != nil {
 			return nil, "", err
 		}
