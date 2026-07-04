@@ -373,7 +373,7 @@ func AddStaticRoute(prefix, dir string) {}
 func AddMCPTool(name, description string, handler func(interface{}) interface{}) {}
 func RegisterMigration(name string, handler func() interface{}) {}
 func RegisterDBSchema(schemaJSON string) {}
-func Subscribe(topic string, handler func(string) interface{}) {}
+func Subscribe(topic string, handler func(string)) {}
 func Publish(topic string, val interface{}) interface{}        { return nil }
 
 // ── OTEL & Concurrency / Semaphore Stubs ──────────────────────────────────────
