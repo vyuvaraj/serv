@@ -48,7 +48,11 @@ dockers:
   - image_templates:
       - "ghcr.io/vyuvaraj/servgate:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servgate:latest"
-    dockerfile: Dockerfile
+    # goreleaser builds in a temp dir with only the binary + Dockerfile.
+    # Dockerfile.goreleaser expects a pre-built binary (no source build stage).
+    dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - config.json
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServGate"
       - "--label=org.opencontainers.image.version={{.Version}}"
