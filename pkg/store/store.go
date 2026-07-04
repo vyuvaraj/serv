@@ -71,6 +71,10 @@ type Store struct {
 	samplingRate int
 	sampled      map[string]bool // key: traceId
 	
+	baseSamplingRate int
+	spanCount        int
+	errorCount       int
+
 	// Metrics fields
 	latencies  map[string][]float64   // key: service:spanName -> list of latencies in ms
 	timestamps map[string][]time.Time // key: service:spanName -> list of hit timestamps
@@ -86,20 +90,41 @@ func NewStore(limit int) *Store {
 		}
 	}
 	return &Store{
-		spans:        make(map[string][]Span),
-		limit:        limit,
-		samplingRate: samplingRate,
-		sampled:      make(map[string]bool),
-		latencies:    make(map[string][]float64),
-		timestamps:   make(map[string][]time.Time),
-		traceLogs:    make(map[string][]LogLine),
-		anomalies:    make([]Anomaly, 0),
+		spans:            make(map[string][]Span),
+		limit:            limit,
+		samplingRate:     samplingRate,
+		baseSamplingRate: samplingRate,
+		sampled:          make(map[string]bool),
+		latencies:        make(map[string][]float64),
+		timestamps:       make(map[string][]time.Time),
+		traceLogs:        make(map[string][]LogLine),
+		anomalies:        make([]Anomaly, 0),
 	}
 }
 
 func (s *Store) AddSpans(newSpans []Span) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	for _, span := range newSpans {
+		s.spanCount++
+		if span.Status == 2 {
+			s.errorCount++
+		}
+		if s.spanCount >= 100 {
+			s.spanCount = int(float64(s.spanCount) * 0.5)
+			s.errorCount = int(float64(s.errorCount) * 0.5)
+		}
+	}
+
+	if s.spanCount > 10 {
+		errRate := float64(s.errorCount) / float64(s.spanCount)
+		if errRate > 0.05 {
+			s.samplingRate = 100
+		} else {
+			s.samplingRate = s.baseSamplingRate
+		}
+	}
 
 	for _, span := range newSpans {
 		traceID := span.TraceID
@@ -602,5 +627,11 @@ func (s *Store) GetAnomalies() []Anomaly {
 	anomaliesCopy := make([]Anomaly, len(s.anomalies))
 	copy(anomaliesCopy, s.anomalies)
 	return anomaliesCopy
+}
+
+func (s *Store) GetSamplingRateForTest() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.samplingRate
 }
 

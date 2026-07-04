@@ -430,3 +430,31 @@ func BenchmarkTraceStoreAddSpans(b *testing.B) {
 		s.AddSpans(spans)
 	}
 }
+
+func TestAdaptiveSampling(t *testing.T) {
+	os.Setenv("SERV_TRACE_SAMPLING_RATE", "10")
+	defer os.Unsetenv("SERV_TRACE_SAMPLING_RATE")
+
+	ts := store.NewStore(100)
+
+	// 1. Send healthy spans, should stay at 10%
+	for i := 0; i < 15; i++ {
+		ts.AddSpans([]store.Span{
+			{TraceID: fmt.Sprintf("trace-h-%d", i), SpanID: "span", Name: "GET", Status: 1, Service: "gateway"},
+		})
+	}
+	if rate := ts.GetSamplingRateForTest(); rate != 10 {
+		t.Errorf("Expected sampling rate to remain 10, got %d", rate)
+	}
+
+	// 2. Send some error spans to spike the error rate (> 5%)
+	ts.AddSpans([]store.Span{
+		{TraceID: "trace-err-1", SpanID: "span", Name: "GET", Status: 2, Service: "gateway"}, // error
+		{TraceID: "trace-err-2", SpanID: "span", Name: "GET", Status: 2, Service: "gateway"}, // error
+	})
+
+	// Sampling rate should adaptively spike to 100%
+	if rate := ts.GetSamplingRateForTest(); rate != 100 {
+		t.Errorf("Expected sampling rate to spike to 100, got %d", rate)
+	}
+}
