@@ -1,4 +1,4 @@
-project_name: servconsole
+﻿project_name: servconsole
 version: 2
 
 before:
@@ -47,7 +47,9 @@ dockers:
   - image_templates:
       - "ghcr.io/vyuvaraj/servconsole:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servconsole:latest"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - web/
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServConsole"
       - "--label=org.opencontainers.image.version={{.Version}}"
