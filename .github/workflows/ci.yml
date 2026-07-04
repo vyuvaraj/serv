@@ -38,7 +38,7 @@ jobs:
         run: |
           $failed = @()
           Get-ChildItem examples\*.srv | ForEach-Object {
-            & .\serv.exe build $_.FullName -o examples\test_bin.exe 2>&1 | Out-Null
+            & .\serv.exe build $_.FullName -o examples\test_bin.exe
             if ($LASTEXITCODE -ne 0) { $failed += $_.Name }
           }
           Remove-Item examples\test_bin.exe -ErrorAction SilentlyContinue
@@ -61,7 +61,7 @@ jobs:
           $failed = @()
           foreach ($file in $testFiles) {
             if (Test-Path $file) {
-              & .\serv.exe test $file 2>&1 | Out-Null
+              & .\serv.exe test $file
               if ($LASTEXITCODE -ne 0) { $failed += $file }
             }
           }
