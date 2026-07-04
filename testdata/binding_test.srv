@@ -1,0 +1,25 @@
+server "9000"
+
+// POST /api/users - JSON body binding
+export route "POST" "/api/users" (req) {
+    let data = req.json()
+    let name = data.name
+    let email = data.email
+    return { "created": name, "email": email }
+}
+
+// POST /api/contact - Form body binding
+export route "POST" "/api/contact" (req) {
+    let form = req.form()
+    let message = form.message
+    return { "received": message }
+}
+
+// GET /api/items/:id - Safe param lookup
+export route "GET" "/api/items/:id" (req) {
+    let id = req.param("id")
+    if id == nil {
+        return { "error": "id is required", "status": 400 }
+    }
+    return { "item": id }
+}

@@ -434,6 +434,28 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return fmt.Sprintf("runtime.EnvSecret(%s)", strings.Join(args, ", ")), nil
 			}
 
+			// Request body binding shortcuts: req.json(), req.form(), req.param(key)
+			// Detect when the callee object is the current route's request parameter
+			if err == nil && c.currentRoute != nil && objStr == c.currentRoute.Param {
+				switch memExpr.Field {
+				case "json":
+					// req.json() -> runtime.JSONParse(req.Body)
+					return fmt.Sprintf("runtime.JSONParse(%s.Body)", objStr), nil
+				case "form":
+					// req.form() -> runtime.ParseFormBody(req.Body)
+					return fmt.Sprintf("runtime.ParseFormBody(%s.Body)", objStr), nil
+				case "param":
+					// req.param("key") -> runtime.RequestParam(req, "key")
+					if len(e.Arguments) == 1 {
+						argStr, argErr := c.genExpression(e.Arguments[0])
+						if argErr != nil {
+							return "", argErr
+						}
+						return fmt.Sprintf("runtime.RequestParam(%s, %s)", objStr, argStr), nil
+					}
+				}
+			}
+
 			if err == nil && objStr == "regexp" && memExpr.Field == "check" {
 				isRegexpCheck = true
 				funcStr = "regexp.check"

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -215,6 +216,41 @@ func RegistryHas(name interface{}) interface{} {
 	_, exists := registryFuncs[key]
 	registryFuncsMu.RUnlock()
 	return exists
+}
+
+// ParseFormBody parses a URL-encoded form body (application/x-www-form-urlencoded)
+// and returns a map[string]interface{} of field values.
+func ParseFormBody(body string) interface{} {
+	vals, err := url.ParseQuery(body)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	res := make(map[string]interface{}, len(vals))
+	for k, v := range vals {
+		if len(v) == 1 {
+			res[k] = v[0]
+		} else {
+			slice := make([]interface{}, len(v))
+			for i, s := range v {
+				slice[i] = s
+			}
+			res[k] = slice
+		}
+	}
+	return res
+}
+
+// RequestParam safely retrieves a named parameter from a Request's Params map,
+// returning nil if the key is not present.
+func RequestParam(req Request, key interface{}) interface{} {
+	k := fmt.Sprint(key)
+	if v, ok := req.Params[k]; ok {
+		return v
+	}
+	if v, ok := req.Query[k]; ok {
+		return v
+	}
+	return nil
 }
 
 // HTMLRedirect returns a redirect sentinel map that the runtime dispatcher

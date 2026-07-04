@@ -410,8 +410,8 @@ func HTMLRender(filePath string, data interface{}) interface{} {
 	return "HTMLRender is not supported in the WebAssembly target"
 }
 
-func HTMLRedirect(url interface{}, code interface{}) interface{} {
-	return nil
-}
+func HTMLRedirect(url interface{}, code interface{}) interface{} { return nil }
+func ParseFormBody(body string) interface{}                       { return map[string]interface{}{} }
+func RequestParam(req Request, key interface{}) interface{}       { return nil }
 
 // ── Metrics Stubs ────────────────────────────────────────────────────────────
