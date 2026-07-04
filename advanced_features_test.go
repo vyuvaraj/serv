@@ -515,6 +515,11 @@ func TestGraphQLFederation(t *testing.T) {
 	resp := w.Result()
 	body, _ := io.ReadAll(resp.Body)
 
+	// OSS build returns 403 for EE-only GraphQL federation
+	if resp.StatusCode == http.StatusForbidden {
+		t.Skip("Skipping: GraphQL Federation requires ServGate Enterprise Edition")
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d, body: %s", resp.StatusCode, string(body))
 	}
@@ -746,6 +751,10 @@ func TestCostAwareLLMRouting(t *testing.T) {
 	recHigh := httptest.NewRecorder()
 
 	handler.ServeHTTP(recHigh, reqHigh)
+	// OSS build returns 403 for EE-only LLM routing
+	if recHigh.Code == http.StatusForbidden {
+		t.Skip("Skipping: Cost-Aware LLM Routing requires ServGate Enterprise Edition")
+	}
 	if recHigh.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", recHigh.Code)
 	}
