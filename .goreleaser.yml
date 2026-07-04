@@ -1,4 +1,4 @@
-project_name: servstore
+﻿project_name: servstore
 version: 2
 
 before:
@@ -34,7 +34,7 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.buildDate={{.Date}}
 
-  # Kubernetes CSI driver — Linux-only (runs as a DaemonSet sidecar)
+  # Kubernetes CSI driver â€” Linux-only (runs as a DaemonSet sidecar)
   - id: csi-driver
     main: ./cmd/csi-driver
     binary: servstore-csi
@@ -48,7 +48,7 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.buildDate={{.Date}}
 
-  # Kubernetes operator — Linux-only
+  # Kubernetes operator â€” Linux-only
   - id: operator
     main: ./cmd/operator
     binary: servstore-operator
@@ -104,7 +104,7 @@ dockers:
       - "ghcr.io/vyuvaraj/servstore:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servstore:latest"
     ids: [servstore]
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServStore"
       - "--label=org.opencontainers.image.version={{.Version}}"
