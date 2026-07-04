@@ -1,4 +1,4 @@
-project_name: servregistry
+﻿project_name: servregistry
 version: 2
 
 before:
@@ -47,7 +47,7 @@ dockers:
   - image_templates:
       - "ghcr.io/vyuvaraj/servregistry:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servregistry:latest"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServRegistry"
       - "--label=org.opencontainers.image.version={{.Version}}"
