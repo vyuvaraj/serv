@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/*]
+    branches: ["main", "feature/*"]
   pull_request:
-    branches: [main]
+    branches: ["main"]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -107,6 +107,9 @@ jobs:
       - name: Tidy Go modules
         run: go mod tidy
 
+      - name: Vet
+        run: go vet ./...
+
       - name: Build serv compiler (Linux)
         run: go build -o serv .
 
@@ -125,6 +128,10 @@ jobs:
             exit 1
           fi
           echo "All examples compiled on Linux"
+
+      # EE compile check — no secrets required
+      - name: Build (EE compile check)
+        run: go build -tags enterprise ./...
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

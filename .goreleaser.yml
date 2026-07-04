@@ -1,0 +1,50 @@
+project_name: serv
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: serv
+    main: .
+    binary: serv
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: serv
+    builds: [serv]
+    name_template: "serv_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+# Note: Homebrew and Scoop are managed via the hand-crafted formulas in
+# homebrew-serv-repo and scoop-serv repos. The existing ci.yml handles
+# cross-platform release builds directly via upload-artifact steps.
+# goreleaser is used here purely for consistent binary naming, checksums,
+# and a clean GitHub Releases page.
