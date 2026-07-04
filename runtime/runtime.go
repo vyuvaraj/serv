@@ -501,14 +501,27 @@ func StartServer() interface{} {
 
 		if resMap, ok := res.(map[string]interface{}); ok {
 			if s, hasStatus := resMap["status"]; hasStatus {
-				if code, ok := s.(int); ok && code >= 400 {
+				if code, ok := s.(int); ok {
 					statusCode = code
 				}
 			}
-			json.NewEncoder(w).Encode(resMap)
+			if htmlStr, hasHtml := resMap["html"].(string); hasHtml {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(statusCode)
+				w.Write([]byte(htmlStr))
+			} else {
+				w.WriteHeader(statusCode)
+				json.NewEncoder(w).Encode(resMap)
+			}
 		} else if resStr, ok := res.(string); ok {
+			// Sniff or check if string starts with HTML tags to set Content-Type correctly
+			if strings.HasPrefix(strings.TrimSpace(strings.ToLower(resStr)), "<html") || strings.HasPrefix(strings.TrimSpace(strings.ToLower(resStr)), "<!doctype") {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			}
+			w.WriteHeader(statusCode)
 			w.Write([]byte(resStr))
 		} else {
+			w.WriteHeader(statusCode)
 			json.NewEncoder(w).Encode(res)
 		}
 
