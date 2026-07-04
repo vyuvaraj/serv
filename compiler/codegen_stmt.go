@@ -19,7 +19,7 @@ func (c *Codegen) genGoPackageImport(s *GoPackageImport) (string, error) {
 	return "", nil
 }
 
-func (c *Codegen) genDeclareModuleStmt(s *DeclareModuleStmt) (string, error) {
+func (c *Codegen) genDeclareModuleStmt(_ *DeclareModuleStmt) (string, error) {
 	return "", nil
 }
 
