@@ -38,9 +38,14 @@ func runTests(srvFile string, withCoverage bool, filter string) {
 	}
 
 	// Clean stale Go files from previous builds to prevent conflicts
-	for _, name := range []string{"main.go", "service.go", "serv_test.go", "coverage.out"} {
-		_ = os.Remove(filepath.Join(buildDir, name))
+	if files, err := os.ReadDir(buildDir); err == nil {
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".go") {
+				_ = os.Remove(filepath.Join(buildDir, f.Name()))
+			}
+		}
 	}
+	_ = os.Remove(filepath.Join(buildDir, "coverage.out"))
 
 	// Write service.go: all generated declarations (functions, init blocks, etc.)
 	serviceCode := goCode + "\n" + cg.GenerateHelpers()
