@@ -1,4 +1,4 @@
-project_name: servdb
+﻿project_name: servdb
 version: 2
 
 before:
@@ -47,7 +47,7 @@ dockers:
   - image_templates:
       - "ghcr.io/vyuvaraj/servdb:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servdb:latest"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServDB"
       - "--label=org.opencontainers.image.version={{.Version}}"
