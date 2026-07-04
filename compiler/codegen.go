@@ -90,6 +90,8 @@ func (c *Codegen) RunPrePass() {
 			for _, table := range s.Tables {
 				c.dbTables[table.Name] = table
 			}
+		case *ExternFnStmt:
+			c.extractGoExtern(s)
 		case *ExportStmt:
 			switch inner := s.Inner.(type) {
 			case *StructDecl:
@@ -108,7 +110,24 @@ func (c *Codegen) RunPrePass() {
 				if len(inner.ParamTypes) > 0 {
 					c.funcParamTypes[inner.Name] = inner.ParamTypes
 				}
+			case *ExternFnStmt:
+				c.extractGoExtern(inner)
 			}
+		}
+	}
+}
+
+func (c *Codegen) extractGoExtern(ext *ExternFnStmt) {
+	if strings.HasPrefix(ext.Source, "go:") {
+		// Format: "go:importPath:FunctionName"
+		parts := strings.Split(strings.TrimPrefix(ext.Source, "go:"), ":")
+		if len(parts) >= 2 {
+			pkgPath := parts[0]
+			// Add package import
+			c.imports[`"`+pkgPath+`"`] = true
+			// Extract package name from path
+			pkgName := filepath.Base(pkgPath)
+			c.goExterns[ext.Name] = pkgName + "." + parts[1]
 		}
 	}
 }
@@ -153,24 +172,6 @@ func (c *Codegen) Generate() (string, error) {
 		c.imports[`"strings"`] = true
 	}
 
-
-	// First pass: extract externs and imports to build the header
-	for _, stmt := range c.program.Statements {
-		if ext, ok := stmt.(*ExternFnStmt); ok {
-			if strings.HasPrefix(ext.Source, "go:") {
-				// Format: "go:importPath:FunctionName"
-				parts := strings.Split(strings.TrimPrefix(ext.Source, "go:"), ":")
-				if len(parts) >= 2 {
-					pkgPath := parts[0]
-					// Add package import
-					c.imports[`"`+pkgPath+`"`] = true
-					// Extract package name from path
-					pkgName := filepath.Base(pkgPath)
-					c.goExterns[ext.Name] = pkgName + "." + parts[1]
-				}
-			}
-		}
-	}
 
 	var body bytes.Buffer
 	bodyStr, err := c.GenerateStatements(c.program.Statements)
