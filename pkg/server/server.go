@@ -14,17 +14,20 @@ import (
 )
 
 type Server struct {
-	orch      *orchestrator.Orchestrator
-	gatewayURL string
-	authToken  string
+	orch            *orchestrator.Orchestrator
+	gatewayURL      string
+	authToken       string
+	autoscaleTicker *time.Ticker
 }
 
 func NewServer(orch *orchestrator.Orchestrator, gatewayURL, authToken string) *Server {
-	return &Server{
+	srv := &Server{
 		orch:      orch,
 		gatewayURL: gatewayURL,
 		authToken:  authToken,
 	}
+	srv.StartAutoscaleLoop()
+	return srv
 }
 
 type DeployRequest struct {

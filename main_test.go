@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -495,4 +496,92 @@ func TestEnvVariablesManagement(t *testing.T) {
 	if val, ok := proc2.Env["DYNAMIC_VAL"]; !ok || val != "dynamic-value" {
 		t.Errorf("expected DYNAMIC_VAL env to be 'dynamic-value', got %q", val)
 	}
+}
+
+func TestHorizontalAutoScaling(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-autoscale-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+
+	var routesMu sync.Mutex
+	registeredRoutes := make(map[string][]string)
+
+	mockGate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/console/sync" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"active_connections": {
+					"http://localhost:9999": 5
+				}
+			}`))
+			return
+		}
+		if r.URL.Path == "/api/routes" && r.Method == http.MethodPost {
+			var payload struct {
+				Prefix  string   `json:"prefix"`
+				Target  string   `json:"target"`
+				Targets []string `json:"targets"`
+			}
+			json.NewDecoder(r.Body).Decode(&payload)
+			routesMu.Lock()
+			registeredRoutes[payload.Prefix] = payload.Targets
+			routesMu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ok"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockGate.Close()
+
+	serviceCode := `
+	server "0" {
+		route "/hello" -> "Hello World!"
+	}
+	`
+	_, _ = orch.Deploy("scale-app", serviceCode)
+	if proc, ok := orch.GetService("scale-app"); ok {
+		proc.Port = 9999
+	}
+
+	srv := server.NewServer(orch, mockGate.URL, "secret-token")
+	defer srv.StopAutoscaleLoopForTest()
+
+	var targets []string
+	timeout := time.After(15 * time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			break
+		case <-ticker.C:
+			routesMu.Lock()
+			targets = registeredRoutes["/service/scale-app"]
+			routesMu.Unlock()
+			if len(targets) >= 2 {
+				break
+			}
+		}
+		if len(targets) >= 2 {
+			break
+		}
+	}
+
+	if len(targets) < 2 {
+		t.Errorf("Expected scale-app to scale up and have at least 2 targets in ServGate route, got targets: %v", targets)
+	} else {
+		t.Logf("Success! Auto-scaler successfully added targets: %v", targets)
+	}
+
+	_ = orch.Undeploy("scale-app")
+	_ = orch.Undeploy("scale-app-replica-1")
 }
