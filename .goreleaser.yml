@@ -1,4 +1,4 @@
-project_name: servflow
+﻿project_name: servflow
 version: 2
 
 before:
@@ -47,7 +47,7 @@ dockers:
   - image_templates:
       - "ghcr.io/vyuvaraj/servflow:{{.Tag}}"
       - "ghcr.io/vyuvaraj/servflow:latest"
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.goreleaser
     build_flag_templates:
       - "--label=org.opencontainers.image.title=ServFlow"
       - "--label=org.opencontainers.image.version={{.Version}}"
