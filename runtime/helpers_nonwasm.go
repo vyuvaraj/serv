@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"time"
 )
 
 // HTTP Client
-func HTTPGet(url string) interface{} {
+func HTTPGet(url string, headersVal ...interface{}) interface{} {
 	if mockFn, exists := GetMock("runtime.HTTPGet:" + url); exists {
 		return mockFn(url)
 	}
@@ -31,11 +29,17 @@ func HTTPGet(url string) interface{} {
 	}
 
 	req.Header.Set("User-Agent", "Serv-Compiler/0.1")
-	if strings.Contains(url, "api.github.com") {
-		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-			req.Header.Set("Authorization", "Bearer " + token)
-		} else if token := os.Getenv("GITHUB_PAT"); token != "" {
-			req.Header.Set("Authorization", "token " + token)
+	
+	// Apply custom headers
+	if len(headersVal) > 0 && headersVal[0] != nil {
+		if headersMap, ok := headersVal[0].(map[string]interface{}); ok {
+			for k, v := range headersMap {
+				req.Header.Set(k, fmt.Sprint(v))
+			}
+		} else if headersMapStr, ok := headersVal[0].(map[interface{}]interface{}); ok {
+			for k, v := range headersMapStr {
+				req.Header.Set(fmt.Sprint(k), fmt.Sprint(v))
+			}
 		}
 	}
 
@@ -61,7 +65,7 @@ func HTTPGet(url string) interface{} {
 	return HTTPResponse{Status: resp.StatusCode, Body: string(body)}
 }
 
-func HTTPPost(url string, body interface{}) interface{} {
+func HTTPPost(url string, body interface{}, headersVal ...interface{}) interface{} {
 	if mockFn, exists := GetMock("runtime.HTTPPost:" + url); exists {
 		return mockFn(url, body)
 	}
@@ -84,11 +88,17 @@ func HTTPPost(url string, body interface{}) interface{} {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Serv-Compiler/0.1")
-	if strings.Contains(url, "api.github.com") {
-		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-			req.Header.Set("Authorization", "Bearer " + token)
-		} else if token := os.Getenv("GITHUB_PAT"); token != "" {
-			req.Header.Set("Authorization", "token " + token)
+
+	// Apply custom headers
+	if len(headersVal) > 0 && headersVal[0] != nil {
+		if headersMap, ok := headersVal[0].(map[string]interface{}); ok {
+			for k, v := range headersMap {
+				req.Header.Set(k, fmt.Sprint(v))
+			}
+		} else if headersMapStr, ok := headersVal[0].(map[interface{}]interface{}); ok {
+			for k, v := range headersMapStr {
+				req.Header.Set(fmt.Sprint(k), fmt.Sprint(v))
+			}
 		}
 	}
 

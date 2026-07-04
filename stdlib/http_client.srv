@@ -2,15 +2,15 @@
 // Import: import { getJSON, postJSON, isSuccess, isClientError } from "stdlib/http_client.srv"
 
 // GET request that auto-parses JSON response
-export fn getJSON(url) {
-    let response = http.get(url)
+export fn getJSON(url, headers) {
+    let response = http.get(url, headers)
     return json.parse(response.body)
 }
 
 // POST request with JSON body
-export fn postJSON(url, data) {
+export fn postJSON(url, data, headers) {
     let body = json.stringify(data)
-    let response = http.post(url, body)
+    let response = http.post(url, body, headers)
     return json.parse(response.body)
 }
 

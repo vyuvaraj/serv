@@ -218,14 +218,14 @@ func ContextLoggerWith(logger interface{}, args ...interface{}) interface{} {
 
 // ── HTTP Client Stubs ────────────────────────────────────────────────────────
 
-func HTTPGet(url string) interface{} {
+func HTTPGet(url string, headersVal ...interface{}) interface{} {
 	return [2]interface{}{nil, "HTTPGet is not supported in the sandboxed WebAssembly target"}
 }
-func HTTPPost(url string, body interface{}) interface{} {
+func HTTPPost(url string, body interface{}, headersVal ...interface{}) interface{} {
 	return [2]interface{}{nil, "HTTPPost is not supported in the sandboxed WebAssembly target"}
 }
-func HTTPGetSafe(url string) interface{} { return HTTPGet(url) }
-func HTTPPostSafe(url string, body interface{}) interface{} { return HTTPPost(url, body) }
+func HTTPGetSafe(url string, headersVal ...interface{}) interface{} { return HTTPGet(url, headersVal...) }
+func HTTPPostSafe(url string, body interface{}, headersVal ...interface{}) interface{} { return HTTPPost(url, body, headersVal...) }
 
 // ── Registry Stubs ───────────────────────────────────────────────────────────
 
