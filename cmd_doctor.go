@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -25,13 +26,15 @@ type DoctorDiscovery struct {
 	Flow   string `json:"flow"`
 }
 
+var osExit = os.Exit
+
 func runDoctor() {
 	fmt.Println("🩺 Running Ecosystem Doctor check...")
 	raw := os.Getenv("SERVVERSE_DISCOVERY")
 	if raw == "" {
 		fmt.Println("❌ Error: SERVVERSE_DISCOVERY environment variable is not set.")
 		fmt.Println("Please set SERVVERSE_DISCOVERY to a valid JSON manifest or file path.")
-		os.Exit(1)
+		osExit(1)
 	}
 
 	var discovery DoctorDiscovery
@@ -40,11 +43,11 @@ func runDoctor() {
 		data, err := os.ReadFile(raw)
 		if err != nil {
 			fmt.Printf("❌ Error: failed to parse SERVVERSE_DISCOVERY: %v\n", err)
-			os.Exit(1)
+			osExit(1)
 		}
 		if err := json.Unmarshal(data, &discovery); err != nil {
 			fmt.Printf("❌ Error: failed to parse SERVVERSE_DISCOVERY file: %v\n", err)
-			os.Exit(1)
+			osExit(1)
 		}
 	}
 
@@ -71,33 +74,33 @@ func runDoctor() {
 	client := &http.Client{Timeout: 2 * time.Second}
 	hasErrors := false
 
-	fmt.Println("\n| Service | Status | Version | Details |")
-	fmt.Println("|---|---|---|---|")
+	fmt.Println("\n| Service | Status | Version | Edition | Details |")
+	fmt.Println("|---|---|---|---|---|")
 
 	for _, s := range services {
 		if s.url == "" {
-			fmt.Printf("| %-12s | 🟡 SKIP | - | Not configured |\n", s.name)
+			fmt.Printf("| %-12s | 🟡 SKIP    | -       | -        | Not configured |\n", s.name)
 			continue
 		}
 
 		// Check version
 		resp, err := client.Get(s.url + "/api/version")
 		if err != nil {
-			fmt.Printf("| %-12s | ❌ DOWN | - | Connection failed: %v |\n", s.name, err)
+			fmt.Printf("| %-12s | ❌ DOWN    | -       | -        | Connection failed: %v |\n", s.name, err)
 			hasErrors = true
 			continue
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			fmt.Printf("| %-12s | ❌ ERROR | - | Bad status code: %d |\n", s.name, resp.StatusCode)
+			fmt.Printf("| %-12s | ❌ ERROR   | -       | -        | Bad status code: %d |\n", s.name, resp.StatusCode)
 			hasErrors = true
 			continue
 		}
 
 		var verInfo map[string]string
 		if err := json.NewDecoder(resp.Body).Decode(&verInfo); err != nil {
-			fmt.Printf("| %-12s | ❌ INVALID | - | Failed to decode JSON |\n", s.name)
+			fmt.Printf("| %-12s | ❌ INVALID | -       | -        | Failed to decode JSON |\n", s.name)
 			hasErrors = true
 			continue
 		}
@@ -106,12 +109,56 @@ func runDoctor() {
 		if ver == "" {
 			ver = "unknown"
 		}
-		fmt.Printf("| %-12s | ✅ ONLINE | %s | OK |\n", s.name, ver)
+		edition := verInfo["edition"]
+		if edition == "" {
+			edition = "oss"
+		}
+
+		// Compatibility check: warn if minor version doesn't match compiler version
+		compilerVer := "0.1" // Major.Minor
+		isCompatible := strings.HasPrefix(strings.TrimPrefix(ver, "v"), compilerVer)
+
+		statusStr := "✅ ONLINE"
+		detailStr := "OK"
+		if !isCompatible && ver != "unknown" {
+			statusStr = "⚠️ WARN"
+			detailStr = fmt.Sprintf("Version mismatch! Compiler expects v%s.x", compilerVer)
+		}
+
+		fmt.Printf("| %-12s | %-9s | %-7s | %-8s | %-30s |\n", s.name, statusStr, ver, edition, detailStr)
 	}
+
+	checkTelemetryPipeline()
 
 	if hasErrors {
 		fmt.Println("\n❌ Doctor check complete with errors. Some services are down or misconfigured.")
-		os.Exit(1)
+		osExit(1)
 	}
 	fmt.Println("\n✅ All configured services are online and compatible!")
+}
+
+func checkTelemetryPipeline() {
+	fmt.Println("\n📡 Running Telemetry Pipeline Diagnostics...")
+	otlp := os.Getenv("SERV_OTLP_ENDPOINT")
+	if otlp == "" {
+		fmt.Println("⚠️ Warning: SERV_OTLP_ENDPOINT environment variable is not set. Services will not emit traces.")
+		return
+	}
+
+	fmt.Printf("Checking connectivity to OTLP collector: %s\n", otlp)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(otlp + "/healthz")
+	if err != nil {
+		// Try a fallback POST request to the traces endpoint to verify routing
+		respPost, errPost := client.Post(otlp + "/v1/traces", "application/json", strings.NewReader(`{}`))
+		if errPost != nil {
+			fmt.Printf("❌ Telemetry Pipeline Error: OTLP endpoint is unreachable: %v\n", errPost)
+			return
+		}
+		defer respPost.Body.Close()
+		fmt.Printf("✅ Telemetry Pipeline OK (OTLP Traces endpoint responded with HTTP %d)\n", respPost.StatusCode)
+		return
+	}
+	defer resp.Body.Close()
+	fmt.Printf("✅ Telemetry Pipeline OK (Collector healthz returned HTTP %d)\n", resp.StatusCode)
 }
