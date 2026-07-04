@@ -501,8 +501,10 @@ func TestPublishRateLimiter(t *testing.T) {
 	_ = os.Remove("queue.wal")
 	defer os.Remove("queue.wal")
 
-	// Set env vars for rate limit test
-	os.Setenv("SERVQUEUE_PUBLISH_RATE", "10")
+	// Use a very low refill rate (0.001 tokens/sec = 1 token per ~17 min)
+	// so the bucket cannot meaningfully refill between three near-instant calls.
+	// Capacity=2 means the first 2 publishes consume all tokens; the 3rd must fail.
+	os.Setenv("SERVQUEUE_PUBLISH_RATE", "0.001")
 	os.Setenv("SERVQUEUE_PUBLISH_CAPACITY", "2")
 	defer func() {
 		os.Unsetenv("SERVQUEUE_PUBLISH_RATE")
