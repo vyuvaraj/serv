@@ -92,6 +92,8 @@ func (c *Codegen) RunPrePass() {
 			}
 		case *ExternFnStmt:
 			c.extractGoExtern(s)
+		case *DeclareModuleStmt:
+			c.extractDeclareModule(s)
 		case *ExportStmt:
 			switch inner := s.Inner.(type) {
 			case *StructDecl:
@@ -112,7 +114,20 @@ func (c *Codegen) RunPrePass() {
 				}
 			case *ExternFnStmt:
 				c.extractGoExtern(inner)
+			case *DeclareModuleStmt:
+				c.extractDeclareModule(inner)
 			}
+		}
+	}
+}
+
+func (c *Codegen) extractDeclareModule(s *DeclareModuleStmt) {
+	pkgName := filepath.Base(s.PkgPath)
+	for _, fn := range s.Functions {
+		key := s.PkgPath + ":" + fn.Name
+		c.declaredGoFuncs[key] = pkgName + "." + fn.Name
+		if fn.MultiReturn {
+			c.goMultiReturnFuncs[pkgName+"."+fn.Name] = true
 		}
 	}
 }

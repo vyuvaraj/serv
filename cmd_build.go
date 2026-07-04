@@ -156,6 +156,9 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 					}
 				}
 			}
+			if goPkg, ok := stmt.(*compiler.GoPackageImport); ok {
+				fileImports[`"`+goPkg.Path+`"`] = true
+			}
 		}
 
 		fileHeader := codegen.GenerateFileHeader(fileImports)

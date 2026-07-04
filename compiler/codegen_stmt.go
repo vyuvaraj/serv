@@ -20,14 +20,6 @@ func (c *Codegen) genGoPackageImport(s *GoPackageImport) (string, error) {
 }
 
 func (c *Codegen) genDeclareModuleStmt(s *DeclareModuleStmt) (string, error) {
-	pkgName := filepath.Base(s.PkgPath)
-	for _, fn := range s.Functions {
-		key := s.PkgPath + ":" + fn.Name
-		c.declaredGoFuncs[key] = pkgName + "." + fn.Name
-		if fn.MultiReturn {
-			c.goMultiReturnFuncs[pkgName+"."+fn.Name] = true
-		}
-	}
 	return "", nil
 }
 
