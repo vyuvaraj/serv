@@ -108,6 +108,7 @@ func main() {
 		coverFlag := testCmd.Bool("cover", false, "Report test coverage")
 		filterFlag := testCmd.String("filter", "", "Filter tests by name")
 		integrationFlag := testCmd.Bool("integration", false, "Run with live infrastructure services")
+		watchFlag := testCmd.Bool("watch", false, "Watch for changes and re-run tests")
 		if err := testCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
@@ -116,7 +117,9 @@ func main() {
 		if len(args) < 1 {
 			args = []string{"."}
 		}
-		if *integrationFlag {
+		if *watchFlag {
+			runTestsWatch(args[0], *coverFlag, *filterFlag, *integrationFlag)
+		} else if *integrationFlag {
 			runIntegrationTests(args[0], *coverFlag, *filterFlag)
 		} else {
 			runTests(args[0], *coverFlag, *filterFlag)
