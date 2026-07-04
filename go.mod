@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.24
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.0
-	github.com/vyuvaraj/ServShared v0.0.0-20260630111408-9e466aadce49
+	github.com/vyuvaraj/ServShared v0.0.0-20260704093242-8fad9c11efe5
 )
 
 require (
