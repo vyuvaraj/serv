@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +31,13 @@ func HTTPGet(url string) interface{} {
 	}
 
 	req.Header.Set("User-Agent", "Serv-Compiler/0.1")
+	if strings.Contains(url, "api.github.com") {
+		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+			req.Header.Set("Authorization", "Bearer " + token)
+		} else if token := os.Getenv("GITHUB_PAT"); token != "" {
+			req.Header.Set("Authorization", "token " + token)
+		}
+	}
 
 	// Inject traceparent if active
 	if active := GetActiveTrace(); active != nil {
@@ -75,6 +84,13 @@ func HTTPPost(url string, body interface{}) interface{} {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Serv-Compiler/0.1")
+	if strings.Contains(url, "api.github.com") {
+		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+			req.Header.Set("Authorization", "Bearer " + token)
+		} else if token := os.Getenv("GITHUB_PAT"); token != "" {
+			req.Header.Set("Authorization", "token " + token)
+		}
+	}
 
 	// Inject traceparent if active
 	if active := GetActiveTrace(); active != nil {
