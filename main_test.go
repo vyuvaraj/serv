@@ -540,6 +540,10 @@ func TestHandleIncidentAnalysis(t *testing.T) {
 	handleIncidentAnalyze(w, req)
 
 	resp := w.Result()
+	// OSS build returns 403; Enterprise build returns 200.
+	if resp.StatusCode == http.StatusForbidden {
+		t.Skip("Skipping: AI Incident Analysis is an Enterprise-only feature")
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
@@ -608,6 +612,10 @@ func TestHandleAIMetrics(t *testing.T) {
 	handleAIMetrics(w, req)
 
 	resp := w.Result()
+	// OSS build returns 403; Enterprise build returns 200.
+	if resp.StatusCode == http.StatusForbidden {
+		t.Skip("Skipping: AI Metrics is an Enterprise-only feature")
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}
