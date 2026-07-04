@@ -305,11 +305,30 @@ func MaxBytesMiddleware(limit int64) func(http.Handler) http.Handler {
 	}
 }
 
-var sanitizeRegex = regexp.MustCompile(`(?i)(password|secret|token|key|authorization|bearer|passwd)\s*[:=]\s*([^\s,"']+)`)
+var sanitizeRegex = regexp.MustCompile(`(?i)(["']?)(password|secret|token|key|authorization|bearer|passwd)(["']?)\s*[:=]\s*("([^"]+)"|'([^']+)'|([^\s,"'\r\n]+))`)
 
 // SanitizeLog redacts sensitive information from log messages.
 func SanitizeLog(msg string) string {
-	return sanitizeRegex.ReplaceAllString(msg, "$1:[REDACTED]")
+	return sanitizeRegex.ReplaceAllStringFunc(msg, func(match string) string {
+		sepIdx := strings.IndexAny(match, ":=")
+		if sepIdx == -1 {
+			return match
+		}
+		keyPart := match[:sepIdx+1]
+		valPart := match[sepIdx+1:]
+		trimmedVal := strings.TrimSpace(valPart)
+		
+		spaceLen := len(valPart) - len(strings.TrimLeft(valPart, " \t"))
+		leadingSpaces := valPart[:spaceLen]
+
+		if strings.HasPrefix(trimmedVal, "\"") && strings.HasSuffix(trimmedVal, "\"") {
+			return keyPart + leadingSpaces + `"[REDACTED]"`
+		}
+		if strings.HasPrefix(trimmedVal, "'") && strings.HasSuffix(trimmedVal, "'") {
+			return keyPart + leadingSpaces + `'[REDACTED]'`
+		}
+		return keyPart + leadingSpaces + "[REDACTED]"
+	})
 }
 
 // IsolateTopic prefixes a topic name with the tenant ID from context.
@@ -336,6 +355,7 @@ func VersionHandler(serviceName, version string) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{
 			"service": serviceName,
 			"version": version,
+			"edition": Edition,
 		})
 	}
 }
