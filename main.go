@@ -32,7 +32,6 @@ import (
 
 	"github.com/vyuvaraj/ServShared"
 
-	"servconsole/pkg/incidents"
 	"servconsole/pkg/proxy"
 	"servconsole/pkg/ws"
 )
@@ -291,20 +290,7 @@ func main() {
 	mux.HandleFunc("/api/alerts/ack", authorizeConsole(handleAlertsAck))
 	mux.HandleFunc("/api/logs", authorizeConsole(handleGetLogs))
 	mux.HandleFunc("/api/logs/ingest", handleIngestLog)
-	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
-	var sloTracker = incidents.NewSLOTracker()
-	mux.HandleFunc("/api/slo", authorizeConsole(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("decomposed") == "true" {
-			sloTracker.HandleSLO(w, r)
-		} else {
-			handleSLO(w, r)
-		}
-	}))
 	mux.HandleFunc("/api/deployments", authorizeConsole(handleDeployments))
-	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(handleRollback))
-	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
-	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
-	mux.HandleFunc("/api/tenant/switch", authorizeConsole(handleTenantSwitch))
 	mux.HandleFunc("/api/plugins", authorizeConsole(handleGetPlugins))
 	mux.HandleFunc("/api/plugins/register", authorizeConsole(handleRegisterPlugin))
 	mux.HandleFunc("/api/plugins/serve", handleServePlugin)
@@ -312,13 +298,10 @@ func main() {
 	// Register AI diagnostics and incident analysis (EE build-tagged)
 	registerAIHandlers(mux)
 
-	mux.HandleFunc("/api/runbooks", authorizeConsole(handleRunbooks))
-	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(handleExecuteRunbook))
-	mux.HandleFunc("/api/provision/store", authorizeConsole(handleProvisionStore))
-	mux.HandleFunc("/api/provision/queue", authorizeConsole(handleProvisionQueue))
-	mux.HandleFunc("/api/diagnostics/exec", authorizeConsole(handleDiagnosticExec))
+	// Register enterprise-only features (SLO, cost, runbooks, dashboards, provisioning, multi-env, tenant switch)
+	registerEnterpriseHandlers(mux)
+
 	mux.HandleFunc("/api/topology/live", authorizeConsole(handleTopologyLive))
-	mux.HandleFunc("/api/dashboards", authorizeConsole(handleDashboards))
 	mux.HandleFunc("/api/dev/services", authorizeConsole(handleDevServices))
 	mux.HandleFunc("/api/dev/restart", authorizeConsole(handleDevRestart))
 	mux.HandleFunc("/api/playground/compile", authorizeConsole(handlePlaygroundCompile))
