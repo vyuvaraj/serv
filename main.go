@@ -6,11 +6,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
+	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -34,6 +36,9 @@ import (
 	"servconsole/pkg/proxy"
 	"servconsole/pkg/ws"
 )
+
+//go:embed web/*
+var webAssets embed.FS
 
 var (
 	port       = flag.Int("port", 8083, "Port to listen on")
@@ -335,7 +340,9 @@ func main() {
 	mux.Handle("/api/proxy/db/", authorizeConsole(dbProxy.ServeHTTP))
 	mux.Handle("/api/proxy/mail/", authorizeConsole(mailProxy.ServeHTTP))
 
-	fileServer := http.FileServer(http.Dir("./web"))
+	// Serve embedded web assets (falls back to ./web on disk if needed for dev)
+	webFS, _ := fs.Sub(webAssets, "web")
+	fileServer := http.FileServer(http.FS(webFS))
 	mux.Handle("/", fileServer)
 
 	var handler http.Handler = mux
