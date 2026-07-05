@@ -300,6 +300,20 @@ func (p *Parser) parseMapLiteral() Expression {
 			return nil
 		}
 
+		// Shorthand property: { name } means { name: name }
+		// Detected when an IDENT is NOT followed by a colon
+		if p.curToken.Type == TOKEN_IDENT && p.peekToken.Type != TOKEN_COLON {
+			// Treat as shorthand: key and value are both the identifier
+			ident := &Identifier{Token: p.curToken, Value: p.curToken.Literal}
+			m.Pairs[key] = ident
+			m.KeyOrder = append(m.KeyOrder, key)
+			entryIndex++
+			if p.peekToken.Type == TOKEN_COMMA {
+				p.nextToken()
+			}
+			continue
+		}
+
 		if !p.expectPeek(TOKEN_COLON) {
 			return nil
 		}

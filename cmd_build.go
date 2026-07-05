@@ -754,6 +754,35 @@ func parseWithDependencies(filePath string, visited map[string]int) (*compiler.P
 			continue
 		}
 		if imp, ok := stmt.(*compiler.ImportStmt); ok {
+			// Wildcard import: import "handlers/*.srv" — expand glob and include all matches
+			if strings.Contains(imp.Path, "*") {
+				basePath := filepath.Dir(filePath)
+				pattern := imp.Path
+				if !strings.HasSuffix(pattern, ".srv") && !strings.HasSuffix(pattern, ".srv.d") {
+					pattern = pattern + ".srv"
+				}
+				globPattern := filepath.Join(basePath, pattern)
+				matches, globErr := filepath.Glob(globPattern)
+				if globErr != nil || len(matches) == 0 {
+					return nil, fmt.Errorf("wildcard import '%s' matched no files", imp.Path)
+				}
+				for _, match := range matches {
+					absMatch, _ := filepath.Abs(match)
+					subProg, err := parseWithDependencies(absMatch, visited)
+					if err != nil {
+						return nil, err
+					}
+					for _, subStmt := range subProg.Statements {
+						if exp, ok := subStmt.(*compiler.ExportStmt); ok {
+							mergedStatements = append(mergedStatements, exp.Inner)
+						} else {
+							mergedStatements = append(mergedStatements, subStmt)
+						}
+					}
+				}
+				continue
+			}
+
 			importPath := resolveImportPath(filePath, imp.Path)
 			subProgram, err := parseWithDependencies(importPath, visited)
 			if err != nil {

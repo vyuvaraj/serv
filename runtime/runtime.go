@@ -530,9 +530,19 @@ func StartServer() interface{} {
 				json.NewEncoder(w).Encode(resMap)
 			}
 		} else if resStr, ok := res.(string); ok {
-			// Sniff or check if string starts with HTML tags to set Content-Type correctly
-			if strings.HasPrefix(strings.TrimSpace(strings.ToLower(resStr)), "<html") || strings.HasPrefix(strings.TrimSpace(strings.ToLower(resStr)), "<!doctype") {
+			// DX.S15: Implicit Content-Type inference from returned string
+			trimmed := strings.TrimSpace(resStr)
+			lower := strings.ToLower(trimmed)
+			switch {
+			case strings.HasPrefix(lower, "<html") || strings.HasPrefix(lower, "<!doctype"):
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			case strings.HasPrefix(lower, "<?xml") || strings.HasPrefix(lower, "<rss") || strings.HasPrefix(lower, "<feed"):
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+			case (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+				(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")):
+				w.Header().Set("Content-Type", "application/json")
+			default:
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			}
 			w.WriteHeader(statusCode)
 			w.Write([]byte(resStr))

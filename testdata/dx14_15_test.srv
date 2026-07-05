@@ -1,0 +1,20 @@
+server "9000"
+
+// DX.S14: object shorthand { name, email } instead of { name: name, email: email }
+export route "POST" "/api/users" (req) {
+    let data = req.json()
+    let name = data.name
+    let email = data.email
+    let id = "user-123"
+    return { name, email, id }
+}
+
+// DX.S15: Implicit Content-Type - returns JSON string, gets application/json automatically
+export route "GET" "/api/status" (req) {
+    return "{\"status\": \"ok\", \"version\": \"1.0\"}"
+}
+
+// DX.S15: Implicit Content-Type - returns XML string
+export route "GET" "/feed.xml" (req) {
+    return "<?xml version=\"1.0\"?><feed><title>My Feed</title></feed>"
+}
