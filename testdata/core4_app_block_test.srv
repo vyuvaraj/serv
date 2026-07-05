@@ -1,0 +1,8 @@
+app GatewayService {
+    server "9000"
+    database "sqlite://app.db"
+
+    export route "GET" "/health" (req) {
+        return { "status": "UP" }
+    }
+}

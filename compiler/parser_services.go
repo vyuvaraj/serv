@@ -22,6 +22,20 @@ func (p *Parser) parseAiStatement() Statement {
 	return stmt
 }
 
+func (p *Parser) parseAppStatement() Statement {
+	stmt := &AppStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) && !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
 func (p *Parser) parseAuthStatement() Statement {
 	stmt := &AuthStmt{Token: p.curToken}
 	p.nextToken()

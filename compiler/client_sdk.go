@@ -32,6 +32,10 @@ func NewClientGenerator(prog *Program) *ClientGenerator {
 				case *RouteStmt:
 					g.Routes = append(g.Routes, inner)
 				}
+			case *AppStmt:
+				if s.Body != nil {
+					collect(s.Body.Statements)
+				}
 			}
 		}
 	}

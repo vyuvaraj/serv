@@ -239,6 +239,12 @@ func analyzeStmtUnused(stmt Statement, scope *Scope, diags *[]Diagnostic) {
 				analyzeStmtUnused(inner, child, diags)
 			}
 		}
+	case *AppStmt:
+		if s.Body != nil {
+			for _, inner := range s.Body.Statements {
+				analyzeStmtUnused(inner, scope, diags)
+			}
+		}
 	}
 }
 
@@ -473,6 +479,12 @@ func collectStmtIdentifiers(stmt Statement, refs map[string]bool) {
 	case *SpawnStmt:
 		collectExprIdentifiers(s.Call, refs)
 	case *ActorDecl:
+		if s.Body != nil {
+			for _, inner := range s.Body.Statements {
+				collectStmtIdentifiers(inner, refs)
+			}
+		}
+	case *AppStmt:
 		if s.Body != nil {
 			for _, inner := range s.Body.Statements {
 				collectStmtIdentifiers(inner, refs)

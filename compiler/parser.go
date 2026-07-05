@@ -190,6 +190,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseAiStatement()
 	case TOKEN_SERVER:
 		return p.parseServerStatement()
+	case TOKEN_APP:
+		return p.parseAppStatement()
 	case TOKEN_ROUTE:
 		return p.parseRouteStatement()
 	case TOKEN_TOOL:

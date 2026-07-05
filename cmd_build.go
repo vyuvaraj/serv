@@ -63,8 +63,8 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 		for _, stmt := range program.Statements {
 			switch stmt.(type) {
 			case *compiler.ServerStmt, *compiler.RouteStmt, *compiler.DatabaseStmt, *compiler.BrokerStmt,
-				*compiler.EveryStmt, *compiler.CronStmt, *compiler.SubscribeStmt, *compiler.WsStmt:
-				return "", fmt.Errorf("wasm target does not support service architecture statements: server, route, database, broker, every, cron, subscribe, ws")
+				*compiler.EveryStmt, *compiler.CronStmt, *compiler.SubscribeStmt, *compiler.WsStmt, *compiler.AppStmt:
+				return "", fmt.Errorf("wasm target does not support service architecture statements: server, route, database, broker, every, cron, subscribe, ws, app")
 			}
 		}
 	}

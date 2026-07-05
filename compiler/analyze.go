@@ -93,6 +93,8 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 		return analyzeBlock(s.Body, nil)
 	case *TestStmt:
 		return analyzeBlock(s.Body, nil)
+	case *AppStmt:
+		return analyzeBlock(s.Body, nil)
 	}
 	return nil
 }

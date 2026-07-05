@@ -333,6 +333,19 @@ func (c *Codegen) genAiStmt(s *AiStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\truntime.InitAI(fmt.Sprint(%s))\n}\n\n", val), nil
 }
 
+func (c *Codegen) genAppStmt(s *AppStmt) (string, error) {
+	// App block acts as a logical namespace / wrapper. Generate statements inside it sequentially.
+	var out bytes.Buffer
+	for _, stmt := range s.Body.Statements {
+		code, err := c.genStatement(stmt)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(code)
+	}
+	return out.String(), nil
+}
+
 func (c *Codegen) genServerStmt(s *ServerStmt) (string, error) {
 	val, err := c.genExpression(s.Value)
 	if err != nil {

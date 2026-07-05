@@ -219,6 +219,8 @@ func stmtToken(stmt Statement) Token {
 		return s.Token
 	case *DatabaseStmt:
 		return s.Token
+	case *AppStmt:
+		return s.Token
 	case *CacheStmt:
 		return s.Token
 	case *TryCatchStmt:

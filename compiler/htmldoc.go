@@ -64,6 +64,10 @@ func GenerateHTMLDocs(prog *Program, entryFile string) (string, error) {
 				case *SubscribeStmt:
 					subscribes = append(subscribes, inner)
 				}
+			case *AppStmt:
+				if s.Body != nil {
+					collect(s.Body.Statements)
+				}
 			}
 		}
 	}

@@ -137,6 +137,19 @@ func (d *DatabaseStmt) statementNode()       {}
 func (d *DatabaseStmt) TokenLiteral() string { return d.Token.Literal }
 func (d *DatabaseStmt) String() string       { return "database " + d.Value.String() + "\n" }
 
+// App Statement (Unified Application Block)
+type AppStmt struct {
+	Token Token
+	Name  string
+	Body  *BlockStmt
+}
+
+func (a *AppStmt) statementNode()       {}
+func (a *AppStmt) TokenLiteral() string { return a.Token.Literal }
+func (a *AppStmt) String() string {
+	return "app " + a.Name + " " + a.Body.String() + "\n"
+}
+
 // Cache Statement
 type CacheStmt struct {
 	Token Token
