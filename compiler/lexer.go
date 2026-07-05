@@ -347,6 +347,11 @@ func (l *Lexer) NextToken() Token {
 			tok.Type = TOKEN_FSTRING
 			tok.Literal = l.readString()
 			return tok
+		} else if l.peekChar() == '`' {
+			l.readChar() // skip 'f'
+			tok.Type = TOKEN_FSTRING
+			tok.Literal = l.readRawString()
+			return tok
 		}
 		tok.Literal = l.readIdentifier()
 		tok.Type = lookupIdent(tok.Literal)
