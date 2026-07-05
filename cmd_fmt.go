@@ -27,7 +27,7 @@ func formatFile(srvFile string, checkOnly bool) {
 		"route": true, "fn": true, "every": true, "cron": true,
 		"subscribe": true, "test": true, "struct": true, "interface": true,
 		"middleware": true, "ws": true, "enum": true, "validate": true,
-		"type": true, "export": true, "app": true,
+		"type": true, "export": true, "app": true, "agent": true,
 	}
 
 	for i, line := range lines {
