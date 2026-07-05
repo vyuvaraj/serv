@@ -87,22 +87,7 @@ func NewGateway(store storage.StorageEngine, auth *auth.AuthProvider, raftNode *
 	if parityShards <= 0 {
 		parityShards = 1
 	}
-	var rules []FederationRule
-	if fedMap := os.Getenv("SERVSTORE_FEDERATION_MAP"); fedMap != "" {
-		for _, part := range strings.Split(fedMap, ",") {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			subParts := strings.SplitN(part, "=", 2)
-			if len(subParts) == 2 {
-				rules = append(rules, FederationRule{
-					Pattern: strings.TrimSpace(subParts[0]),
-					Target:  strings.TrimSpace(subParts[1]),
-				})
-			}
-		}
-	}
+	var rules []FederationRule = initFederationRules()
 
 	return &Gateway{
 		store:             store,
@@ -915,63 +900,6 @@ func (g *Gateway) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("Bucket restored successfully to " + timeStr))
-}
-
-func (g *Gateway) handleRegisterFederation(w http.ResponseWriter, r *http.Request) {
-	var rule FederationRule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		g.writeErrorCtx(w, r, http.StatusBadRequest, "InvalidJSON", "Failed to decode federation rule.")
-		return
-	}
-
-	if rule.Pattern == "" || rule.Target == "" {
-		g.writeErrorCtx(w, r, http.StatusBadRequest, "InvalidArgument", "pattern and target fields are required")
-		return
-	}
-
-	g.fedMutex.Lock()
-	g.federationRules = append(g.federationRules, rule)
-	g.fedMutex.Unlock()
-
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("Federation rule registered successfully"))
-}
-
-func (g *Gateway) resolveFederatedBucket(bucket string) (string, bool) {
-	if bucket == "system-access-logs" {
-		return "", false
-	}
-
-	targetRegion := ""
-	if strings.Contains(bucket, "@") {
-		parts := strings.SplitN(bucket, "@", 2)
-		bucket = parts[0]
-		targetRegion = parts[1]
-	}
-
-	g.fedMutex.RLock()
-	defer g.fedMutex.RUnlock()
-
-	for _, rule := range g.federationRules {
-		// Match region pattern or bucket pattern
-		matches := false
-		if targetRegion != "" {
-			matches = strings.EqualFold(rule.Pattern, targetRegion)
-		} else {
-			matches = matchPattern(bucket, rule.Pattern)
-		}
-
-		if matches {
-			if g.cluster != nil {
-				localAddr, ok := g.cluster.GetNodeAddress(g.cluster.LocalNodeID())
-				if ok && (rule.Target == localAddr || strings.Contains(rule.Target, localAddr)) {
-					continue
-				}
-			}
-			return rule.Target, true
-		}
-	}
-	return "", false
 }
 
 func matchPattern(bucket, pattern string) bool {

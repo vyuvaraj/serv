@@ -332,19 +332,17 @@ func SanitizeLog(msg string) string {
 }
 
 // IsolateTopic prefixes a topic name with the tenant ID from context.
+// In OSS: returns the topic unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant isolation.
 func IsolateTopic(ctx context.Context, topic string) string {
-	if tid, ok := ctx.Value(TenantContextKey).(string); ok && tid != "" && tid != "default" {
-		return tid + "-" + topic
-	}
-	return topic
+	return isolateTopicImpl(ctx, topic)
 }
 
 // IsolateDBPool prefixes database name with the tenant ID from context.
+// In OSS: returns the dbName unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant isolation.
 func IsolateDBPool(ctx context.Context, dbName string) string {
-	if tid, ok := ctx.Value(TenantContextKey).(string); ok && tid != "" && tid != "default" {
-		return tid + "_" + dbName
-	}
-	return dbName
+	return isolateDBPoolImpl(ctx, dbName)
 }
 
 // VersionHandler returns a JSON version response.

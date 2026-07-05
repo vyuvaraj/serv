@@ -13,7 +13,7 @@ require (
 	github.com/klauspost/compress v1.16.0
 	github.com/klauspost/reedsolomon v1.14.0
 	github.com/tetratelabs/wazero v1.12.0
-	github.com/vyuvaraj/ServShared v0.0.0-20260704093242-8fad9c11efe5
+	github.com/vyuvaraj/ServShared v0.0.0-20260705084654-865b8ebb869b
 	github.com/yalue/onnxruntime_go v1.31.0
 	github.com/zeebo/blake3 v0.2.4
 	google.golang.org/grpc v1.81.1
