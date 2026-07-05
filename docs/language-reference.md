@@ -13,6 +13,21 @@ broker "nats://localhost:4222"   // Message broker
 // Routes, functions, scheduled tasks, etc.
 ```
 
+## Unified Application Block (`app`)
+
+An `app` block acts as a namespace to group related servers, databases, and APIs within a single logical service boundary:
+
+```serv
+app GatewayService {
+    server "8080"
+    database "sqlite://app.db"
+
+    export route "GET" "/health" (req) {
+        return { "status": "UP" }
+    }
+}
+```
+
 ## Variables
 
 ```serv
