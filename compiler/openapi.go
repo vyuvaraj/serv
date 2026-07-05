@@ -89,6 +89,10 @@ func GenerateOpenAPI(prog *Program) (string, error) {
 				case *RouteStmt:
 					routes = append(routes, inner)
 				}
+			case *AppStmt:
+				if s.Body != nil {
+					collect(s.Body.Statements)
+				}
 			}
 		}
 	}
