@@ -325,7 +325,7 @@ github.com/tetratelabs/wazero/internal/wasm/binary
 github.com/tetratelabs/wazero/internal/wasmdebug
 github.com/tetratelabs/wazero/internal/wasmruntime
 github.com/tetratelabs/wazero/sys
-# github.com/vyuvaraj/ServShared v0.0.0-20260705084654-865b8ebb869b
+# github.com/vyuvaraj/ServShared v0.1.0
 ## explicit; go 1.26.4
 github.com/vyuvaraj/ServShared
 # github.com/x448/float16 v0.8.4

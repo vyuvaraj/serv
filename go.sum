@@ -280,6 +280,8 @@ github.com/vyuvaraj/ServShared v0.0.0-20260704093242-8fad9c11efe5 h1:zYYJvVYWGna
 github.com/vyuvaraj/ServShared v0.0.0-20260704093242-8fad9c11efe5/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
 github.com/vyuvaraj/ServShared v0.0.0-20260705084654-865b8ebb869b h1:L02OxMCkC0n0ouXnaEUxJOQ6DTgZSf8rnmZBLpom82g=
 github.com/vyuvaraj/ServShared v0.0.0-20260705084654-865b8ebb869b/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
+github.com/vyuvaraj/ServShared v0.1.0 h1:1duW4sj6x2ZkadA898fl8llA0rJmBxG3TZALONrZ6EY=
+github.com/vyuvaraj/ServShared v0.1.0/go.mod h1:quYZYsX/CJFhifDhhhpf3H32EZAov8SX+5eGC8wb5dI=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/yalue/onnxruntime_go v1.31.0 h1:1ln4YW1SFOFfGJZXe3jNOb2JUSt+l2pEneZfV8HdtFA=
