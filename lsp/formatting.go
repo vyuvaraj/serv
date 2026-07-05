@@ -142,9 +142,10 @@ func countNetBracesLSP(line string) int {
 			stringChar = ch
 			continue
 		}
-		if ch == '{' {
+		switch ch {
+		case '{':
 			net++
-		} else if ch == '}' {
+		case '}':
 			net--
 		}
 	}

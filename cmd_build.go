@@ -192,7 +192,9 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 
 	mainCode.WriteString("import (\n")
 	for imp := range mainImports {
-		mainCode.WriteString("\t" + imp + "\n")
+		mainCode.WriteString("\t")
+		mainCode.WriteString(imp)
+		mainCode.WriteString("\n")
 	}
 	mainCode.WriteString(")\n\n")
 	mainCode.WriteString("var _ = fmt.Sprintf\nvar _ = runtime.Noop\n")
