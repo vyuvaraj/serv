@@ -1036,19 +1036,28 @@ func runServHot(srvFile string, env string) {
 	}
 
 	targetPort := ""
-	for _, stmt := range program.Statements {
-		if s, ok := stmt.(*compiler.ServerStmt); ok {
-			// Extract port string from expression if possible
-			if strLit, ok := s.Value.(*compiler.StringLiteral); ok {
-				targetPort = strLit.Value
-			} else if intLit, ok := s.Value.(*compiler.IntegerLiteral); ok {
-				targetPort = fmt.Sprintf("%d", intLit.Value)
-			} else if ident, ok := s.Value.(*compiler.Identifier); ok {
-				targetPort = ident.Value
+	var extractServerPort func(statements []compiler.Statement)
+	extractServerPort = func(statements []compiler.Statement) {
+		for _, stmt := range statements {
+			if s, ok := stmt.(*compiler.ServerStmt); ok {
+				// Extract port string from expression if possible
+				if strLit, ok := s.Value.(*compiler.StringLiteral); ok {
+					targetPort = strLit.Value
+				} else if intLit, ok := s.Value.(*compiler.IntegerLiteral); ok {
+					targetPort = fmt.Sprintf("%d", intLit.Value)
+				} else if ident, ok := s.Value.(*compiler.Identifier); ok {
+					targetPort = ident.Value
+				}
+				return
+			} else if app, ok := stmt.(*compiler.AppStmt); ok && app.Body != nil {
+				extractServerPort(app.Body.Statements)
+				if targetPort != "" {
+					return
+				}
 			}
-			break
 		}
 	}
+	extractServerPort(program.Statements)
 
 	if targetPort == "" {
 		targetPort = "8080" // default fallback
