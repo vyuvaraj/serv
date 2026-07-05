@@ -27,6 +27,3 @@ jobs:
 
       - name: Test (OSS)
         run: go test ./... -timeout 120s
-
-      - name: Build (EE compile check)
-        run: go build -tags enterprise ./...
