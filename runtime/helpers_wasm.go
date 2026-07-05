@@ -379,25 +379,33 @@ func Publish(topic string, val interface{}) interface{}        { return nil }
 // ── OTEL & Concurrency / Semaphore Stubs ──────────────────────────────────────
 
 func AcquireSemaphore(name string, fn func() int) interface{} { return fn() }
-func ReleaseSemaphore(name string)                           {}
-func SetActiveTrace(trace interface{})                        {}
-func ClearActiveTrace()                                       {}
-func GetActiveTrace() interface{}                             { return nil }
-func TraceSpawn(name string) func()                           { return func() {} }
-func Traceparent(trace interface{}) string                    { return "" }
+func ReleaseSemaphore(name string) {}
 
-type RequestTrace struct{}
+// RequestTrace WASM stub matches the non-wasm struct so cross-target code
+// (e.g. otel_test.go) can access .TraceID without type assertions.
+type RequestTrace struct {
+	TraceID  string
+	SpanID   string
+	ParentID string
+	Method   string
+	Path     string
+}
 
-func OtelEnabled() bool                                            { return false }
-func TraceRequest(method, path string, parentTrace string) interface{} { return nil }
-func EndTrace(rt interface{}, statusCode int)                      {}
-func TraceDB(operation, query string) func()                       { return func() {} }
-func TraceCache(operation, key string) func()                      { return func() {} }
-func TraceHTTPClient(method, url string) func(statusCode int)      { return func(int) {} }
-func TracePubSub(operation, topic string) func()                   { return func() {} }
-func TraceScheduler(jobType, schedule string) func()               { return func() {} }
+func SetActiveTrace(trace *RequestTrace)                            {}
+func ClearActiveTrace()                                             {}
+func GetActiveTrace() *RequestTrace                                 { return nil }
+func TraceSpawn(name string) func()                                 { return func() {} }
+func Traceparent(trace *RequestTrace) string                        { return "" }
+func OtelEnabled() bool                                             { return false }
+func TraceRequest(method, path string, parentTrace string) *RequestTrace { return &RequestTrace{} }
+func EndTrace(rt *RequestTrace, statusCode int)                     {}
+func TraceDB(operation, query string) func()                        { return func() {} }
+func TraceCache(operation, key string) func()                       { return func() {} }
+func TraceHTTPClient(method, url string) func(statusCode int)       { return func(int) {} }
+func TracePubSub(operation, topic string) func()                    { return func() {} }
+func TraceScheduler(jobType, schedule string) func()                { return func() {} }
 func TraceWebSocket(path, event string) func()                      { return func() {} }
-func TraceExtern(source, funcName string) func()                   { return func() {} }
+func TraceExtern(source, funcName string) func()                    { return func() {} }
 
 func ResetDBState() {}
 func ClearCache()   {}
