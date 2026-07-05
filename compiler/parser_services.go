@@ -72,9 +72,10 @@ func (p *Parser) parseAgentDeclaration() Statement {
 				}
 			}
 
-			if key == "system" {
+			switch key {
+			case "system":
 				stmt.System = valStr
-			} else if key == "model" {
+			case "model":
 				stmt.Model = valStr
 			}
 		}
