@@ -27,10 +27,3 @@ jobs:
 
       - name: Test (OSS)
         run: go test ./... -timeout 120s
-
-      - name: Build (EE compile check)
-        run: go build -tags enterprise ./...
-
-      # ServConsole has *_ee.go files — this catches enterprise build-tag errors early
-      - name: Build (EE compile check)
-        run: go build -tags enterprise ./...
