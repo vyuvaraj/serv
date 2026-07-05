@@ -309,7 +309,11 @@ func Config(key string) string { return "" }
 func InitDB(connStr string)     {}
 func InitCache(connStr string)  {}
 func InitBroker(connStr string) {}
+func InitAI(connStr string)     {}
 func AddAgent(name, system, model string, tools []string) {}
+func AIComplete(args ...interface{}) interface{} { return nil }
+func AIChat(args ...interface{}) interface{} { return nil }
+func AIEmbed(args ...interface{}) interface{} { return nil }
 
 func CacheGet(key interface{}) interface{} {
 	return [2]interface{}{nil, "Cache is not supported in the sandboxed WebAssembly target"}
