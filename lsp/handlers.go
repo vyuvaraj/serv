@@ -764,6 +764,8 @@ func extractSymbol(stmt compiler.Statement) symbolInfo {
 		return symbolInfo{Name: s.Name, Kind: "enum", Line: s.Token.Line - 1, Col: s.Token.Col - 1, TypeInfo: strings.Join(s.Members, ", ")}
 	case *compiler.ExportStmt:
 		return extractSymbol(s.Inner)
+	case *compiler.AppStmt:
+		return symbolInfo{Name: s.Name, Kind: "app", Line: s.Token.Line - 1, Col: s.Token.Col - 1}
 	default:
 		return symbolInfo{}
 	}

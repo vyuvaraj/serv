@@ -62,12 +62,19 @@ func (s *Server) analyzeAndPublishDiagnostics(uri, text string) {
 	}
 
 	// Collect symbols
-	for _, stmt := range program.Statements {
-		sym := extractSymbol(stmt)
-		if sym.Name != "" {
-			symbols = append(symbols, sym)
+	var collectSymbols func(statements []compiler.Statement)
+	collectSymbols = func(statements []compiler.Statement) {
+		for _, stmt := range statements {
+			sym := extractSymbol(stmt)
+			if sym.Name != "" {
+				symbols = append(symbols, sym)
+			}
+			if app, ok := stmt.(*compiler.AppStmt); ok && app.Body != nil {
+				collectSymbols(app.Body.Statements)
+			}
 		}
 	}
+	collectSymbols(program.Statements)
 
 	s.mu.Lock()
 	s.symbols[uri] = symbols
