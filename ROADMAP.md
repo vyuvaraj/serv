@@ -143,4 +143,52 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | 12.6 | **Plugin architecture completion** | Large | Full plugin loading runtime (7.10). WASM-based console panels with sandboxed rendering | [ ] |
 | 12.7 | **main.go target: <300 lines** | — | After extraction, main.go should only contain server setup, route registration, and startup/shutdown | [ ] |
 
+---
+
+## Phase 13: Full Ecosystem Integration — Unified Dashboard (Pending — Q3 2026)
+
+> **Issue:** ServConsole proxies only 9 of 15 services. ServMesh, ServCron, ServCloud, ServCache, ServRegistry, and ServDocs have zero console visibility. Health monitoring (`/api/status` and alert loop) only checks 4 services.
+
+### Integration Completeness
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 13.1 | **Full service discovery** | Medium | Add `meshUrl`, `cronUrl`, `cloudUrl`, `cacheUrl`, `registryUrl`, `docsUrl` CLI flags + `ServDiscovery` struct fields. All 15 services discoverable via SERVVERSE_DISCOVERY. | [ ] |
+| 13.2 | **Unified health aggregation** | Small | `/api/status` and alert monitoring loop must check ALL connected services, not just 4. Extend `handleStatus` and `startAlertMonitoring`. | [ ] |
+| 13.3 | **ServMesh panel** | Medium | Proxy `/api/proxy/mesh/`. Show live service registry, circuit breaker states, mTLS cert expiry, routing rules, canary split weights. | [ ] |
+| 13.4 | **ServCron panel** | Medium | Proxy `/api/proxy/cron/`. Show scheduled jobs, next 5 run times, execution history, failure counts. Visual cron expression editor with next-runs preview. | [ ] |
+| 13.5 | **ServCache panel** | Medium | Proxy `/api/proxy/cache/`. Show per-namespace key counts, hit/miss ratios, memory pressure, eviction rates, top hot keys. | [ ] |
+| 13.6 | **ServCloud deployment panel** | Small | Proxy `/api/proxy/cloud/`. Consolidate existing deployment handlers with full ServCloud proxy for resource quotas, scaling, and deploy previews. | [ ] |
+| 13.7 | **ServRegistry panel** | Medium | Proxy `/api/proxy/registry/`. Show published packages, download stats, dependency trees, deprecation warnings, license info. | [ ] |
+| 13.8 | **ServDocs panel** | Small | Proxy `/api/proxy/docs/`. Embed generated documentation browser within the console documentation tab. | [ ] |
+
+### Cross-Service Intelligence
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 13.9 | **End-to-end request flow** | Large | Visualize full request lifecycle: Client → ServGate → Backend → ServQueue → Subscriber → ServStore. Single timeline from OTel spans across all 15 services. | [ ] |
+| 13.10 | **Ecosystem dependency matrix** | Medium | Auto-generated matrix showing runtime dependencies between services (from OTel trace data + discovery config). Interactive — click a cell to see call volume/latency. | [ ] |
+| 13.11 | **Unified configuration editor** | Large | Central panel to edit cross-service config: ServGate rate limits, ServCache TTLs, ServCron schedules, ServMesh routing rules — all from one place with validation. | [ ] |
+| 13.12 | **Cross-service log correlation** | Medium | Click any trace_id → see all log lines from all services with that trace_id, in chronological order across the ecosystem. | [ ] |
+| 13.13 | **Ecosystem upgrade dashboard** | Medium | Show current versions of all running services, compare against latest releases from ServRegistry, highlight version incompatibilities, offer upgrade via ServCloud. | [ ] |
+
+### Operational Intelligence
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 13.14 | **Capacity planning view** | Medium | Aggregate CPU/memory/disk/network across all services. Project growth trends. Alert when approaching infrastructure limits. | [ ] |
+| 13.15 | **Change correlation engine** | Large | Overlay deployments (ServCloud), config changes (audit log), and incidents (alerts) on a unified timeline. Correlate "what changed" with "what broke." | [ ] |
+| 13.16 | **Service comparison mode** | Medium | Compare two services side-by-side: latency, throughput, error rate, resource usage. Useful for canary validation. | [ ] |
+| 13.17 | **Ecosystem startup orchestrator** | Medium | `serv console --start-all` boots all ecosystem services in dependency order, waits for health, then opens the dashboard. One-command full-stack local dev. | [ ] |
+| 13.18 | **Unified API documentation portal** | Medium | Auto-aggregate all service OpenAPI specs into a single interactive documentation portal served from the console. | [ ] |
+
+### AI-Powered Operations
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 13.19 | **AI root cause analysis** | Large | When an alert fires, automatically correlate: recent deploys, config changes, dependency failures, similar past incidents. Present ranked hypothesis list. | [ ] |
+| 13.20 | **Natural language query** | Large | "Show me all failed requests in the last hour that touched ServDB" → translates to trace search + log filter + error aggregation. Conversational operations. | [ ] |
+| 13.21 | **Predictive alerting** | Large | Historical metric trends to predict upcoming issues: disk full in 3 days, certificate expiring, traffic spike approaching rate limits. | [ ] |
+| 13.22 | **Automated incident playbooks** | Large | When a specific alert pattern is detected (e.g., ServDB pool exhaustion + high latency), auto-execute runbook steps: scale pool, route to replica, notify on-call. | [ ] |
+
 > See [UNIFIED_ROADMAP.md](../../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
