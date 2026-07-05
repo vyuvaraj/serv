@@ -85,6 +85,47 @@ func RegisterDBSchema(schemaJSON string) {
 	dbSchemaJSON = schemaJSON
 }
 
+// tableSchemas stores the canonical CREATE TABLE SQL for each declared table.
+// Populated by RegisterTableSchema at init time (generated from `table` DSL).
+var (
+	tableSchemas   = make(map[string]string)
+	tableSchemaMu  sync.Mutex
+)
+
+// RegisterTableSchema registers the CREATE TABLE SQL for a named table.
+// Called from generated init() functions when `table` declarations are compiled.
+func RegisterTableSchema(tableName, createSQL string) {
+	tableSchemaMu.Lock()
+	defer tableSchemaMu.Unlock()
+	tableSchemas[tableName] = createSQL
+}
+
+// GetTableSchemas returns a copy of all registered table schemas.
+func GetTableSchemas() map[string]string {
+	tableSchemaMu.Lock()
+	defer tableSchemaMu.Unlock()
+	out := make(map[string]string, len(tableSchemas))
+	for k, v := range tableSchemas {
+		out[k] = v
+	}
+	return out
+}
+
+// DBExec executes a raw SQL statement against the active database connection.
+// Returns nil on success or an error message string on failure.
+// Used by generated migrations from declarative `table` schemas.
+func DBExec(sql string) interface{} {
+	if dbInstance == nil {
+		return "database not initialised"
+	}
+	if _, err := dbInstance.Exec(sql); err != nil {
+		return err.Error()
+	}
+	return nil
+}
+
+
+
 func uploadSchemaToServStore() {
 	time.Sleep(1 * time.Second)
 

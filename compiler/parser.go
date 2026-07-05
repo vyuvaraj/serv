@@ -261,6 +261,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseEnumStatement()
 	case TOKEN_MIGRATION:
 		return p.parseMigrationStatement()
+	case TOKEN_TABLE:
+		return p.parseTableDeclaration()
 	case TOKEN_IF:
 		return p.parseIfStatement()
 	case TOKEN_FOR:

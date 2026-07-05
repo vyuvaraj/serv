@@ -64,9 +64,12 @@ Changes to `.srv` files trigger automatic rebuild and restart.
 server "3000"
 database "sqlite://app.db"
 
-// Run on startup
-log.info("Service starting...")
-db.query("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY, title TEXT, done BOOLEAN)")
+// Declare schema — run `serv migrate` once to create the table
+table tasks {
+    id    int    @primary @autoincrement
+    title string @required
+    done  bool   @default(0)
+}
 
 // Create a task
 route "POST" "/tasks" (req) {
@@ -90,6 +93,14 @@ every 1h {
     log.info("Cleaned up completed tasks")
 }
 ```
+
+Apply the schema before first run:
+
+```bash
+serv migrate app.srv    # creates the tasks table
+serv run app.srv
+```
+
 
 ## Next Steps
 

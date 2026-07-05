@@ -79,6 +79,7 @@ const (
 	TOKEN_NOTIFY      TokenType = "NOTIFY"
 	TOKEN_APP         TokenType = "APP"
 	TOKEN_AGENT       TokenType = "AGENT"
+	TOKEN_TABLE       TokenType = "TABLE"
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -622,6 +623,7 @@ var keywords = map[string]TokenType{
 	"notify":          TOKEN_NOTIFY,
 	"app":             TOKEN_APP,
 	"agent":           TOKEN_AGENT,
+	"table":           TOKEN_TABLE,
 }
 
 func lookupIdent(ident string) TokenType {

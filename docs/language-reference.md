@@ -514,13 +514,86 @@ let errors = validate(req.body, {
 })
 ```
 
-## Migrations
+## Declarative Schema Migrations (`table`)
+
+Declare your database schema natively in `.srv` files. The compiler generates
+the SQL automatically; `serv migrate` applies it to the live database.
 
 ```serv
-migration "create_users" {
-    db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+table users {
+    id        int      @primary @autoincrement
+    name      string   @required
+    email     string   @unique
+    role      string   @default(user)
+    createdAt datetime @default(now)
+}
+
+table posts {
+    id        int      @primary @autoincrement
+    userId    int      @required
+    title     string   @required
+    body      string
+    published bool     @default(0)
+    createdAt datetime @default(now)
 }
 ```
+
+### Column Annotations
+
+| Annotation | SQL equivalent | Notes |
+|-----------|----------------|-------|
+| `@primary` | `PRIMARY KEY` | Mark as primary key |
+| `@autoincrement` | `AUTOINCREMENT` | Auto-increment integer (SQLite) |
+| `@required` | `NOT NULL` | Field cannot be null |
+| `@unique` | `UNIQUE` | Enforce unique constraint |
+| `@default(value)` | `DEFAULT value` | Set default; use `now` for `CURRENT_TIMESTAMP` |
+
+### Serv → SQL Type Mapping
+
+| Serv type | SQL type |
+|-----------|----------|
+| `int` | `INTEGER` |
+| `float` | `REAL` |
+| `bool` | `INTEGER` (0/1) |
+| `string` | `TEXT` |
+| `datetime` | `DATETIME` |
+
+### `serv migrate` workflow
+
+```bash
+# Apply all table declarations to the database (default: sqlite://serv.db)
+serv migrate
+
+# Target a specific file or directory
+serv migrate ./schemas/
+
+# Override the database connection
+serv migrate --db sqlite://production.db
+serv migrate --db postgres://user:pass@localhost/mydb
+```
+
+`serv migrate` will:
+- **Create** tables that don't exist yet (`CREATE TABLE IF NOT EXISTS`)
+- **Add** missing columns to existing tables (`ALTER TABLE ADD COLUMN`)
+- Skip tables/columns that are already up to date
+
+> **Note:** Column renames and type changes require a manual migration block (see below).
+
+### Raw SQL migrations (legacy / advanced)
+
+For custom logic, constraints, or renaming operations use the `migration` block:
+
+```serv
+migration "add_users_index" {
+    db.query("CREATE INDEX idx_users_email ON users (email)")
+}
+
+migration "rename_status_column" {
+    db.query("ALTER TABLE orders RENAME COLUMN status TO order_status")
+}
+```
+
+Raw migrations are applied in declaration order and tracked in `schema_migrations`.
 
 ## MCP Tools
 
@@ -530,3 +603,34 @@ tool "calculator" "Performs math operations" (args) {
     return { "result": result }
 }
 ```
+
+## AI Agents (`agent`)
+
+Declare autonomous AI agents with system prompts, model routing, and tool bindings:
+
+```serv
+agent SupportBot {
+    system "You are a helpful customer support assistant."
+    model  "openai://gpt-4o"
+    tools  ["lookup_order", "create_ticket"]
+}
+
+tool "lookup_order" "Look up an order by ID" (args) {
+    let row = db.query("SELECT * FROM orders WHERE id = ?", args.order_id)
+    return row
+}
+```
+
+**Supported model URI schemes:**
+- `openai://gpt-4o` — OpenAI GPT-4
+- `anthropic://claude-3-5-sonnet` — Anthropic Claude
+- `google://gemini-2.0-flash` — Google Gemini
+- `local://ollama/llama3` — Local Ollama model
+
+**Agent configuration keys:**
+
+| Key | Description |
+|-----|-------------|
+| `system` | System prompt / instruction |
+| `model` | Model URI |
+| `tools` | List of `tool` block names available to the agent |

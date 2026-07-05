@@ -237,6 +237,8 @@ func stmtToken(stmt Statement) Token {
 		return s.Token
 	case *MigrationStmt:
 		return s.Token
+	case *TableDecl:
+		return s.Token
 	case *IfStmt:
 		return s.Token
 	case *ForStmt:

@@ -400,6 +400,100 @@ func splitColumns(colDefsStr string) []string {
 	return cols
 }
 
+// parseTableDeclaration parses a declarative table schema:
+//
+//	table users {
+//	    id        int      @primary @autoincrement
+//	    name      string   @required
+//	    email     string   @unique
+//	    role      string   @default("user")
+//	    createdAt datetime @default(now)
+//	}
+//
+// Newlines are transparent (skipped by lexer). Columns are separated implicitly.
+// The parser reads (name, type, [@annotation]*) until it sees TOKEN_RBRACE.
+func (p *Parser) parseTableDeclaration() Statement {
+	stmt := &TableDecl{Token: p.curToken}
+
+	// table <name>
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	// opening {
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	p.nextToken() // move past {
+
+	for p.curToken.Type != TOKEN_RBRACE && p.curToken.Type != TOKEN_EOF {
+		// column name must be an identifier (or keyword-as-name)
+		if p.curToken.Type == TOKEN_RBRACE || p.curToken.Type == TOKEN_EOF {
+			break
+		}
+		colName := p.curToken.Literal
+		p.nextToken()
+
+		// column type
+		if p.curToken.Type == TOKEN_RBRACE || p.curToken.Type == TOKEN_EOF {
+			// orphan name — just stop
+			break
+		}
+		colType := p.curToken.Literal
+		p.nextToken()
+
+		col := ColumnDef{
+			Name: colName,
+			Type: colType,
+		}
+
+		// Parse @annotations — TOKEN_MACRO is the '@' character
+		for p.curToken.Type == TOKEN_MACRO {
+			p.nextToken() // move past '@'
+			if p.curToken.Type == TOKEN_EOF || p.curToken.Type == TOKEN_RBRACE {
+				break
+			}
+			annotation := strings.ToLower(p.curToken.Literal)
+			switch annotation {
+			case "primary":
+				col.Primary = true
+				p.nextToken()
+			case "autoincrement":
+				col.AutoIncrement = true
+				p.nextToken()
+			case "required":
+				col.Required = true
+				p.nextToken()
+			case "unique":
+				col.Unique = true
+				p.nextToken()
+			case "default":
+				p.nextToken() // past 'default'
+				if p.curToken.Type == TOKEN_LPAREN {
+					p.nextToken() // past '('
+					defVal := p.curToken.Literal
+					p.nextToken() // past value
+					if p.curToken.Type == TOKEN_RPAREN {
+						p.nextToken() // past ')'
+					}
+					col.Default = &defVal
+				}
+			default:
+				p.nextToken()
+			}
+		}
+
+		stmt.Columns = append(stmt.Columns, col)
+	}
+
+	return stmt
+}
+
+
+
+
+
 
 func (p *Parser) parseEveryStatement() Statement {
 	stmt := &EveryStmt{Token: p.curToken}

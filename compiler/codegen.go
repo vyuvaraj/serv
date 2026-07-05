@@ -90,6 +90,14 @@ func (c *Codegen) RunPrePass() {
 			for _, table := range s.Tables {
 				c.dbTables[table.Name] = table
 			}
+		case *TableDecl:
+			// Register declarative table columns as DBTable entries
+			dbCols := make([]DBColumn, 0, len(s.Columns))
+			for _, col := range s.Columns {
+				dbCols = append(dbCols, DBColumn{Name: col.Name, Type: col.Type})
+			}
+			c.dbTables[s.Name] = DBTable{Name: s.Name, Columns: dbCols}
+
 		case *ExternFnStmt:
 			c.extractGoExtern(s)
 		case *DeclareModuleStmt:
@@ -490,6 +498,8 @@ case *ToolStmt:
 return c.genToolStmt(s)
 case *MigrationStmt:
 return c.genMigrationStmt(s)
+case *TableDecl:
+return c.genTableDecl(s)
 case *EveryStmt:
 return c.genEveryStmt(s)
 case *CronStmt:

@@ -594,6 +594,88 @@ func (c *Codegen) genMigrationStmt(s *MigrationStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\truntime.RegisterMigration(%q, func() %s)\n}\n\n", s.Name, bodyStr), nil
 }
 
+// genTableDecl converts a declarative table schema into:
+//  1. A CREATE TABLE IF NOT EXISTS SQL statement
+//  2. A runtime.RegisterTableSchema call (for DB introspection/docs)
+//  3. A runtime.RegisterMigration call so the table is auto-created on startup
+func (c *Codegen) genTableDecl(s *TableDecl) (string, error) {
+	sql := c.tableToSQL(s)
+	migrationName := "create_" + s.Name
+
+	// Escape the SQL for use as a Go raw string
+	escapedSQL := strings.ReplaceAll(sql, "`", "` + \"`\" + `")
+
+	return fmt.Sprintf(
+		"func init() {\n\truntime.RegisterTableSchema(%q, `%s`)\n\truntime.RegisterMigration(%q, func() interface{} {\n\t\treturn runtime.DBExec(`%s`)\n\t})\n}\n\n",
+		s.Name, escapedSQL, migrationName, escapedSQL,
+	), nil
+}
+
+// tableToSQL generates a CREATE TABLE IF NOT EXISTS statement from a TableDecl.
+func (c *Codegen) tableToSQL(s *TableDecl) string {
+	var sb strings.Builder
+	sb.WriteString("CREATE TABLE IF NOT EXISTS ")
+	sb.WriteString(s.Name)
+	sb.WriteString(" (\n")
+
+	for i, col := range s.Columns {
+		sb.WriteString("    ")
+		sb.WriteString(col.Name)
+		sb.WriteString(" ")
+		sb.WriteString(servTypeToSQL(col.Type))
+
+		if col.Primary {
+			sb.WriteString(" PRIMARY KEY")
+		}
+		if col.AutoIncrement {
+			sb.WriteString(" AUTOINCREMENT")
+		}
+		if col.Required {
+			sb.WriteString(" NOT NULL")
+		}
+		if col.Unique {
+			sb.WriteString(" UNIQUE")
+		}
+		if col.Default != nil {
+			defVal := *col.Default
+			if defVal == "now" {
+				sb.WriteString(" DEFAULT CURRENT_TIMESTAMP")
+			} else if col.Type == "string" || col.Type == "datetime" {
+				sb.WriteString(" DEFAULT '")
+				sb.WriteString(defVal)
+				sb.WriteString("'")
+			} else {
+				sb.WriteString(" DEFAULT ")
+				sb.WriteString(defVal)
+			}
+		}
+		if i < len(s.Columns)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(")")
+	return sb.String()
+}
+
+// servTypeToSQL maps serv-lang primitive types to SQLite-compatible SQL types.
+func servTypeToSQL(t string) string {
+	switch strings.ToLower(t) {
+	case "int":
+		return "INTEGER"
+	case "float", "float64":
+		return "REAL"
+	case "bool":
+		return "INTEGER" // SQLite uses 0/1
+	case "datetime":
+		return "DATETIME"
+	default:
+		return "TEXT"
+	}
+}
+
+
+
 func (c *Codegen) genEveryStmt(s *EveryStmt) (string, error) {
 	interval, err := c.genExpression(s.Interval)
 	if err != nil {

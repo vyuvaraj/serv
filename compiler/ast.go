@@ -285,6 +285,40 @@ func (m *MigrationStmt) String() string {
 	return "migration \"" + m.Name + "\" " + m.Body.String() + "\n"
 }
 
+// ColumnDef represents a single column in a declarative table declaration.
+// Constraint annotations (@primary, @autoincrement, @required, @unique, @default)
+// are parsed from the column definition line.
+type ColumnDef struct {
+	Name          string
+	Type          string  // int, float, string, bool, datetime
+	Primary       bool
+	AutoIncrement bool
+	Required      bool    // NOT NULL
+	Unique        bool
+	Default       *string // raw default value, e.g. "user", "now", "0"
+}
+
+// TableDecl is the AST node for a declarative schema declaration:
+//
+//	table users {
+//	    id    int    @primary @autoincrement
+//	    name  string @required
+//	    email string @unique
+//	}
+type TableDecl struct {
+	Token   Token
+	Name    string
+	Columns []ColumnDef
+}
+
+func (t *TableDecl) statementNode()       {}
+func (t *TableDecl) TokenLiteral() string { return t.Token.Literal }
+func (t *TableDecl) String() string {
+	return "table " + t.Name + " { ... }\n"
+}
+
+
+
 
 // Every Statement
 type EveryStmt struct {

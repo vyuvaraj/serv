@@ -175,6 +175,74 @@ Generate a Dockerfile for deployment.
 serv dockerize <file.srv>
 ```
 
+## serv migrate
+
+Apply declarative `table` schema migrations to the database.
+
+```bash
+serv migrate [file-or-dir] [--db <connection-string>]
+```
+
+**Options:**
+- `--db` — Database connection string. Falls back to `$DATABASE_URL` then `sqlite://serv.db`
+
+**Supported connection strings:**
+
+| Format | Example |
+|--------|---------|
+| SQLite | `sqlite://app.db` |
+| PostgreSQL | `postgres://user:pass@localhost/mydb` |
+| MySQL | `mysql://user:pass@localhost/mydb` |
+
+**What it does:**
+
+1. Scans `.srv` files for `table` declarations
+2. Connects to the database
+3. **Creates** tables that don't exist (`CREATE TABLE IF NOT EXISTS`)
+4. **Adds** new columns to existing tables (`ALTER TABLE ADD COLUMN`)
+5. Skips anything already up to date
+
+**Example output:**
+```
+Found 3 table declaration(s):
+  • users (5 columns)
+  • posts (6 columns)
+  • tags (2 columns)
+
+  ✓ users: schema applied
+  ✓ posts: schema applied
+  - tags: already up to date
+
+Migration complete: 2 table(s) created/updated.
+```
+
+## serv create
+
+AI-scaffold a new `.srv` file from a natural language description.
+
+```bash
+serv create "<prompt describing your service>"
+```
+
+**Examples:**
+```bash
+serv create "a REST API for managing blog posts with SQLite"
+serv create "a webhook receiver that processes Stripe payment events"
+```
+
+Requires `SERV_AI_KEY` environment variable (OpenAI or Gemini API key).
+
+## serv dev
+
+Start the full development environment with hot-reload and infrastructure services.
+
+```bash
+serv dev [file.srv] [--services all]
+```
+
+Starts ServDB, ServCache, ServQueue, and ServMesh locally, then watches `.srv`
+files for changes and reloads the compiled service automatically.
+
 ## Runtime Flags
 
 Compiled Serv binaries accept these flags:
@@ -190,3 +258,6 @@ Compiled Serv binaries accept these flags:
 - `LOG_LEVEL=debug` — Set log level
 - `OTEL_ENDPOINT=http://localhost:4318` — Enable OpenTelemetry
 - `OTEL_SERVICE_NAME=my-service` — Service name for traces
+- `DATABASE_URL` — Default database connection string
+- `SERV_MESH_ADDR` — ServMesh registry address (default: `http://localhost:8089`)
+- `SERV_SELF_ADDR` — This service's advertised address for mesh registration

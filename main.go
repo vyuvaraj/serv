@@ -218,6 +218,19 @@ func main() {
 		}
 		createNewProject(args[0], *templateFlag)
 
+	case "create":
+		createCmd := flag.NewFlagSet("create", flag.ExitOnError)
+		if err := createCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Printf("Error parsing arguments: %v\n", err)
+			os.Exit(1)
+		}
+		args := createCmd.Args()
+		if len(args) < 1 {
+			fmt.Println("Usage: serv create \"<prompt describing your service>\"")
+			os.Exit(1)
+		}
+		runAIScaffold(args[0])
+
 	case "debug":
 		targetFile := "."
 		if len(os.Args) >= 3 {
@@ -270,6 +283,20 @@ func main() {
 	case "dev":
 		runDevCmd()
 
+	case "migrate":
+		migrateCmd := flag.NewFlagSet("migrate", flag.ExitOnError)
+		dbFlag := migrateCmd.String("db", "", "Database connection string (e.g. sqlite://mydb.db). Falls back to $DATABASE_URL")
+		if err := migrateCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Printf("Error parsing arguments: %v\n", err)
+			os.Exit(1)
+		}
+		args := migrateCmd.Args()
+		target := "."
+		if len(args) >= 1 {
+			target = args[0]
+		}
+		runMigrate(target, *dbFlag)
+
 	case "lsp-action":
 		runLspActionCmd(os.Args[2:])
 
@@ -283,6 +310,7 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  serv init [name]                           Create a new Serv project")
 	fmt.Println("  serv new <name> [--template <template>]    Create a new Serv project from a template (api, worker, event-processor, full-stack)")
+	fmt.Println("  serv create \"<prompt>\"                     AI-scaffold a new Serv file from a natural language description")
 	fmt.Println("  serv docs generate <file.srv> [-o <out>]   Autogenerate OpenAPI 3.1 specifications from routes")
 	fmt.Println("  serv generate client <file.srv> [--lang <lang>] [-o <out>] Autogenerate client SDKs (typescript/python/go) from routes")
 
@@ -304,5 +332,6 @@ func printUsage() {
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
 	fmt.Println("  serv doctor                                Run compatibility and health checks on all Servverse services")
 	fmt.Println("  serv status                                Print live health, uptime, and latency stats for all services")
+	fmt.Println("  serv migrate [file.srv] [--db <conn>]         Apply declarative `table` schema migrations to the database")
 	fmt.Println("  serv lsp-action --file <file> --line <line> [--type <type>] Resolve LSP code action recommendation")
 }
