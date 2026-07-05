@@ -255,7 +255,7 @@ func main() {
 		}
 		runMonitor(target)
 
-	case "docs":
+	case "docs", "doc":
 		runDocs()
 
 	case "generate":
