@@ -245,6 +245,8 @@ func analyzeStmtUnused(stmt Statement, scope *Scope, diags *[]Diagnostic) {
 				analyzeStmtUnused(inner, scope, diags)
 			}
 		}
+	case *AgentDecl:
+		// Agent declaration registers symbols. Validate referenced tools if necessary
 	}
 }
 
@@ -489,6 +491,10 @@ func collectStmtIdentifiers(stmt Statement, refs map[string]bool) {
 			for _, inner := range s.Body.Statements {
 				collectStmtIdentifiers(inner, refs)
 			}
+		}
+	case *AgentDecl:
+		for _, tool := range s.Tools {
+			refs[tool] = true
 		}
 	case *ExportStmt:
 		collectStmtIdentifiers(s.Inner, refs)

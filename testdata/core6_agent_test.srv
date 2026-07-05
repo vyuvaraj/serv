@@ -1,0 +1,7 @@
+app AIService {
+    agent SupportAgent {
+        model: "openai://gpt-4o-mini"
+        system: "You are a customer support agent. Help the user."
+        tools: [calculator, search]
+    }
+}

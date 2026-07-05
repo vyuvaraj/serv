@@ -247,6 +247,21 @@ func (t *ToolStmt) String() string {
 	return "tool \"" + t.Name + "\" \"" + t.Description + "\" (" + t.Param + ") " + t.Body.String() + "\n"
 }
 
+// Agent Declaration (Built-in Multi-Agent AI Framework)
+type AgentDecl struct {
+	Token       Token
+	Name        string
+	System      string   // System prompt / instruction
+	Model       string   // e.g. "openai://gpt-4"
+	Tools       []string // Referenced tool block names
+}
+
+func (a *AgentDecl) statementNode()       {}
+func (a *AgentDecl) TokenLiteral() string { return a.Token.Literal }
+func (a *AgentDecl) String() string {
+	return "agent " + a.Name + " { ... }\n"
+}
+
 type DBColumn struct {
 	Name string
 	Type string

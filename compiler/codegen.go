@@ -450,6 +450,8 @@ case *AiStmt:
 return c.genAiStmt(s)
 	case *AppStmt:
 		return c.genAppStmt(s)
+	case *AgentDecl:
+		return c.genAgentDecl(s)
 	case *MailStmt:
 		return c.genMailStmt(s)
 	case *NotifyStmt:

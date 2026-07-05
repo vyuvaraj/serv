@@ -78,6 +78,7 @@ const (
 	TOKEN_MACRO       TokenType = "MACRO"
 	TOKEN_NOTIFY      TokenType = "NOTIFY"
 	TOKEN_APP         TokenType = "APP"
+	TOKEN_AGENT       TokenType = "AGENT"
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -620,6 +621,7 @@ var keywords = map[string]TokenType{
 	"circuit_breaker": TOKEN_CIRCUIT_BREAKER,
 	"notify":          TOKEN_NOTIFY,
 	"app":             TOKEN_APP,
+	"agent":           TOKEN_AGENT,
 }
 
 func lookupIdent(ident string) TokenType {

@@ -766,6 +766,8 @@ func extractSymbol(stmt compiler.Statement) symbolInfo {
 		return extractSymbol(s.Inner)
 	case *compiler.AppStmt:
 		return symbolInfo{Name: s.Name, Kind: "app", Line: s.Token.Line - 1, Col: s.Token.Col - 1}
+	case *compiler.AgentDecl:
+		return symbolInfo{Name: s.Name, Kind: "agent", Line: s.Token.Line - 1, Col: s.Token.Col - 1}
 	default:
 		return symbolInfo{}
 	}

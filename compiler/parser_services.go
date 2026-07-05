@@ -36,6 +36,53 @@ func (p *Parser) parseAppStatement() Statement {
 	return stmt
 }
 
+func (p *Parser) parseAgentDeclaration() Statement {
+	stmt := &AgentDecl{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+
+	p.nextToken()
+	for p.curToken.Type != TOKEN_RBRACE && p.curToken.Type != TOKEN_EOF {
+		if p.curToken.Type == TOKEN_IDENT {
+			key := p.curToken.Literal
+			if !p.expectPeek(TOKEN_COLON) {
+				return nil
+			}
+			p.nextToken()
+			valExpr := p.parseExpression(LOWEST)
+			valStr := ""
+			if lit, ok := valExpr.(*StringLiteral); ok {
+				valStr = lit.Value
+			} else if lit, ok := valExpr.(*Identifier); ok {
+				valStr = lit.Value
+			} else if list, ok := valExpr.(*ArrayLiteral); ok {
+				// Parse array values for tools: tools: [add, multiply]
+				for _, el := range list.Elements {
+					if ident, ok := el.(*Identifier); ok {
+						stmt.Tools = append(stmt.Tools, ident.Value)
+					} else if str, ok := el.(*StringLiteral); ok {
+						stmt.Tools = append(stmt.Tools, str.Value)
+					}
+				}
+			}
+
+			if key == "system" {
+				stmt.System = valStr
+			} else if key == "model" {
+				stmt.Model = valStr
+			}
+		}
+		p.nextToken()
+	}
+	return stmt
+}
+
 func (p *Parser) parseAuthStatement() Statement {
 	stmt := &AuthStmt{Token: p.curToken}
 	p.nextToken()

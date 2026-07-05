@@ -68,6 +68,8 @@ func GenerateHTMLDocs(prog *Program, entryFile string) (string, error) {
 				if s.Body != nil {
 					collect(s.Body.Statements)
 				}
+			case *AgentDecl:
+				// AgentDecl support in doc lists
 			}
 		}
 	}

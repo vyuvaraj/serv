@@ -17,6 +17,31 @@ var aiModel string
 var aiBaseURL string
 var aiAPIKey string
 
+// AIAgent holds multi-agent configuration details
+type AIAgent struct {
+	Name   string
+	System string
+	Model  string
+	Tools  []string
+}
+
+var agents = make(map[string]*AIAgent)
+
+// AddAgent registers a custom multi-agent with system prompt and tools
+func AddAgent(name, system, model string, tools []string) {
+	agents[name] = &AIAgent{
+		Name:   name,
+		System: system,
+		Model:  model,
+		Tools:  tools,
+	}
+}
+
+// GetAgent retrieves a registered agent config
+func GetAgent(name string) *AIAgent {
+	return agents[name]
+}
+
 // InitAI configures the AI provider from a connection string.
 // Formats:
 //

@@ -346,6 +346,19 @@ func (c *Codegen) genAppStmt(s *AppStmt) (string, error) {
 	return out.String(), nil
 }
 
+func (c *Codegen) genAgentDecl(s *AgentDecl) (string, error) {
+	c.imports[`"strings"`] = true
+	toolsList := ""
+	if len(s.Tools) > 0 {
+		toolsList = fmt.Sprintf("[]string{%q}", strings.Join(s.Tools, `", "`))
+		// Clean up formatting
+		toolsList = strings.ReplaceAll(toolsList, `""`, `","`)
+	} else {
+		toolsList = "[]string{}"
+	}
+	return fmt.Sprintf("func init() {\n\truntime.AddAgent(%q, %q, %q, %s)\n}\n\n", s.Name, s.System, s.Model, toolsList), nil
+}
+
 func (c *Codegen) genServerStmt(s *ServerStmt) (string, error) {
 	val, err := c.genExpression(s.Value)
 	if err != nil {

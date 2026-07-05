@@ -95,6 +95,8 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 		return analyzeBlock(s.Body, nil)
 	case *AppStmt:
 		return analyzeBlock(s.Body, nil)
+	case *AgentDecl:
+		return nil
 	}
 	return nil
 }
