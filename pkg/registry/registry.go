@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/vyuvaraj/ServShared"
+	"servmesh/pkg/lock"
 )
 
 type Instance struct {
@@ -55,6 +56,9 @@ type Registry struct {
 	caCert        *x509.Certificate
 	caPrivKey     *ecdsa.PrivateKey
 	multicastConn *net.UDPConn
+
+	// locks is the distributed lock store embedded in the registry.
+	locks *lock.Store
 }
 
 func NewRegistry(ttl time.Duration) *Registry {
@@ -63,6 +67,7 @@ func NewRegistry(ttl time.Duration) *Registry {
 		rules:     make(map[string]RoutingRule),
 		policies:  make(map[string][]NetworkPolicy),
 		ttl:       ttl,
+		locks:     lock.NewStore(ttl),
 	}
 	r.generateRootCA()
 	r.startMulticastListener()
@@ -446,6 +451,131 @@ func (r *Registry) Handler() http.Handler {
 		}
 	})
 
+	// ── Distributed Lock Manager ─────────────────────────────────────────────
+
+	// POST /api/lock/acquire
+	// Body: {"key":"<key>","owner":"<caller>","ttl_ms":<int>}
+	// Response 200: {"acquired":true,"lock":{...}} or {"acquired":false,"held_by":"<owner>"}
+	mux.HandleFunc("/api/lock/acquire", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Key   string `json:"key"`
+			Owner string `json:"owner"`
+			TTLMs int64  `json:"ttl_ms"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if body.Key == "" || body.Owner == "" {
+			http.Error(w, "key and owner are required", http.StatusBadRequest)
+			return
+		}
+		ttl := time.Duration(body.TTLMs) * time.Millisecond
+		result := r.locks.Acquire(body.Key, body.Owner, ttl)
+		w.Header().Set("Content-Type", "application/json")
+		if result.Acquired {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusConflict)
+		}
+		json.NewEncoder(w).Encode(result)
+	})
+
+	// POST /api/lock/release
+	// Body: {"key":"<key>","owner":"<caller>"}
+	// Response 200: {"released":true} or 409 {"released":false}
+	mux.HandleFunc("/api/lock/release", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Key   string `json:"key"`
+			Owner string `json:"owner"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		released := r.locks.Release(body.Key, body.Owner)
+		w.Header().Set("Content-Type", "application/json")
+		if released {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusConflict)
+		}
+		json.NewEncoder(w).Encode(map[string]bool{"released": released})
+	})
+
+	// POST /api/lock/extend
+	// Body: {"key":"<key>","owner":"<caller>","ttl_ms":<int>}
+	// Response 200: updated lock entry, 409 if not held by owner
+	mux.HandleFunc("/api/lock/extend", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Key   string `json:"key"`
+			Owner string `json:"owner"`
+			TTLMs int64  `json:"ttl_ms"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		ttl := time.Duration(body.TTLMs) * time.Millisecond
+		entry, ok := r.locks.Extend(body.Key, body.Owner, ttl)
+		w.Header().Set("Content-Type", "application/json")
+		if ok {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(entry)
+		} else {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": "lock not held by owner or expired"})
+		}
+	})
+
+	// GET /api/lock/status?key=<key>
+	// Response 200: lock entry, 404 if not held
+	mux.HandleFunc("/api/lock/status", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		key := req.URL.Query().Get("key")
+		if key == "" {
+			http.Error(w, "key query parameter required", http.StatusBadRequest)
+			return
+		}
+		entry, ok := r.locks.Status(key)
+		w.Header().Set("Content-Type", "application/json")
+		if ok {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(entry)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "lock not held"})
+		}
+	})
+
+	// GET /api/lock/list
+	// Response 200: array of all currently held locks
+	mux.HandleFunc("/api/lock/list", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		entries := r.locks.List()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(entries)
+	})
+
 	return ServShared.AuthMiddleware(mux)
 }
 
@@ -535,6 +665,9 @@ func (r *Registry) Close() {
 	if r.multicastConn != nil {
 		r.multicastConn.Close()
 		r.multicastConn = nil
+	}
+	if r.locks != nil {
+		r.locks.Close()
 	}
 }
 

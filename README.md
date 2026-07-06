@@ -25,3 +25,12 @@ go run main.go --port 8089 --ttl 10s
 - `POST /api/register` - Registers a new instance
 - `POST /api/heartbeat` - Refreshes instance TTL
 - `GET /api/resolve/{service_name}` - Resolves a service to healthy endpoints
+
+### Distributed Locking APIs
+
+- `POST /api/lock/acquire` - Acquires a TTL lock for an owner
+- `POST /api/lock/release` - Releases a held lock
+- `POST /api/lock/extend` - Extends the TTL of a held lock
+- `GET /api/lock/status?key=...` - Returns the status of a lock
+- `GET /api/lock/list` - Returns all active locks
+
