@@ -365,6 +365,22 @@ func (r *Registry) Handler() http.Handler {
 		json.NewEncoder(w).Encode(instances)
 	})
 
+	mux.HandleFunc("/api/instances", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		r.mu.RLock()
+		var allInstances []Instance
+		for _, list := range r.instances {
+			allInstances = append(allInstances, list...)
+		}
+		r.mu.RUnlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(allInstances)
+	})
+
 	mux.HandleFunc("/api/rules", func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
