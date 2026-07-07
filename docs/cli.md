@@ -243,7 +243,66 @@ serv dev [file.srv] [--services all]
 Starts ServDB, ServCache, ServQueue, and ServMesh locally, then watches `.srv`
 files for changes and reloads the compiled service automatically.
 
+## serv deploy
+
+Deploy a `.srv` service to a target environment (e.g. Servverse Cloud).
+
+```bash
+serv deploy <file.srv> [--env <production|staging>] [--token <jwt>]
+```
+
+**Options:**
+- `--env` — Target hosting environment (defaults to `staging`)
+- `--token` — Deployment authentication token (falls back to `$SERV_DEPLOY_TOKEN`)
+
+## serv doctor
+
+Execute diagnostic and compatibility checks across all running local services.
+
+```bash
+serv doctor [--integration]
+```
+
+**Options:**
+- `--integration` — Boot and test the full 15-service pipeline via docker-compose
+
+## serv audit
+
+Audit third-party package dependency paths for compatibility and vulnerability risks.
+
+```bash
+serv audit [--fix]
+```
+
+**Options:**
+- `--fix` — Attempt to resolve minor version conflicts automatically
+
+## serv status
+
+Query and format the health status of active local network registry nodes.
+
+```bash
+serv status [--json]
+```
+
+## serv repl
+
+Start an interactive read-eval-print shell to execute and inspect Serv statements.
+
+```bash
+serv repl
+```
+
+## serv packages
+
+Inspect or list downloaded dependency structures and standard library overrides.
+
+```bash
+serv packages [--update]
+```
+
 ## Runtime Flags
+
 
 Compiled Serv binaries accept these flags:
 

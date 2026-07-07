@@ -139,3 +139,74 @@ route "GET" "/api/profile" (req) {
 ```
 
 Full module documentation: see comments at the top of each file in `stdlib/`.
+
+## Deep-dive Module Examples
+
+### 1. Resilience (`circuit_breaker.srv` & `retry.srv`)
+
+Implement standard fault tolerance when requesting downstreams:
+
+```serv
+import { createBreaker, recordSuccess, recordFailure, isOpen } from "../stdlib/circuit_breaker.srv"
+import { backoffDelay } from "../stdlib/retry.srv"
+
+let breaker = createBreaker(3, 10s) // 3 failures, 10s timeout window
+
+fn requestExternalAPI(url) {
+    if isOpen(breaker) {
+        return { "error": "circuit breaker open", "status": "failing" }
+    }
+
+    let res = http.get(url)
+    if res.status != 200 {
+        recordFailure(breaker)
+        return nil
+    }
+
+    recordSuccess(breaker)
+    return res.body
+}
+```
+
+### 2. Concurrency (`semaphore.srv`)
+
+Guard resources from over-concurrency:
+
+```serv
+import { createSemaphore, tryAcquire, release } from "../stdlib/semaphore.srv"
+
+let sem = createSemaphore(5) // Max 5 parallel tasks
+
+fn processTask(taskId) {
+    if !tryAcquire(sem) {
+        log.warn("Rate limited locally — too many concurrent workers")
+        return false
+    }
+    defer release(sem)
+
+    heavyComputation(taskId)
+    return true
+}
+```
+
+### 3. Masking & Compliance (`mask.srv` & `audit.srv`)
+
+Sanitize user profiles and write logs:
+
+```serv
+import { maskEmail, maskCard } from "../stdlib/mask.srv"
+import { auditLog } from "../stdlib/audit.srv"
+
+fn getSafeProfile(req) {
+    let email = req.body.email
+    let card = req.body.card
+
+    auditLog(req.user, "access", "billing-profile", nil)
+
+    return {
+        "email": maskEmail(email),
+        "card": maskCard(card)
+    }
+}
+```
+
