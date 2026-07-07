@@ -49,7 +49,7 @@ github.com/sijms/go-ora/v2/network
 github.com/sijms/go-ora/v2/network/security
 github.com/sijms/go-ora/v2/network/security/md4
 github.com/sijms/go-ora/v2/trace
-# github.com/vyuvaraj/ServShared v0.1.1-0.20260707055944-17bb1291bf6d
+# github.com/vyuvaraj/ServShared v0.1.1-0.20260707060806-c546de0a6015
 ## explicit; go 1.26.4
 github.com/vyuvaraj/ServShared
 github.com/vyuvaraj/ServShared/pkg/middleware

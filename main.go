@@ -45,12 +45,17 @@ var (
 	storeUrl   = flag.String("store-url", "http://localhost:8081", "ServStore base URL")
 	queueUrl   = flag.String("queue-url", "http://localhost:8082", "ServQueue base URL")
 	traceUrl   = flag.String("trace-url", "http://localhost:8090", "ServTrace base URL")
-	tunnelUrl  = flag.String("tunnel-url", "http://localhost:8443", "ServTunnel base URL")
-	authUrl    = flag.String("auth-url", "http://localhost:8098", "ServAuth base URL")
-	dbUrl      = flag.String("db-url", "http://localhost:8097", "ServDB base URL")
-	mailUrl    = flag.String("mail-url", "http://localhost:8094", "ServMail base URL")
-	flowUrl    = flag.String("flow-url", "http://localhost:8096", "ServFlow base URL")
-	authToken  = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
+	tunnelUrl   = flag.String("tunnel-url", "http://localhost:8443", "ServTunnel base URL")
+	authUrl     = flag.String("auth-url", "http://localhost:8098", "ServAuth base URL")
+	dbUrl       = flag.String("db-url", "http://localhost:8097", "ServDB base URL")
+	mailUrl     = flag.String("mail-url", "http://localhost:8094", "ServMail base URL")
+	flowUrl     = flag.String("flow-url", "http://localhost:8096", "ServFlow base URL")
+	meshUrl     = flag.String("mesh-url", "http://localhost:8089", "ServMesh base URL")
+	cronUrl     = flag.String("cron-url", "http://localhost:8087", "ServCron base URL")
+	cacheUrl    = flag.String("cache-url", "http://localhost:8086", "ServCache base URL")
+	registryUrl = flag.String("registry-url", "http://localhost:8088", "ServRegistry base URL")
+	cloudUrl    = flag.String("cloud-url", "http://localhost:8085", "ServCloud base URL")
+	authToken   = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
 
@@ -67,7 +72,12 @@ type ServDiscovery struct {
 	DB           string `json:"db"`            // ServDB base URL
 	Mail         string `json:"mail"`          // ServMail base URL
 	Flow         string `json:"flow"`          // ServFlow base URL
-	ConsolePort  int    `json:"console_port"` // Override listen port
+	Mesh         string `json:"mesh"`          // ServMesh base URL
+	Cron         string `json:"cron"`          // ServCron base URL
+	Cache        string `json:"cache"`         // ServCache base URL
+	Registry     string `json:"registry"`      // ServRegistry base URL
+	Cloud        string `json:"cloud"`         // ServCloud base URL
+	ConsolePort  int    `json:"console_port"`  // Override listen port
 	JWTSecret    string `json:"jwt_secret"`   // Shared JWT signing secret
 	OTLPEndpoint string `json:"otlp_endpoint"` // Shared OpenTelemetry collector
 	GateConfig   string `json:"gate_config"`  // Path to ServGate config.json
@@ -90,6 +100,11 @@ func loadDiscovery() ServDiscovery {
 		DB:           *dbUrl,
 		Mail:         *mailUrl,
 		Flow:         *flowUrl,
+		Mesh:         *meshUrl,
+		Cron:         *cronUrl,
+		Cache:        *cacheUrl,
+		Registry:     *registryUrl,
+		Cloud:        *cloudUrl,
 		ConsolePort:  *port,
 		AuthToken:    *authToken,
 		GateConfig:   *gateConfig,
@@ -136,6 +151,11 @@ func loadDiscovery() ServDiscovery {
 	if manifest.DB != "" { d.DB = manifest.DB }
 	if manifest.Mail != "" { d.Mail = manifest.Mail }
 	if manifest.Flow != "" { d.Flow = manifest.Flow }
+	if manifest.Mesh != "" { d.Mesh = manifest.Mesh }
+	if manifest.Cron != "" { d.Cron = manifest.Cron }
+	if manifest.Cache != "" { d.Cache = manifest.Cache }
+	if manifest.Registry != "" { d.Registry = manifest.Registry }
+	if manifest.Cloud != "" { d.Cloud = manifest.Cloud }
 
 	return d
 }
@@ -181,22 +201,39 @@ func main() {
 
 	// Load service discovery (SERVVERSE_DISCOVERY env var > CLI flags > defaults)
 	activeDiscovery = loadDiscovery()
-
 	// Apply resolved URLs back to the flag vars so all handlers pick them up
-	*gateUrl    = activeDiscovery.Gate
-	*storeUrl   = activeDiscovery.Store
-	*queueUrl   = activeDiscovery.Queue
-	*traceUrl   = activeDiscovery.Trace
-	*tunnelUrl  = activeDiscovery.Tunnel
-	*port       = activeDiscovery.ConsolePort
-	*authToken  = activeDiscovery.AuthToken
-	*gateConfig = activeDiscovery.GateConfig
+	*gateUrl     = activeDiscovery.Gate
+	*storeUrl    = activeDiscovery.Store
+	*queueUrl    = activeDiscovery.Queue
+	*traceUrl    = activeDiscovery.Trace
+	*tunnelUrl   = activeDiscovery.Tunnel
+	*authUrl     = activeDiscovery.Auth
+	*dbUrl       = activeDiscovery.DB
+	*mailUrl     = activeDiscovery.Mail
+	*flowUrl     = activeDiscovery.Flow
+	*meshUrl     = activeDiscovery.Mesh
+	*cronUrl     = activeDiscovery.Cron
+	*cacheUrl    = activeDiscovery.Cache
+	*registryUrl = activeDiscovery.Registry
+	*cloudUrl    = activeDiscovery.Cloud
+	*port        = activeDiscovery.ConsolePort
+	*authToken   = activeDiscovery.AuthToken
+	*gateConfig  = activeDiscovery.GateConfig
 
-	log.Printf("[discovery] ServGate  → %s", *gateUrl)
-	log.Printf("[discovery] ServStore → %s", *storeUrl)
-	log.Printf("[discovery] ServQueue → %s", *queueUrl)
-	log.Printf("[discovery] ServTrace → %s", *traceUrl)
-	log.Printf("[discovery] ServTunnel → %s", *tunnelUrl)
+	log.Printf("[discovery] ServGate     → %s", *gateUrl)
+	log.Printf("[discovery] ServStore    → %s", *storeUrl)
+	log.Printf("[discovery] ServQueue    → %s", *queueUrl)
+	log.Printf("[discovery] ServTrace    → %s", *traceUrl)
+	log.Printf("[discovery] ServTunnel   → %s", *tunnelUrl)
+	log.Printf("[discovery] ServAuth     → %s", *authUrl)
+	log.Printf("[discovery] ServDB       → %s", *dbUrl)
+	log.Printf("[discovery] ServMail     → %s", *mailUrl)
+	log.Printf("[discovery] ServFlow     → %s", *flowUrl)
+	log.Printf("[discovery] ServMesh     → %s", *meshUrl)
+	log.Printf("[discovery] ServCron     → %s", *cronUrl)
+	log.Printf("[discovery] ServCache    → %s", *cacheUrl)
+	log.Printf("[discovery] ServRegistry → %s", *registryUrl)
+	log.Printf("[discovery] ServCloud    → %s", *cloudUrl)
 	if activeDiscovery.OTLPEndpoint != "" {
 		log.Printf("[discovery] OTLP      → %s", activeDiscovery.OTLPEndpoint)
 	}
@@ -247,6 +284,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid mail-url: %v", err)
 	}
+	meshU, err := url.Parse(*meshUrl)
+	if err != nil {
+		log.Fatalf("Invalid mesh-url: %v", err)
+	}
+	cronU, err := url.Parse(*cronUrl)
+	if err != nil {
+		log.Fatalf("Invalid cron-url: %v", err)
+	}
+	cacheU, err := url.Parse(*cacheUrl)
+	if err != nil {
+		log.Fatalf("Invalid cache-url: %v", err)
+	}
+	registryU, err := url.Parse(*registryUrl)
+	if err != nil {
+		log.Fatalf("Invalid registry-url: %v", err)
+	}
+	cloudU, err := url.Parse(*cloudUrl)
+	if err != nil {
+		log.Fatalf("Invalid cloud-url: %v", err)
+	}
 
 	// Create reverse proxies
 	gateProxy := httputil.NewSingleHostReverseProxy(gURL)
@@ -256,7 +313,12 @@ func main() {
 	tunnelProxy := httputil.NewSingleHostReverseProxy(tunURL)
 	authProxy := httputil.NewSingleHostReverseProxy(aURL)
 	dbProxy := httputil.NewSingleHostReverseProxy(dURL)
-	mailProxy := httputil.NewSingleHostReverseProxy(mURL)
+	mailProxy     := httputil.NewSingleHostReverseProxy(mURL)
+	meshProxy     := httputil.NewSingleHostReverseProxy(meshU)
+	cronProxy     := httputil.NewSingleHostReverseProxy(cronU)
+	cacheProxy    := httputil.NewSingleHostReverseProxy(cacheU)
+	registryProxy := httputil.NewSingleHostReverseProxy(registryU)
+	cloudProxy    := httputil.NewSingleHostReverseProxy(cloudU)
 
 	// Adjust Director to rewrite request path and set Authorization headers
 	proxy.ConfigureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken, getProxyActionName, addAuditLog)
@@ -267,6 +329,11 @@ func main() {
 	proxy.ConfigureProxyDirector(authProxy, aURL, "/api/proxy/auth", "", getProxyActionName, addAuditLog)
 	proxy.ConfigureProxyDirector(dbProxy, dURL, "/api/proxy/db", "", getProxyActionName, addAuditLog)
 	proxy.ConfigureProxyDirector(mailProxy, mURL, "/api/proxy/mail", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(meshProxy, meshU, "/api/proxy/mesh", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(cronProxy, cronU, "/api/proxy/cron", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(cacheProxy, cacheU, "/api/proxy/cache", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(registryProxy, registryU, "/api/proxy/registry", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(cloudProxy, cloudU, "/api/proxy/cloud", "", getProxyActionName, addAuditLog)
 
 	mux := http.NewServeMux()
 
@@ -321,7 +388,12 @@ func main() {
 	mux.Handle("/api/proxy/tunnel/", authorizeConsole(tunnelProxy.ServeHTTP))
 	mux.Handle("/api/proxy/auth/", authorizeConsole(authProxy.ServeHTTP))
 	mux.Handle("/api/proxy/db/", authorizeConsole(dbProxy.ServeHTTP))
-	mux.Handle("/api/proxy/mail/", authorizeConsole(mailProxy.ServeHTTP))
+	mux.Handle("/api/proxy/mail/",     authorizeConsole(mailProxy.ServeHTTP))
+	mux.Handle("/api/proxy/mesh/",     authorizeConsole(meshProxy.ServeHTTP))
+	mux.Handle("/api/proxy/cron/",     authorizeConsole(cronProxy.ServeHTTP))
+	mux.Handle("/api/proxy/cache/",    authorizeConsole(cacheProxy.ServeHTTP))
+	mux.Handle("/api/proxy/registry/", authorizeConsole(registryProxy.ServeHTTP))
+	mux.Handle("/api/proxy/cloud/",    authorizeConsole(cloudProxy.ServeHTTP))
 
 	// Serve embedded web assets (falls back to ./web on disk if needed for dev)
 	webFS, _ := fs.Sub(webAssets, "web")
@@ -408,7 +480,17 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		checkStatus("ServGate", *gateUrl),
 		checkStatus("ServStore", *storeUrl),
 		checkStatus("ServQueue", *queueUrl),
+		checkStatus("ServTrace", *traceUrl),
 		checkStatus("ServTunnel", *tunnelUrl),
+		checkStatus("ServAuth", *authUrl),
+		checkStatus("ServDB", *dbUrl),
+		checkStatus("ServMail", *mailUrl),
+		checkStatus("ServFlow", *flowUrl),
+		checkStatus("ServMesh", *meshUrl),
+		checkStatus("ServCron", *cronUrl),
+		checkStatus("ServCache", *cacheUrl),
+		checkStatus("ServRegistry", *registryUrl),
+		checkStatus("ServCloud", *cloudUrl),
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
@@ -1970,7 +2052,17 @@ func startAlertMonitoring(ctx context.Context) {
 				{"ServGate", *gateUrl},
 				{"ServStore", *storeUrl},
 				{"ServQueue", *queueUrl},
+				{"ServTrace", *traceUrl},
 				{"ServTunnel", *tunnelUrl},
+				{"ServAuth", *authUrl},
+				{"ServDB", *dbUrl},
+				{"ServMail", *mailUrl},
+				{"ServFlow", *flowUrl},
+				{"ServMesh", *meshUrl},
+				{"ServCron", *cronUrl},
+				{"ServCache", *cacheUrl},
+				{"ServRegistry", *registryUrl},
+				{"ServCloud", *cloudUrl},
 			}
 
 			for _, c := range components {
@@ -3442,6 +3534,11 @@ func handleDevServices(w http.ResponseWriter, r *http.Request) {
 		{"ServDB", activeDiscovery.DB},
 		{"ServMail", activeDiscovery.Mail},
 		{"ServFlow", activeDiscovery.Flow},
+		{"ServMesh", activeDiscovery.Mesh},
+		{"ServCron", activeDiscovery.Cron},
+		{"ServCache", activeDiscovery.Cache},
+		{"ServRegistry", activeDiscovery.Registry},
+		{"ServCloud", activeDiscovery.Cloud},
 	}
 
 	client := &http.Client{Timeout: 300 * time.Millisecond}

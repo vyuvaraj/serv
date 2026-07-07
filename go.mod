@@ -7,7 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/lib/pq v1.12.3
 	github.com/sijms/go-ora/v2 v2.9.0
-	github.com/vyuvaraj/ServShared v0.1.1-0.20260707055944-17bb1291bf6d
+	github.com/vyuvaraj/ServShared v0.1.1-0.20260707060806-c546de0a6015
 )
 
 require (
