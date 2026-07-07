@@ -184,8 +184,35 @@ items.contains(3)                // true
 items.push(6)                    // [1, 2, 3, 4, 5, 6]
 items.length()                   // 5
 
-// Slice expressions
-let first3 = items[0:3]          // [1, 2, 3]
-let rest = items[2:]             // [3, 4, 5]
-let head = items[:2]             // [1, 2]
+## ai — Artificial Intelligence & LLM Access
+
+First-class AI operations directly available in Serv-lang:
+
+```serv
+// Complete single prompt
+let res = ai.complete("Translate to French: Hello World")
+// res = "Bonjour le monde"
+
+// Chat conversation loop
+let reply = ai.chat([
+    { "role": "system", "content": "You are a translator." },
+    { "role": "user", "content": "Translate: Hello" }
+])
+
+// Vector Embeddings generation
+let vectors = ai.embed("text to convert to vectors")
+// vectors = [0.12, -0.45, 0.98, ...]
+```
+
+## auth — Authenticated Request Claims
+
+Inspect and parse request JWT contexts:
+
+```serv
+let claims = auth.claims(req)
+// claims = { "username": "alice", "roles": ["admin"] }
+
+let valid = auth.verify(req)  // Returns true if authenticated
+```
+
 ```
