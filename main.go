@@ -372,6 +372,12 @@ func main() {
 	mux.HandleFunc("/api/mesh/instances", authorizeConsole(handleConsoleMeshInstances))
 	mux.HandleFunc("/api/registry/packages", authorizeConsole(handleConsoleRegistryPackages))
 	
+	// Cloud panel consolidation endpoints
+	mux.HandleFunc("/api/cloud/services", authorizeConsole(handleConsoleCloudServices))
+	mux.HandleFunc("/api/cloud/services/", authorizeConsole(handleConsoleCloudServicesItem))
+	mux.HandleFunc("/api/cloud/deploy", authorizeConsole(handleConsoleCloudDeploy))
+	mux.HandleFunc("/api/cloud/history", authorizeConsole(handleConsoleCloudHistory))
+	
 	// Register AI diagnostics and incident analysis (EE build-tagged)
 	registerAIHandlers(mux)
 
@@ -4011,6 +4017,168 @@ func handleConsoleRegistryPackages(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
+
+func handleConsoleCloudServices(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/services", strings.TrimSuffix(*cloudUrl, "/"))
+
+	req, _ := http.NewRequest("GET", targetURL, nil)
+
+	// Propagate JWT token downstream to ServCloud
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to fetch services from ServCloud: "+err.Error(), "ERR_CLOUD_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleConsoleCloudServicesItem(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Path: /api/cloud/services/{name} or /api/cloud/services/{name}/logs
+	path := strings.TrimPrefix(r.URL.Path, "/api/cloud/services/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		WriteJSONError(w, r, "Missing service name", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+
+	name := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	var targetURL string
+	if action == "logs" {
+		targetURL = fmt.Sprintf("%s/api/services/%s/logs", strings.TrimSuffix(*cloudUrl, "/"), name)
+	} else if action == "stats" {
+		targetURL = fmt.Sprintf("%s/api/services/%s/stats", strings.TrimSuffix(*cloudUrl, "/"), name)
+	} else if action == "rollback" {
+		targetURL = fmt.Sprintf("%s/api/services/%s/rollback", strings.TrimSuffix(*cloudUrl, "/"), name)
+	} else if action == "env" {
+		targetURL = fmt.Sprintf("%s/api/services/%s/env", strings.TrimSuffix(*cloudUrl, "/"), name)
+	} else {
+		targetURL = fmt.Sprintf("%s/api/services/%s", strings.TrimSuffix(*cloudUrl, "/"), name)
+	}
+
+	var req *http.Request
+	if r.Method == http.MethodDelete && action == "" {
+		req, _ = http.NewRequest("DELETE", targetURL, nil)
+	} else if r.Method == http.MethodPost && (action == "rollback" || action == "env") {
+		req, _ = http.NewRequest("POST", targetURL, r.Body)
+	} else if r.Method == http.MethodGet {
+		req, _ = http.NewRequest("GET", targetURL, nil)
+	} else {
+		WriteJSONError(w, r, "Method not allowed or invalid action", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+
+	// Propagate JWT token downstream to ServCloud
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to communicate with ServCloud: "+err.Error(), "ERR_CLOUD_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if r.Method == http.MethodDelete {
+		addAuditLog(r.Header.Get("X-Console-User"), "Undeploy Service: "+name, r.Method, r.URL.Path, resp.StatusCode)
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleConsoleCloudDeploy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/deploy", strings.TrimSuffix(*cloudUrl, "/"))
+
+	req, _ := http.NewRequest("POST", targetURL, r.Body)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Propagate JWT token downstream to ServCloud
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to deploy on ServCloud: "+err.Error(), "ERR_CLOUD_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	addAuditLog(r.Header.Get("X-Console-User"), "Deploy Service via Console", r.Method, r.URL.Path, resp.StatusCode)
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleConsoleCloudHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/history", strings.TrimSuffix(*cloudUrl, "/"))
+
+	req, _ := http.NewRequest("GET", targetURL, nil)
+
+	// Propagate JWT token downstream to ServCloud
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to fetch history from ServCloud: "+err.Error(), "ERR_CLOUD_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 
 
 
