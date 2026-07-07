@@ -362,6 +362,12 @@ func main() {
 	mux.HandleFunc("/api/plugins/register", authorizeConsole(handleRegisterPlugin))
 	mux.HandleFunc("/api/plugins/serve", handleServePlugin)
 	
+	// Cron & Cache panel API endpoints
+	mux.HandleFunc("/api/cron/jobs", authorizeConsole(handleConsoleCronJobs))
+	mux.HandleFunc("/api/cron/jobs/", authorizeConsole(handleConsoleCronJobsItem))
+	mux.HandleFunc("/api/cache/stats", authorizeConsole(handleConsoleCacheStats))
+	mux.HandleFunc("/api/cache/clear", authorizeConsole(handleConsoleCacheClear))
+	
 	// Register AI diagnostics and incident analysis (EE build-tagged)
 	registerAIHandlers(mux)
 
@@ -3776,4 +3782,168 @@ func handleServePlugin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(binary)
 }
+
+func handleConsoleCronJobs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	client := &http.Client{Timeout: 3 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/jobs", strings.TrimSuffix(*cronUrl, "/"))
+	
+	if r.Method == http.MethodGet {
+		req, _ := http.NewRequest("GET", targetURL, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			WriteJSONError(w, r, "Failed to fetch jobs from ServCron: "+err.Error(), "ERR_CRON_UNREACHABLE", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+	
+	if r.Method == http.MethodPost {
+		req, _ := http.NewRequest("POST", targetURL, r.Body)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(req)
+		if err != nil {
+			WriteJSONError(w, r, "Failed to create job in ServCron: "+err.Error(), "ERR_CRON_UNREACHABLE", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		
+		addAuditLog(r.Header.Get("X-Console-User"), "Create Cron Job", r.Method, r.URL.Path, resp.StatusCode)
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+	
+	WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+}
+
+func handleConsoleCronJobsItem(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Path format: /api/cron/jobs/{id} or /api/cron/jobs/{id}/run
+	path := strings.TrimPrefix(r.URL.Path, "/api/cron/jobs/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		WriteJSONError(w, r, "Missing job ID", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+	
+	jobID := parts[0]
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+	
+	client := &http.Client{Timeout: 3 * time.Second}
+	var targetURL string
+	if action == "run" {
+		targetURL = fmt.Sprintf("%s/api/jobs/%s/run", strings.TrimSuffix(*cronUrl, "/"), jobID)
+	} else {
+		targetURL = fmt.Sprintf("%s/api/jobs/%s", strings.TrimSuffix(*cronUrl, "/"), jobID)
+	}
+	
+	if r.Method == http.MethodPost && action == "run" {
+		req, _ := http.NewRequest("POST", targetURL, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			WriteJSONError(w, r, "Failed to trigger job in ServCron: "+err.Error(), "ERR_CRON_UNREACHABLE", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		
+		addAuditLog(r.Header.Get("X-Console-User"), "Manually Trigger Cron Job: "+jobID, r.Method, r.URL.Path, resp.StatusCode)
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+	
+	if r.Method == http.MethodDelete && action == "" {
+		req, _ := http.NewRequest("DELETE", targetURL, nil)
+		resp, err := client.Do(req)
+		if err != nil {
+			WriteJSONError(w, r, "Failed to delete job in ServCron: "+err.Error(), "ERR_CRON_UNREACHABLE", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		
+		addAuditLog(r.Header.Get("X-Console-User"), "Delete Cron Job: "+jobID, r.Method, r.URL.Path, resp.StatusCode)
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+		return
+	}
+	
+	WriteJSONError(w, r, "Method not allowed or invalid action", "ERR_BAD_REQUEST", http.StatusBadRequest)
+}
+
+func handleConsoleCacheStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	client := &http.Client{Timeout: 3 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/cache/inspect", strings.TrimSuffix(*cacheUrl, "/"))
+	
+	req, _ := http.NewRequest("GET", targetURL, nil)
+	
+	// Add token to authenticate console call downstream to ServCache
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to fetch stats from ServCache: "+err.Error(), "ERR_CACHE_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleConsoleCacheClear(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	client := &http.Client{Timeout: 3 * time.Second}
+	pattern := r.URL.Query().Get("pattern")
+	targetURL := fmt.Sprintf("%s/api/cache", strings.TrimSuffix(*cacheUrl, "/"))
+	if pattern != "" {
+		targetURL = fmt.Sprintf("%s/api/cache?pattern=%s", strings.TrimSuffix(*cacheUrl, "/"), url.QueryEscape(pattern))
+	}
+	
+	req, _ := http.NewRequest("DELETE", targetURL, nil)
+	
+	// Add token to authenticate console call downstream to ServCache
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to clear ServCache: "+err.Error(), "ERR_CACHE_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	
+	addAuditLog(r.Header.Get("X-Console-User"), "Clear Cache: "+pattern, r.Method, r.URL.Path, resp.StatusCode)
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 
