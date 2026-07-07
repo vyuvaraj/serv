@@ -45,7 +45,7 @@ func TestDoctorCommandOffline(t *testing.T) {
 		defer func() {
 			recover()
 		}()
-		runDoctor()
+		runDoctor(false)
 	}()
 
 	w.Close()
@@ -103,7 +103,7 @@ func TestDoctorCommandOnline(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runDoctor()
+	runDoctor(false)
 
 	w.Close()
 	os.Stdout = oldStdout
