@@ -634,3 +634,50 @@ tool "lookup_order" "Look up an order by ID" (args) {
 | `system` | System prompt / instruction |
 | `model` | Model URI |
 | `tools` | List of `tool` block names available to the agent |
+
+## Native Infrastructure & Component Keywords
+
+### 1. Storage Buckets (`bucket`)
+Bind and interact with ServStore S3 storage natively:
+```serv
+bucket media {
+    path "servstore://media-bucket"
+    allowed_types ["image/jpeg", "image/png", "application/pdf"]
+}
+
+// Upload file payload
+media.put("user_1_avatar.png", req.body.file)
+```
+
+### 2. Retrieval-Augmented Generation (`RAG`)
+Declare semantic index and document query stores directly:
+```serv
+rag DocumentIndex {
+    source "servstore://docs"
+    embed "openai"
+    chunk 512
+}
+
+// Query RAG context inside AI agent chat
+let context = DocumentIndex.query("How to setup mTLS?")
+let reply = ai.chat(context)
+```
+
+### 3. Distributed Mutual Exclusion (`lock` block)
+Scope-level locking backed by the ServLock coordinator:
+```serv
+lock "billing:invoice:42" {
+    // Critical Section: Only one instance runs this at a time
+    processInvoice(42)
+} // Automatic deferred release on block exit
+```
+
+### 4. Event Handler (`on` block)
+Subscribe to event queues via NATS / ServQueue brokers:
+```serv
+on "user.signup" (event) {
+    log.info("New signup recorded: ", event.email)
+    sendWelcomeEmail(event.email)
+}
+```
+

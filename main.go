@@ -242,7 +242,17 @@ func main() {
 		runAudit()
 
 	case "doctor":
-		runDoctor()
+		doctorCmd := flag.NewFlagSet("doctor", flag.ExitOnError)
+		integrationFlag := doctorCmd.Bool("integration", false, "Run full pipeline docker integration checks")
+		if err := doctorCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Printf("Error parsing arguments: %v\n", err)
+			os.Exit(1)
+		}
+		runDoctor(*integrationFlag)
+
+	case "upgrade":
+		runUpgrade()
+
 
 	case "cache":
 		if len(os.Args) >= 3 && os.Args[2] == "inspect" {

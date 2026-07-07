@@ -28,8 +28,11 @@ type DoctorDiscovery struct {
 
 var osExit = os.Exit
 
-func runDoctor() {
+func runDoctor(integration bool) {
 	fmt.Println("🩺 Running Ecosystem Doctor check...")
+	if integration {
+		fmt.Println("🐳 Running docker-compose service integration checks...")
+	}
 	raw := os.Getenv("SERVVERSE_DISCOVERY")
 	if raw == "" {
 		fmt.Println("❌ Error: SERVVERSE_DISCOVERY environment variable is not set.")
