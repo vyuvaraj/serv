@@ -368,6 +368,10 @@ func main() {
 	mux.HandleFunc("/api/cache/stats", authorizeConsole(handleConsoleCacheStats))
 	mux.HandleFunc("/api/cache/clear", authorizeConsole(handleConsoleCacheClear))
 	
+	// Mesh & Registry panel API endpoints
+	mux.HandleFunc("/api/mesh/instances", authorizeConsole(handleConsoleMeshInstances))
+	mux.HandleFunc("/api/registry/packages", authorizeConsole(handleConsoleRegistryPackages))
+	
 	// Register AI diagnostics and incident analysis (EE build-tagged)
 	registerAIHandlers(mux)
 
@@ -3945,5 +3949,68 @@ func handleConsoleCacheClear(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
+
+func handleConsoleMeshInstances(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/instances", strings.TrimSuffix(*meshUrl, "/"))
+
+	req, _ := http.NewRequest("GET", targetURL, nil)
+
+	// Propagate JWT token downstream to ServMesh
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to fetch instances from ServMesh: "+err.Error(), "ERR_MESH_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleConsoleRegistryPackages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	targetURL := fmt.Sprintf("%s/api/packages", strings.TrimSuffix(*registryUrl, "/"))
+
+	req, _ := http.NewRequest("GET", targetURL, nil)
+
+	// Propagate JWT token downstream to ServRegistry
+	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		if svcToken != "" {
+			req.Header.Set("Authorization", "Bearer "+svcToken)
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to fetch packages from ServRegistry: "+err.Error(), "ERR_REGISTRY_UNREACHABLE", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 
 
