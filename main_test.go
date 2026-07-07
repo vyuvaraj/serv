@@ -151,15 +151,36 @@ func TestHandleEvents(t *testing.T) {
 }
 
 func TestHandleStatusHealthz(t *testing.T) {
+	// Save originals
 	oldGate := *gateUrl
 	oldStore := *storeUrl
 	oldQueue := *queueUrl
 	oldTunnel := *tunnelUrl
+	oldTrace := *traceUrl
+	oldAuth := *authUrl
+	oldDB := *dbUrl
+	oldMail := *mailUrl
+	oldFlow := *flowUrl
+	oldMesh := *meshUrl
+	oldCron := *cronUrl
+	oldCache := *cacheUrl
+	oldRegistry := *registryUrl
+	oldCloud := *cloudUrl
 	defer func() {
-		*gateUrl = oldGate
-		*storeUrl = oldStore
-		*queueUrl = oldQueue
-		*tunnelUrl = oldTunnel
+		*gateUrl     = oldGate
+		*storeUrl    = oldStore
+		*queueUrl    = oldQueue
+		*tunnelUrl   = oldTunnel
+		*traceUrl    = oldTrace
+		*authUrl     = oldAuth
+		*dbUrl       = oldDB
+		*mailUrl     = oldMail
+		*flowUrl     = oldFlow
+		*meshUrl     = oldMesh
+		*cronUrl     = oldCron
+		*cacheUrl    = oldCache
+		*registryUrl = oldRegistry
+		*cloudUrl    = oldCloud
 	}()
 
 	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,10 +193,21 @@ func TestHandleStatusHealthz(t *testing.T) {
 	}))
 	defer mockSrv.Close()
 
-	*gateUrl = mockSrv.URL
-	*storeUrl = mockSrv.URL
-	*queueUrl = mockSrv.URL
-	*tunnelUrl = mockSrv.URL
+	// Point all 14 service URLs at the mock server
+	*gateUrl     = mockSrv.URL
+	*storeUrl    = mockSrv.URL
+	*queueUrl    = mockSrv.URL
+	*tunnelUrl   = mockSrv.URL
+	*traceUrl    = mockSrv.URL
+	*authUrl     = mockSrv.URL
+	*dbUrl       = mockSrv.URL
+	*mailUrl     = mockSrv.URL
+	*flowUrl     = mockSrv.URL
+	*meshUrl     = mockSrv.URL
+	*cronUrl     = mockSrv.URL
+	*cacheUrl    = mockSrv.URL
+	*registryUrl = mockSrv.URL
+	*cloudUrl    = mockSrv.URL
 
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	w := httptest.NewRecorder()
@@ -196,8 +228,8 @@ func TestHandleStatusHealthz(t *testing.T) {
 		t.Fatal("expected components list in response")
 	}
 
-	if len(components) != 4 {
-		t.Fatalf("expected 4 components, got %d", len(components))
+	if len(components) != 14 {
+		t.Fatalf("expected 14 components, got %d", len(components))
 	}
 
 	for _, c := range components {
@@ -207,6 +239,7 @@ func TestHandleStatusHealthz(t *testing.T) {
 		}
 	}
 }
+
 
 func TestHandleAlerts(t *testing.T) {
 	alertsMu.Lock()
