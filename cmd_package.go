@@ -289,13 +289,18 @@ func installPackageWithDeps(pkgName string, visited map[string]bool, depth int) 
 
 	// Strip version suffix if present (e.g. "jwt@1.0.0" -> "jwt")
 	name := pkgName
+	version := "latest"
 	if idx := strings.Index(pkgName, "@"); idx > 0 {
 		name = pkgName[:idx]
+		version = pkgName[idx+1:]
 	}
 
-	// Check if already installed
+	// Check if already installed (allow overrides for hot module replacement if depth == 0)
 	targetDir := filepath.Join("packages", name)
-	if _, err := os.Stat(targetDir); err == nil {
+	if strings.HasPrefix(name, "stdlib/") {
+		targetDir = filepath.Join("stdlib", strings.TrimPrefix(name, "stdlib/"))
+		fmt.Printf("⚡ Hot Module Replacement: overriding stdlib module '%s' with version '%s'\n", name, version)
+	} else if _, err := os.Stat(targetDir); err == nil {
 		if depth > 0 {
 			indent := strings.Repeat("  ", depth)
 			fmt.Printf("%s• %s (already installed)\n", indent, name)

@@ -364,6 +364,7 @@ func main() {
 	case "migrate":
 		migrateCmd := flag.NewFlagSet("migrate", flag.ExitOnError)
 		dbFlag := migrateCmd.String("db", "", "Database connection string (e.g. sqlite://mydb.db). Falls back to $DATABASE_URL")
+		rollbackFlag := migrateCmd.Bool("rollback", false, "Roll back structural schema changes (e.g., dropping columns or tables)")
 		if err := migrateCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
@@ -373,7 +374,7 @@ func main() {
 		if len(args) >= 1 {
 			target = args[0]
 		}
-		runMigrate(target, *dbFlag)
+		runMigrate(target, *dbFlag, *rollbackFlag)
 
 	case "lsp-action":
 		runLspActionCmd(os.Args[2:])

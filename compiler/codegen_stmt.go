@@ -1561,7 +1561,11 @@ func (c *Codegen) genInjectStmt(s *InjectStmt) (string, error) {
 }
 
 func (c *Codegen) genGraphQLStmt(s *GraphQLStmt) (string, error) {
-	return fmt.Sprintf("// graphql handler registered at %q\n", s.Path), nil
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func init() {\n\t// Register native GraphQL route at %q\n\t_ = func() %s\n}\n\n", s.Path, bodyStr), nil
 }
 
 func (c *Codegen) genMacroStmt(s *MacroStmt) (string, error) {

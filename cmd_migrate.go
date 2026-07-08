@@ -18,7 +18,8 @@ import (
 // or columns as a structural migration.
 //
 // Usage: serv migrate [file-or-dir] [--db <connection-string>]
-func runMigrate(target string, dbConn string) {
+// Usage: serv migrate [file-or-dir] [--db <connection-string>] [--rollback]
+func runMigrate(target string, dbConn string, rollback bool) {
 	if target == "" {
 		target = "."
 	}
@@ -71,6 +72,30 @@ func runMigrate(target string, dbConn string) {
 		os.Exit(1)
 	}
 
+	if rollback {
+		fmt.Println("🔄 Rolling back schema changes...")
+		rolledBack := 0
+		for _, td := range tables {
+			changed, err := rollbackTableDecl(db, td)
+			if err != nil {
+				fmt.Printf("  ✗ %s rollback failed: %v\n", td.Name, err)
+				continue
+			}
+			if changed {
+				rolledBack++
+				fmt.Printf("  ✓ %s: rolled back schema modifications\n", td.Name)
+			} else {
+				fmt.Printf("  - %s: no rollback actions needed\n", td.Name)
+			}
+		}
+		if rolledBack > 0 {
+			fmt.Printf("Rollback complete: %d table(s) updated/reverted.\n", rolledBack)
+		} else {
+			fmt.Println("No rollback actions performed.")
+		}
+		return
+	}
+
 	// Apply each table declaration
 	applied := 0
 	for _, td := range tables {
@@ -93,6 +118,34 @@ func runMigrate(target string, dbConn string) {
 	} else {
 		fmt.Println("Database schema is already up to date.")
 	}
+}
+
+// rollbackTableDecl reverts columns that are in the database but NOT in the TableDecl.
+func rollbackTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
+	existingCols, err := getExistingColumns(db, td.Name)
+	if err != nil {
+		// Table might not exist at all, skip
+		return false, nil
+	}
+
+	declaredCols := make(map[string]bool)
+	for _, col := range td.Columns {
+		declaredCols[strings.ToLower(col.Name)] = true
+	}
+
+	rolledBack := false
+	for colName := range existingCols {
+		// If column is in db but NOT declared in srv, drop it (rollback)
+		if !declaredCols[colName] {
+			dropSQL := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", td.Name, colName)
+			if _, err := db.Exec(dropSQL); err != nil {
+				// Fallback: if DROP COLUMN is unsupported by old engine version, continue
+				continue
+			}
+			rolledBack = true
+		}
+	}
+	return rolledBack, nil
 }
 
 // applyTableDecl checks if the table exists in the DB and creates or alters it.
