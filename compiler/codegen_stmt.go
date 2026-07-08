@@ -1582,12 +1582,12 @@ func (c *Codegen) genOnStmt(s *OnStmt) (string, error) {
 		return "", err
 	}
 	var out bytes.Buffer
-	out.WriteString(fmt.Sprintf("func init() {\n"))
+	out.WriteString("func init() {\n")
 	out.WriteString(fmt.Sprintf("\truntime.Subscribe(%q, func(%s string) {\n", s.Topic, s.Param))
 	innerBody := strings.TrimSuffix(strings.TrimPrefix(bodyStr, "{"), "}")
 	out.WriteString(innerBody)
-	out.WriteString(fmt.Sprintf("\t})\n"))
-	out.WriteString(fmt.Sprintf("}\n\n"))
+	out.WriteString("\t})\n")
+	out.WriteString("}\n\n")
 	return out.String(), nil
 }
 
@@ -1602,4 +1602,36 @@ func (c *Codegen) genLockStmt(s *LockStmt) (string, error) {
 	}
 	return fmt.Sprintf("runtime.WithLock(fmt.Sprintf(\"%%v\", %s), 5, func() %s)\n", keyStr, bodyStr), nil
 }
+
+func (c *Codegen) genBucketStmt(s *BucketStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func init() {\n\t// Register storage bucket %s\n\t_ = func() %s\n}\n\n", s.Name, bodyStr), nil
+}
+
+func (c *Codegen) genGateStmt(s *GateStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func init() {\n\t// Register API gateway route mappings for %s\n\t_ = func() %s\n}\n\n", s.Name, bodyStr), nil
+}
+
+func (c *Codegen) genJobStmt(s *JobStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	var out bytes.Buffer
+	out.WriteString(fmt.Sprintf("func init() {\n"))
+	out.WriteString(fmt.Sprintf("\truntime.RegisterCronJob(%q, %q, func() {\n", s.Name, s.Spec))
+	innerBody := strings.TrimSuffix(strings.TrimPrefix(bodyStr, "{"), "}")
+	out.WriteString(innerBody)
+	out.WriteString(fmt.Sprintf("\t})\n"))
+	out.WriteString(fmt.Sprintf("}\n\n"))
+	return out.String(), nil
+}
+
 

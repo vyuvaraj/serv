@@ -1317,3 +1317,44 @@ func (l *LockStmt) String() string {
 	return "lock " + l.Key.String() + " " + l.Body.String() + "\n"
 }
 
+// BucketStmt represents native storage bucket declaration: bucket media { ... }
+type BucketStmt struct {
+	Token Token
+	Name  string
+	Body  *BlockStmt
+}
+
+func (b *BucketStmt) statementNode()       {}
+func (b *BucketStmt) TokenLiteral() string { return b.Token.Literal }
+func (b *BucketStmt) String() string {
+	return "bucket " + b.Name + " " + b.Body.String() + "\n"
+}
+
+// GateStmt represents native API gateway ingress declaration: gate ingress { ... }
+type GateStmt struct {
+	Token Token
+	Name  string
+	Body  *BlockStmt
+}
+
+func (g *GateStmt) statementNode()       {}
+func (g *GateStmt) TokenLiteral() string { return g.Token.Literal }
+func (g *GateStmt) String() string {
+	return "gate " + g.Name + " " + g.Body.String() + "\n"
+}
+
+// JobStmt represents native cron job declaration: job cleanup every 1h { ... }
+type JobStmt struct {
+	Token Token
+	Name  string
+	Spec  string // cron spec or interval
+	Body  *BlockStmt
+}
+
+func (j *JobStmt) statementNode()       {}
+func (j *JobStmt) TokenLiteral() string { return j.Token.Literal }
+func (j *JobStmt) String() string {
+	return "job " + j.Name + " " + j.Spec + " " + j.Body.String() + "\n"
+}
+
+

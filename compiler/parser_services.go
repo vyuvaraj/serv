@@ -894,3 +894,52 @@ func (p *Parser) parseLockStatement() Statement {
 	return stmt
 }
 
+// parseBucketStatement parses: bucket name { ... }
+func (p *Parser) parseBucketStatement() Statement {
+	stmt := &BucketStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+// parseGateStatement parses: gate name { ... }
+func (p *Parser) parseGateStatement() Statement {
+	stmt := &GateStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+// parseJobStatement parses: job name cronSpecOrEvery { ... }
+func (p *Parser) parseJobStatement() Statement {
+	stmt := &JobStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	p.nextToken() // move to cronSpec/Every string
+	stmt.Spec = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+

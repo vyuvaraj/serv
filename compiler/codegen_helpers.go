@@ -283,6 +283,12 @@ func stmtToken(stmt Statement) Token {
 		return s.Token
 	case *LockStmt:
 		return s.Token
+	case *BucketStmt:
+		return s.Token
+	case *GateStmt:
+		return s.Token
+	case *JobStmt:
+		return s.Token
 	default:
 		return Token{}
 	}

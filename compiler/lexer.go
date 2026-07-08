@@ -140,6 +140,9 @@ const (
 	TOKEN_ON         TokenType = "ON"
 	TOKEN_LOCK       TokenType = "LOCK"
 	TOKEN_UNLOCK     TokenType = "UNLOCK"
+	TOKEN_BUCKET     TokenType = "BUCKET"
+	TOKEN_GATE       TokenType = "GATE"
+	TOKEN_JOB        TokenType = "JOB"
 )
 
 type Token struct {
@@ -631,6 +634,9 @@ var keywords = map[string]TokenType{
 	"on":              TOKEN_ON,
 	"lock":            TOKEN_LOCK,
 	"unlock":          TOKEN_UNLOCK,
+	"bucket":          TOKEN_BUCKET,
+	"gate":            TOKEN_GATE,
+	"job":             TOKEN_JOB,
 }
 
 func lookupIdent(ident string) TokenType {

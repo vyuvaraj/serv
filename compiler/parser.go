@@ -304,6 +304,12 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseOnStatement()
 	case TOKEN_LOCK:
 		return p.parseLockStatement()
+	case TOKEN_BUCKET:
+		return p.parseBucketStatement()
+	case TOKEN_GATE:
+		return p.parseGateStatement()
+	case TOKEN_JOB:
+		return p.parseJobStatement()
 	case TOKEN_EXPORT:
 		return p.parseExportStatement()
 	case TOKEN_BREAK:

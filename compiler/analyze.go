@@ -109,6 +109,12 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 		return analyzeBlock(s.Body, nil)
 	case *LockStmt:
 		return analyzeBlock(s.Body, nil)
+	case *BucketStmt:
+		return analyzeBlock(s.Body, nil)
+	case *GateStmt:
+		return analyzeBlock(s.Body, nil)
+	case *JobStmt:
+		return analyzeBlock(s.Body, nil)
 	}
 	return nil
 }

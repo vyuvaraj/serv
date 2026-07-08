@@ -524,6 +524,12 @@ case *OnStmt:
 return c.genOnStmt(s)
 case *LockStmt:
 return c.genLockStmt(s)
+case *BucketStmt:
+return c.genBucketStmt(s)
+case *GateStmt:
+return c.genGateStmt(s)
+case *JobStmt:
+return c.genJobStmt(s)
 case *ReturnStmt:
 return c.genReturnStmt(s)
 case *YieldStmt:
