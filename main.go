@@ -292,7 +292,27 @@ func main() {
 		runDocs()
 
 	case "generate":
+		// DX.21: support --from-openapi alias for 'serv generate routes'
+		for _, arg := range os.Args[2:] {
+			if arg == "--from-openapi" {
+				// Rewrite args: serv generate --from-openapi <spec> → serv generate routes <spec>
+				newArgs := []string{os.Args[0], "generate", "routes"}
+				for _, a := range os.Args[2:] {
+					if a != "--from-openapi" {
+						newArgs = append(newArgs, a)
+					}
+				}
+				os.Args = newArgs
+				break
+			}
+		}
 		runGenerate()
+
+	case "bench":
+		runBench()
+
+	case "observability", "obs":
+		runObservabilityCmd()
 
 	case "tunnel":
 		runTunnelCmd()
@@ -390,5 +410,9 @@ func printUsage() {
 	fmt.Println("  serv mesh inspect [--host <url>] [--service <name>]   Inspect ServMesh registry and instance list")
 	fmt.Println("  serv mesh routes [--host <url>]                        Show active routing rules and circuit-breaker state")
 	fmt.Println("  serv init --full-stack                                 Generate docker-compose.yml with all Servverse services")
+	fmt.Println("  serv bench <file.srv> [--rps <n>] [--duration <s>]       Run built-in load test against declared routes")
+	fmt.Println("  serv generate --from-openapi <spec.yaml> [-o <out.srv>]  Generate .srv route stubs from OpenAPI spec")
+	fmt.Println("  serv observability init                                   Create .serv/observability.yaml template")
+	fmt.Println("  serv observability apply [--dry-run]                     Provision alert rules, SLOs, and dashboards")
 	fmt.Println("  serv lsp-action --file <file> --line <line> [--type <type>] Resolve LSP code action recommendation")
 }
