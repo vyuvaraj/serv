@@ -4,7 +4,27 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 )
+
+type TimelineEvent struct {
+	Timestamp   time.Time `json:"timestamp"`
+	Type        string    `json:"type"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Color       string    `json:"color"`
+}
+
+type IncidentTimeline struct {
+	AlertID            string          `json:"alertId"`
+	Title              string          `json:"title"`
+	Component          string          `json:"component"`
+	Severity           string          `json:"severity"`
+	Events             []TimelineEvent `json:"events"`
+	AISuggestedRunbook string          `json:"ai_suggested_runbook,omitempty"`
+	AIRunbookSteps     []string        `json:"ai_runbook_steps,omitempty"`
+	AISuggestion       string          `json:"ai_suggestion,omitempty"`
+}
 
 type SLO struct {
 	ServiceName  string  `json:"service_name"`

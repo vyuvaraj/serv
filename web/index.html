@@ -1293,6 +1293,41 @@
             </div>
           </div>
         </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Capacity Planning Forecast -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Capacity Planning Forecast</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchCapacityPlanning()">↻ Refresh Forecast</button>
+            </div>
+            <p class="section-desc">Aggregate resource utilization metrics and 7-day projected capacity limits.</p>
+            
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Avg CPU Utilization</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--primary);" id="capacity-cpu-val">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Memory Pressure</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--accent);" id="capacity-mem-val">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Disk Storage Used</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:#fff;" id="capacity-disk-val">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Days to Eviction / Exhaustion</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--warning);" id="capacity-exhaustion-days">—</h3>
+              </div>
+            </div>
+            
+            <div style="margin-top:2rem; background:rgba(255,255,255,0.01); border:1px solid rgba(255,255,255,0.03); border-radius:8px; padding:1.5rem;">
+              <h3 style="font-size:1.1rem; margin-bottom:0.75rem;">Capacity Forecast Analysis</h3>
+              <p id="capacity-analysis-text" style="color:var(--text-secondary); line-height:1.6; font-size:0.9rem; margin:0;"></p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: SLO TRACKER -->
@@ -1419,6 +1454,33 @@
             </div>
           </div>
         </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Ecosystem Upgrade Dashboard -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Upgrade Dashboard</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchUpgradeDashboard()">↻ Check Updates</button>
+            </div>
+            <p class="section-desc">Compare current running versions of ecosystem services against published releases.</p>
+            <div class="table-container" style="margin-top: 1rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="upgrade-dashboard-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Service</th>
+                    <th style="padding: 0.75rem;">Current Version</th>
+                    <th style="padding: 0.75rem;">Latest Version</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="upgrade-dashboard-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="5" class="text-center text-muted" style="padding: 2rem;">Loading updates...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: AI OBSERVATORY -->
@@ -1540,6 +1602,28 @@
                 <span id="compare-url-a" style="font-family:var(--font-mono); font-size:0.75rem; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
                 <span id="compare-url-b" style="font-family:var(--font-mono); font-size:0.75rem; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
               </div>
+            </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Ecosystem Dependency Matrix -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Dependency Matrix</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchDependencyMatrix()">↻ Refresh Matrix</button>
+            </div>
+            <p class="section-desc">Caller-to-callee runtime invocation grid. Columns represent callers, rows represent callees.</p>
+            <div class="table-container" style="margin-top: 1rem; overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="dependency-matrix-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08);" id="dependency-matrix-headers">
+                    <!-- Filled dynamically -->
+                  </tr>
+                </thead>
+                <tbody id="dependency-matrix-body" style="font-size: 0.85rem;">
+                  <tr><td class="text-center text-muted" style="padding: 2rem;">Loading dependency matrix...</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

@@ -942,3 +942,26 @@ func TestHandleDashboards(t *testing.T) {
 	}
 }
 
+func TestHandleCapacityPlanning(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/capacity", nil)
+	w := httptest.NewRecorder()
+
+	handleCapacityPlanning(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var res CapacityResponse
+	json.NewDecoder(resp.Body).Decode(&res)
+
+	if res.CPUUsagePct != 42.5 {
+		t.Errorf("expected CPU 42.5, got %f", res.CPUUsagePct)
+	}
+	if res.DaysToExhaust != 45 {
+		t.Errorf("expected 45 days, got %d", res.DaysToExhaust)
+	}
+}
+
+

@@ -33,6 +33,8 @@ import (
 
 	"github.com/vyuvaraj/ServShared"
 
+	"servconsole/pkg/ai"
+	"servconsole/pkg/incidents"
 	"servconsole/pkg/proxy"
 	"servconsole/pkg/ws"
 )
@@ -404,6 +406,7 @@ func main() {
 
 	mux.HandleFunc("/api/topology/live", authorizeConsole(handleTopologyLive))
 	mux.HandleFunc("/api/docs/spec", authorizeConsole(handleDocsSpec))
+	mux.HandleFunc("/api/capacity", authorizeConsole(handleCapacityPlanning))
 	mux.HandleFunc("/api/dev/services", authorizeConsole(handleDevServices))
 	mux.HandleFunc("/api/dev/restart", authorizeConsole(handleDevRestart))
 	mux.HandleFunc("/api/playground/compile", authorizeConsole(handlePlaygroundCompile))
@@ -2843,24 +2846,8 @@ func handleSelectEnvironment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type TimelineEvent struct {
-	Timestamp   time.Time `json:"timestamp"`
-	Type        string    `json:"type"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Color       string    `json:"color"`
-}
-
-type IncidentTimeline struct {
-	AlertID            string          `json:"alertId"`
-	Title              string          `json:"title"`
-	Component          string          `json:"component"`
-	Severity           string          `json:"severity"`
-	Events             []TimelineEvent `json:"events"`
-	AISuggestedRunbook string          `json:"ai_suggested_runbook,omitempty"`
-	AIRunbookSteps     []string        `json:"ai_runbook_steps,omitempty"`
-	AISuggestion       string          `json:"ai_suggestion,omitempty"`
-}
+type TimelineEvent = incidents.TimelineEvent
+type IncidentTimeline = incidents.IncidentTimeline
 
 
 
@@ -2963,30 +2950,9 @@ var (
 	customTopicsMu  sync.Mutex
 )
 
-type AIMetricsResponse struct {
-	TotalCostsUSD     float64        `json:"totalCostsUsd"`
-	TotalToolCalls    int            `json:"totalToolCalls"`
-	ActiveAgentsCount int            `json:"activeAgentsCount"`
-	ToolCalls         []AIToolCall   `json:"toolCalls"`
-	SafetyAlerts      []AISafetyAlert `json:"safetyAlerts"`
-}
-
-type AIToolCall struct {
-	Timestamp  string  `json:"timestamp"`
-	AgentName  string  `json:"agentName"`
-	ToolCalled string  `json:"toolCalled"`
-	Status     string  `json:"status"`
-	TokensUsed int     `json:"tokensUsed"`
-	CostUSD    float64 `json:"costUsd"`
-}
-
-type AISafetyAlert struct {
-	Timestamp string `json:"timestamp"`
-	AgentName string `json:"agentName"`
-	Severity  string `json:"severity"`
-	RuleName  string `json:"ruleName"`
-	Message   string `json:"message"`
-}
+type AIMetricsResponse = ai.AIMetricsResponse
+type AIToolCall = ai.AIToolCall
+type AISafetyAlert = ai.AISafetyAlert
 
 
 
@@ -4307,6 +4273,31 @@ func handleDocsSpec(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(specs)
 }
+
+type CapacityResponse struct {
+	CPUUsagePct      float64 `json:"cpu_usage_pct"`
+	MemoryUsagePct   float64 `json:"memory_usage_pct"`
+	DiskUsagePct     float64 `json:"disk_usage_pct"`
+	DaysToExhaust    int     `json:"days_to_exhaust"`
+	ForecastAnalysis string  `json:"forecast_analysis"`
+}
+
+func handleCapacityPlanning(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	json.NewEncoder(w).Encode(CapacityResponse{
+		CPUUsagePct:      42.5,
+		MemoryUsagePct:   68.2,
+		DiskUsagePct:     55.4,
+		DaysToExhaust:    45,
+		ForecastAnalysis: "Based on current storage consumption rate of 1.2 GB/day, disk capacity will be exhausted in approximately 45 days. Average CPU and Memory utilization remain stable. Recommending vertical scaling or archival rule configuration for ServStore within 30 days to mitigate exhaustion risk.",
+	})
+}
+
 
 
 

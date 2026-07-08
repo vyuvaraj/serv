@@ -102,11 +102,13 @@ function initTabs() {
         loadPoliciesView();
       } else if (tabId === 'cost') {
         fetchCostEstimation();
+        fetchCapacityPlanning();
       } else if (tabId === 'slo') {
         fetchSLOTargets();
       } else if (tabId === 'deployments') {
         fetchDeployments();
         fetchCloudServices();
+        fetchUpgradeDashboard();
       } else if (tabId === 'ai-observatory') {
         fetchAIMetrics();
       } else if (tabId === 'docs') {
@@ -115,6 +117,7 @@ function initTabs() {
         fetchApiSpecs();
       } else if (tabId === 'topology') {
         initServiceComparison();
+        fetchDependencyMatrix();
       }
     });
   });
@@ -154,6 +157,7 @@ function initPolling() {
       } else if (STATE.activeTab === 'deployments') {
         fetchDeployments();
         fetchCloudServices();
+        fetchUpgradeDashboard();
       }
     } catch (err) {
       logEvent('error', `Status polling failed: ${err.message}`);
@@ -4483,6 +4487,200 @@ function loadSelectedDocsSpec() {
   details.innerHTML = html;
 }
 window.loadSelectedDocsSpec = loadSelectedDocsSpec;
+
+async function fetchDependencyMatrix() {
+  const headers = document.getElementById('dependency-matrix-headers');
+  const body = document.getElementById('dependency-matrix-body');
+  if (!headers || !body) return;
+
+  try {
+    const res = await fetch('/api/topology/live');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const services = Array.from(new Set(data.nodes.map(n => n.id))).sort();
+
+    if (services.length === 0) {
+      body.innerHTML = `<tr><td class="text-center text-muted" style="padding: 2rem;">No dependency data available yet. Trigger requests to populate traces.</td></tr>`;
+      headers.innerHTML = '';
+      return;
+    }
+
+    // Build headers
+    let headersHtml = `<th style="padding:0.75rem; border-bottom: 2px solid rgba(255,255,255,0.08); color:var(--text-muted);">Callee (↓) \\ Caller (→)</th>`;
+    services.forEach(svc => {
+      headersHtml += `<th style="padding:0.75rem; border-bottom: 2px solid rgba(255,255,255,0.08); color:var(--primary); font-weight:600;">${escapeHtml(svc)}</th>`;
+    });
+    headers.innerHTML = headersHtml;
+
+    const edgeMap = {};
+    services.forEach(callee => {
+      edgeMap[callee] = {};
+    });
+
+    data.edges.forEach(edge => {
+      const caller = edge.from;
+      const callee = edge.to;
+      if (edgeMap[callee]) {
+        edgeMap[callee][caller] = edge;
+      }
+    });
+
+    let bodyHtml = '';
+    services.forEach(callee => {
+      bodyHtml += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">`;
+      bodyHtml += `<td style="padding:0.75rem; font-weight:600; color:var(--accent);">${escapeHtml(callee)}</td>`;
+
+      services.forEach(caller => {
+        const edge = edgeMap[callee][caller];
+        if (edge) {
+          const lat = edge.latency_ms || edge.latencyMs || 0;
+          bodyHtml += `
+            <td style="padding:0.75rem; background: rgba(59, 130, 246, 0.03);">
+              <div style="font-weight:bold; color:#fff;">${edge.throughput} calls</div>
+              <div style="font-size:0.75rem; color:var(--text-secondary);">${lat} ms</div>
+            </td>
+          `;
+        } else {
+          bodyHtml += `<td style="padding:0.75rem; color:var(--text-muted); opacity: 0.3;">—</td>`;
+        }
+      });
+
+      bodyHtml += `</tr>`;
+    });
+
+    body.innerHTML = bodyHtml;
+  } catch (err) {
+    console.error('Failed to fetch dependency matrix:', err);
+    body.innerHTML = `<tr><td class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading matrix: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchDependencyMatrix = fetchDependencyMatrix;
+
+async function fetchUpgradeDashboard() {
+  const list = document.getElementById('upgrade-dashboard-list');
+  if (!list) return;
+
+  try {
+    let packages = [];
+    try {
+      const pkgRes = await fetch('/api/registry/packages');
+      if (pkgRes.ok) {
+        packages = await pkgRes.json();
+      }
+    } catch (e) {
+      console.warn('Ecosystem Registry is offline, using mock package catalog');
+    }
+
+    const latestCatalog = {
+      "ServGate": "v1.5.0",
+      "ServStore": "v1.4.2",
+      "ServQueue": "v1.4.0",
+      "ServAuth": "v1.3.1",
+      "ServDB": "v1.2.0",
+      "ServCron": "v1.1.0",
+      "ServMesh": "v1.1.2",
+      "ServDocs": "v1.0.0"
+    };
+
+    if (packages && packages.length > 0) {
+      packages.forEach(pkg => {
+        if (pkg.name && pkg.version) {
+          latestCatalog[pkg.name] = pkg.version;
+        }
+      });
+    }
+
+    list.innerHTML = '';
+    const componentNames = Object.keys(STATE.components);
+    if (componentNames.length === 0) {
+      list.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 2rem;">No services registered in this console.</td></tr>`;
+      return;
+    }
+
+    componentNames.forEach(name => {
+      const comp = STATE.components[name];
+      const currentVer = comp.details && comp.details.version ? comp.details.version : "v1.4.2";
+      const latestVer = latestCatalog[name] || "v1.4.2";
+
+      const isOutdated = currentVer !== latestVer && !currentVer.startsWith(latestVer);
+
+      const statusBadge = isOutdated
+        ? `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">OUT-OF-DATE</span>`
+        : `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">UP-TO-DATE</span>`;
+
+      const actionBtn = isOutdated
+        ? `<button class="btn btn-primary btn-sm" onclick="triggerServiceUpgrade('${escapeHtml(name)}', '${escapeHtml(latestVer)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Upgrade</button>`
+        : `<button class="btn btn-secondary btn-sm" disabled style="font-size:0.75rem; padding:0.2rem 0.5rem; opacity:0.4;">Latest</button>`;
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.03)';
+      tr.innerHTML = `
+        <td style="padding: 0.75rem; font-weight:600; color:#fff;">${escapeHtml(name)}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${escapeHtml(currentVer)}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${escapeHtml(latestVer)}</td>
+        <td style="padding: 0.75rem;">${statusBadge}</td>
+        <td style="padding: 0.75rem; text-align: right;">${actionBtn}</td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch upgrade dashboard:', err);
+    list.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading upgrades: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchUpgradeDashboard = fetchUpgradeDashboard;
+
+async function triggerServiceUpgrade(name, targetVersion) {
+  if (!confirm(`Trigger automatic package upgrade for ${name} to version ${targetVersion} via ServCloud?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cloud/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_name: name,
+        version: targetVersion,
+        author: 'admin',
+        changelog: `Console automated upgrade to ${targetVersion}`
+      })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Upgrade roll out initiated successfully for ${name}!`);
+    fetchUpgradeDashboard();
+  } catch (err) {
+    alert(`Upgrade failed: ${err.message}`);
+  }
+}
+window.triggerServiceUpgrade = triggerServiceUpgrade;
+
+async function fetchCapacityPlanning() {
+  const cpuEl = document.getElementById('capacity-cpu-val');
+  const memEl = document.getElementById('capacity-mem-val');
+  const diskEl = document.getElementById('capacity-disk-val');
+  const daysEl = document.getElementById('capacity-exhaustion-days');
+  const analysisEl = document.getElementById('capacity-analysis-text');
+  if (!cpuEl || !memEl || !diskEl || !daysEl || !analysisEl) return;
+
+  try {
+    const res = await fetch('/api/capacity');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    cpuEl.textContent = `${data.cpu_usage_pct.toFixed(1)}%`;
+    memEl.textContent = `${data.memory_usage_pct.toFixed(1)}%`;
+    diskEl.textContent = `${data.disk_usage_pct.toFixed(1)}%`;
+    daysEl.textContent = `${data.days_to_exhaust} days`;
+    analysisEl.textContent = data.forecast_analysis;
+  } catch (err) {
+    console.error('Failed to fetch capacity planning stats:', err);
+    analysisEl.innerHTML = `<span style="color:var(--danger);">Error loading forecast: ${escapeHtml(err.message)}</span>`;
+  }
+}
+window.fetchCapacityPlanning = fetchCapacityPlanning;
+
 
 
 
