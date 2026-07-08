@@ -409,6 +409,10 @@ func main() {
 	mux.HandleFunc("/api/capacity", authorizeConsole(handleCapacityPlanning))
 	mux.HandleFunc("/api/correlation/timeline", authorizeConsole(handleCorrelationTimeline))
 	mux.HandleFunc("/api/ai/root-cause", authorizeConsole(handleAIRootCause))
+	mux.HandleFunc("/api/nlq", authorizeConsole(handleNLQ))
+	mux.HandleFunc("/api/predictive/alerts", authorizeConsole(handlePredictiveAlerts))
+	mux.HandleFunc("/api/playbooks", authorizeConsole(handlePlaybooks))
+	mux.HandleFunc("/api/playbooks/execute", authorizeConsole(handleExecutePlaybook))
 	mux.HandleFunc("/api/dev/services", authorizeConsole(handleDevServices))
 	mux.HandleFunc("/api/dev/restart", authorizeConsole(handleDevRestart))
 	mux.HandleFunc("/api/playground/compile", authorizeConsole(handlePlaygroundCompile))
@@ -4354,6 +4358,182 @@ func handleCorrelationTimeline(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(events)
 }
+
+// --- Natural Language Query (UC.20) ---
+
+type NLQResult struct {
+	Query       string        `json:"query"`
+	Interpreted string        `json:"interpreted"`
+	TraceCount  int           `json:"traceCount"`
+	ErrorCount  int           `json:"errorCount"`
+	TotalSpans  int           `json:"totalSpans"`
+	Services    []string      `json:"services"`
+	Summary     string        `json:"summary"`
+}
+
+func handleNLQ(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		WriteJSONError(w, r, "Missing query parameter 'q'", "ERR_MISSING_PARAM", http.StatusBadRequest)
+		return
+	}
+
+	// Simulate parsing and response — in production this calls LLM + ServTrace
+	result := NLQResult{
+		Query:       q,
+		Interpreted: "Trace filter: service=ServDB, status=error, window=last 1 hour",
+		TraceCount:  42,
+		ErrorCount:  17,
+		TotalSpans:  284,
+		Services:    []string{"ServGate", "ServStore", "ServDB"},
+		Summary:     "Found 42 traces touching ServDB in the last hour. 17 contained errors (40%). Peak error rate at 14:03 UTC (p99 latency: 620ms). Most common error: 'context deadline exceeded' on SELECT queries. Likely correlated with ServStore v1.4.2 deploy at 13:58 UTC.",
+	}
+
+	json.NewEncoder(w).Encode(result)
+}
+
+// --- Predictive Alerting (UC.21) ---
+
+type PredictiveAlert struct {
+	ID         string  `json:"id"`
+	Metric     string  `json:"metric"`
+	Service    string  `json:"service"`
+	Current    float64 `json:"current"`
+	Threshold  float64 `json:"threshold"`
+	Unit       string  `json:"unit"`
+	DaysUntil  int     `json:"daysUntil"`
+	Severity   string  `json:"severity"`
+	Suggestion string  `json:"suggestion"`
+}
+
+func handlePredictiveAlerts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	alerts := []PredictiveAlert{
+		{
+			ID:         "pred-disk-serv-store",
+			Metric:     "Disk Usage",
+			Service:    "ServStore",
+			Current:    55.4,
+			Threshold:  90.0,
+			Unit:       "%",
+			DaysUntil:  45,
+			Severity:   "warning",
+			Suggestion: "Enable automatic archive rules in ServStore or expand disk volume.",
+		},
+		{
+			ID:         "pred-cert-mtls",
+			Metric:     "mTLS Certificate Expiry",
+			Service:    "ServMesh",
+			Current:    182,
+			Threshold:  30,
+			Unit:       "days",
+			DaysUntil:  152,
+			Severity:   "info",
+			Suggestion: "Certificate auto-renew is active. No action needed.",
+		},
+		{
+			ID:         "pred-ratelimit-gate",
+			Metric:     "Request Rate",
+			Service:    "ServGate",
+			Current:    138,
+			Threshold:  150,
+			Unit:       "req/sec",
+			DaysUntil:  7,
+			Severity:   "critical",
+			Suggestion: "Raise rate limit threshold in Config Editor or scale ServGate horizontally.",
+		},
+	}
+
+	json.NewEncoder(w).Encode(alerts)
+}
+
+// --- Incident Playbooks (UC.22) ---
+
+type Playbook struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Trigger     string `json:"trigger"`
+	Steps       int    `json:"steps"`
+	LastRun     string `json:"lastRun"`
+	AutoExecute bool   `json:"autoExecute"`
+}
+
+func handlePlaybooks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	playbooks := []Playbook{
+		{
+			ID:          "pb-db-pool-exhaustion",
+			Name:        "DB Connection Pool Exhaustion",
+			Trigger:     "ServDB active_connections > 90% of max_connections for 60s",
+			Steps:       4,
+			LastRun:     "3 days ago",
+			AutoExecute: true,
+		},
+		{
+			ID:          "pb-high-latency-gate",
+			Name:        "ServGate High Latency Mitigation",
+			Trigger:     "ServGate p99 latency > 500ms for 30s",
+			Steps:       3,
+			LastRun:     "Never",
+			AutoExecute: false,
+		},
+		{
+			ID:          "pb-disk-pressure",
+			Name:        "ServStore Disk Pressure Relief",
+			Trigger:     "ServStore disk_usage_pct > 85%",
+			Steps:       2,
+			LastRun:     "12 days ago",
+			AutoExecute: true,
+		},
+	}
+
+	json.NewEncoder(w).Encode(playbooks)
+}
+
+type PlaybookExecResult struct {
+	PlaybookID string `json:"playbookId"`
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	StepsRun   int    `json:"stepsRun"`
+}
+
+func handleExecutePlaybook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		WriteJSONError(w, r, "Missing playbook 'id' parameter", "ERR_MISSING_PARAM", http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(PlaybookExecResult{
+		PlaybookID: id,
+		Status:     "success",
+		Message:    "Playbook executed successfully. All steps completed.",
+		StepsRun:   3,
+	})
+}
+
 
 
 

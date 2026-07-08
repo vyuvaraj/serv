@@ -112,6 +112,8 @@ function initTabs() {
       } else if (tabId === 'ai-observatory') {
         fetchAIMetrics();
         fetchRootCauseAnalysis();
+        fetchPredictiveAlerts();
+        fetchPlaybooks();
       } else if (tabId === 'traces') {
         fetchTraces();
         fetchChangeCorrelationTimeline();
@@ -5117,6 +5119,124 @@ async function fetchRootCauseAnalysis() {
   }
 }
 window.fetchRootCauseAnalysis = fetchRootCauseAnalysis;
+
+// --- Natural Language Query (UC.20) ---
+async function fetchNLQueryResult() {
+  const input = document.getElementById('nlq-input');
+  const resultBox = document.getElementById('nlq-result');
+  if (!input || !resultBox) return;
+
+  const q = input.value.trim();
+  if (!q) {
+    input.style.borderColor = 'var(--danger)';
+    setTimeout(() => input.style.borderColor = '', 2000);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/nlq?q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    document.getElementById('nlq-interpreted').textContent = data.interpreted;
+    document.getElementById('nlq-trace-count').textContent = data.traceCount;
+    document.getElementById('nlq-error-count').textContent = data.errorCount;
+    document.getElementById('nlq-span-count').textContent = data.totalSpans;
+    document.getElementById('nlq-summary').textContent = data.summary;
+
+    resultBox.style.display = 'block';
+  } catch (err) {
+    console.error(err);
+    resultBox.style.display = 'block';
+    document.getElementById('nlq-summary').innerHTML = `<span style="color:var(--danger);">Error: ${escapeHtml(err.message)}</span>`;
+  }
+}
+window.fetchNLQueryResult = fetchNLQueryResult;
+
+// --- Predictive Alerting (UC.21) ---
+async function fetchPredictiveAlerts() {
+  const tbody = document.getElementById('predictive-alerts-list');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/predictive/alerts');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const alerts = await res.json();
+
+    tbody.innerHTML = '';
+    alerts.forEach(alert => {
+      const severityColor = alert.severity === 'critical' ? 'var(--danger)'
+        : alert.severity === 'warning' ? 'var(--warning)' : 'var(--text-secondary)';
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+      tr.title = alert.suggestion;
+      tr.innerHTML = `
+        <td style="padding:0.75rem; font-weight:600; color:#fff;">${escapeHtml(alert.service)}</td>
+        <td style="padding:0.75rem;">${escapeHtml(alert.metric)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${alert.current} ${escapeHtml(alert.unit)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${alert.threshold} ${escapeHtml(alert.unit)}</td>
+        <td style="padding:0.75rem;">${alert.daysUntil} days</td>
+        <td style="padding:0.75rem;"><span class="badge" style="background:rgba(255,255,255,0.03); color:${severityColor}; text-transform:uppercase; font-size:0.7rem;">${alert.severity}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color:var(--danger); padding:1.5rem;">Error: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchPredictiveAlerts = fetchPredictiveAlerts;
+
+// --- Incident Playbooks (UC.22) ---
+async function fetchPlaybooks() {
+  const container = document.getElementById('playbooks-list');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/playbooks');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const playbooks = await res.json();
+
+    container.innerHTML = '';
+    playbooks.forEach(pb => {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:1rem; display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;';
+      card.innerHTML = `
+        <div style="flex:1;">
+          <div style="font-weight:600; color:#fff; margin-bottom:0.25rem;">${escapeHtml(pb.name)}</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:0.5rem;">${escapeHtml(pb.trigger)}</div>
+          <div style="display:flex; gap:1rem; font-size:0.75rem; color:var(--text-secondary);">
+            <span>${pb.steps} steps</span>
+            <span>Last run: ${escapeHtml(pb.lastRun)}</span>
+            ${pb.autoExecute ? '<span style="color:var(--success);">⚡ Auto-execute ON</span>' : '<span style="color:var(--text-muted);">Manual only</span>'}
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="executePlaybook('${escapeHtml(pb.id)}')" style="white-space:nowrap; font-size:0.8rem; padding:0.3rem 0.75rem;">▶ Execute</button>
+      `;
+      container.appendChild(card);
+    });
+  } catch (err) {
+    console.error(err);
+    container.innerHTML = `<div class="text-center" style="color:var(--danger); padding:1.5rem;">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.fetchPlaybooks = fetchPlaybooks;
+
+async function executePlaybook(id) {
+  if (!confirm(`Execute playbook '${id}' now? This will run automated remediation steps.`)) return;
+
+  try {
+    const res = await fetch(`/api/playbooks/execute?id=${encodeURIComponent(id)}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = await res.json();
+    alert(`✅ Playbook executed successfully!\n${result.message}\nSteps run: ${result.stepsRun}`);
+  } catch (err) {
+    alert(`❌ Playbook execution failed: ${err.message}`);
+  }
+}
+window.executePlaybook = executePlaybook;
+
 
 
 

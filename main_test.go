@@ -995,5 +995,75 @@ func TestAIRootCause(t *testing.T) {
 	}
 }
 
+func TestHandleNLQ(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/nlq?q=show+failed+requests+touching+ServDB", nil)
+	w := httptest.NewRecorder()
+	handleNLQ(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var res NLQResult
+	json.NewDecoder(resp.Body).Decode(&res)
+	if res.TraceCount == 0 {
+		t.Error("expected non-zero trace count")
+	}
+}
+
+func TestHandleNLQMissingParam(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/nlq", nil)
+	w := httptest.NewRecorder()
+	handleNLQ(w, req)
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing q param, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandlePredictiveAlerts(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/predictive/alerts", nil)
+	w := httptest.NewRecorder()
+	handlePredictiveAlerts(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var alerts []PredictiveAlert
+	json.NewDecoder(resp.Body).Decode(&alerts)
+	if len(alerts) == 0 {
+		t.Error("expected at least one predictive alert")
+	}
+}
+
+func TestHandlePlaybooks(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/playbooks", nil)
+	w := httptest.NewRecorder()
+	handlePlaybooks(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var books []Playbook
+	json.NewDecoder(resp.Body).Decode(&books)
+	if len(books) == 0 {
+		t.Error("expected at least one playbook")
+	}
+}
+
+func TestHandleExecutePlaybook(t *testing.T) {
+	req := httptest.NewRequest("POST", "/api/playbooks/execute?id=pb-disk-pressure", nil)
+	w := httptest.NewRecorder()
+	handleExecutePlaybook(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var result PlaybookExecResult
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result.Status != "success" {
+		t.Errorf("expected success status, got %s", result.Status)
+	}
+}
+
+
 
 

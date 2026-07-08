@@ -1610,9 +1610,79 @@
             </div>
           </div>
         </div>
+
+        <!-- Natural Language Query -->
+        <div class="pane-grid mt-4">
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Natural Language Operations Query</h2>
+              <span class="badge online" style="background:rgba(16,185,129,0.1); color:var(--success);">OSS</span>
+            </div>
+            <p class="section-desc">Ask questions in plain English — the engine maps them to trace/log filters and returns aggregated results.</p>
+            <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+              <input type="text" id="nlq-input" placeholder='e.g. "Show failed requests in last hour touching ServDB"'
+                style="flex:1; background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.6rem 1rem; border-radius:8px; font-size:0.9rem; outline:none;">
+              <button class="btn btn-primary" id="btn-nlq-submit" onclick="fetchNLQueryResult()">⚡ Run Query</button>
+            </div>
+            <div id="nlq-result" style="display:none; margin-top:1.5rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:1.25rem;">
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem;">Interpreted as:</div>
+                <div id="nlq-interpreted" style="font-family:var(--font-mono); font-size:0.85rem; color:var(--primary);"></div>
+                <div style="display:flex; gap:2rem; margin-top:1rem; flex-wrap:wrap;">
+                  <div><div style="font-size:0.75rem; color:var(--text-muted);">Traces</div><div id="nlq-trace-count" class="card-value" style="font-size:1.5rem;"></div></div>
+                  <div><div style="font-size:0.75rem; color:var(--text-muted);">Errors</div><div id="nlq-error-count" class="card-value" style="font-size:1.5rem; color:var(--danger);"></div></div>
+                  <div><div style="font-size:0.75rem; color:var(--text-muted);">Total Spans</div><div id="nlq-span-count" class="card-value" style="font-size:1.5rem;"></div></div>
+                </div>
+                <p id="nlq-summary" style="margin:1rem 0 0 0; font-size:0.85rem; color:var(--text-secondary); line-height:1.6;"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Predictive Alerts + Incident Playbooks -->
+        <div class="pane-grid mt-4">
+          <!-- Predictive Alerting -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Predictive Alerting</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchPredictiveAlerts()">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Trend-based predictions: disk exhaustion, cert expiry, approaching rate limits.</p>
+            <div class="table-container" style="margin-top:1rem;">
+              <table style="width:100%; border-collapse:collapse; text-align:left;">
+                <thead>
+                  <tr style="border-bottom:2px solid rgba(255,255,255,0.08); font-size:0.8rem; text-transform:uppercase;">
+                    <th style="padding:0.75rem;">Service</th>
+                    <th style="padding:0.75rem;">Metric</th>
+                    <th style="padding:0.75rem;">Current</th>
+                    <th style="padding:0.75rem;">Threshold</th>
+                    <th style="padding:0.75rem;">ETA</th>
+                    <th style="padding:0.75rem;">Severity</th>
+                  </tr>
+                </thead>
+                <tbody id="predictive-alerts-list">
+                  <tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Loading predictions...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Incident Playbooks -->
+          <div class="card glass-card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Incident Playbooks</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchPlaybooks()">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Registered runbooks triggered by alert patterns. Click Execute to run immediately.</p>
+            <div id="playbooks-list" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+              <!-- Filled dynamically -->
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: LIVE TOPOLOGY -->
+
       <div class="tab-pane" id="tab-topology">
         <div class="pane-grid">
           <!-- Left: Live Topology Info -->

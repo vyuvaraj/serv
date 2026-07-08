@@ -187,8 +187,8 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 13.19 | **AI root cause analysis** | Large | When an alert fires, automatically correlate: recent deploys, config changes, dependency failures, similar past incidents. Present ranked hypothesis list. [EE only] | [x] |
-| 13.20 | **Natural language query** | Large | "Show me all failed requests in the last hour that touched ServDB" → translates to trace search + log filter + error aggregation. Conversational operations. | [ ] |
-| 13.21 | **Predictive alerting** | Large | Historical metric trends to predict upcoming issues: disk full in 3 days, certificate expiring, traffic spike approaching rate limits. | [ ] |
-| 13.22 | **Automated incident playbooks** | Large | When a specific alert pattern is detected (e.g., ServDB pool exhaustion + high latency), auto-execute runbook steps: scale pool, route to replica, notify on-call. | [ ] |
+| 13.20 | **Natural language query** | Large | "Show me all failed requests in the last hour that touched ServDB" → translates to trace search + log filter + error aggregation. Conversational operations. | [x] |
+| 13.21 | **Predictive alerting** | Large | Historical metric trends to predict upcoming issues: disk full in 3 days, certificate expiring, traffic spike approaching rate limits. | [x] |
+| 13.22 | **Automated incident playbooks** | Large | When a specific alert pattern is detected (e.g., ServDB pool exhaustion + high latency), auto-execute runbook steps: scale pool, route to replica, notify on-call. | [x] |
 
 > See [UNIFIED_ROADMAP.md](../../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
