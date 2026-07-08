@@ -202,7 +202,17 @@ func main() {
 		publishPackage(os.Args[2])
 
 	case "init":
-		initProject()
+		initCmd := flag.NewFlagSet("init", flag.ExitOnError)
+		fullStackFlag := initCmd.Bool("full-stack", false, "Generate docker-compose.yml with all Servverse services")
+		if err := initCmd.Parse(os.Args[2:]); err != nil {
+			fmt.Printf("Error parsing arguments: %v\n", err)
+			os.Exit(1)
+		}
+		if *fullStackFlag {
+			runInitFullStack()
+		} else {
+			initProject()
+		}
 
 	case "new":
 		newCmd := flag.NewFlagSet("new", flag.ExitOnError)
@@ -290,6 +300,38 @@ func main() {
 	case "trace":
 		runTraceCmd()
 
+	case "queue":
+		subcmd := ""
+		if len(os.Args) >= 3 {
+			subcmd = os.Args[2]
+		}
+		switch subcmd {
+		case "tail":
+			runQueueTail()
+		case "list":
+			runQueueList()
+		default:
+			fmt.Println("Usage:")
+			fmt.Println("  serv queue tail <topic> [--host <url>] [--limit <n>]")
+			fmt.Println("  serv queue list [--host <url>]")
+		}
+
+	case "mesh":
+		subcmd := ""
+		if len(os.Args) >= 3 {
+			subcmd = os.Args[2]
+		}
+		switch subcmd {
+		case "inspect":
+			runMeshInspect()
+		case "routes":
+			runMeshRoutes()
+		default:
+			fmt.Println("Usage:")
+			fmt.Println("  serv mesh inspect [--host <url>] [--service <name>]")
+			fmt.Println("  serv mesh routes [--host <url>]")
+		}
+
 	case "dev":
 		runDevCmd()
 
@@ -343,5 +385,10 @@ func printUsage() {
 	fmt.Println("  serv doctor                                Run compatibility and health checks on all Servverse services")
 	fmt.Println("  serv status                                Print live health, uptime, and latency stats for all services")
 	fmt.Println("  serv migrate [file.srv] [--db <conn>]         Apply declarative `table` schema migrations to the database")
+	fmt.Println("  serv queue tail <topic> [--host <url>] [--limit <n>]   Tail recent messages on a ServQueue topic")
+	fmt.Println("  serv queue list [--host <url>]                         List all ServQueue topics and consumer counts")
+	fmt.Println("  serv mesh inspect [--host <url>] [--service <name>]   Inspect ServMesh registry and instance list")
+	fmt.Println("  serv mesh routes [--host <url>]                        Show active routing rules and circuit-breaker state")
+	fmt.Println("  serv init --full-stack                                 Generate docker-compose.yml with all Servverse services")
 	fmt.Println("  serv lsp-action --file <file> --line <line> [--type <type>] Resolve LSP code action recommendation")
 }
