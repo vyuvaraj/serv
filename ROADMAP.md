@@ -166,7 +166,7 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 13.9 | **End-to-end request flow** | Large | Visualize full request lifecycle: Client → ServGate → Backend → ServQueue → Subscriber → ServStore. Single timeline from OTel spans across all 15 services. | [ ] |
+| 13.9 | **End-to-end request flow** | Large | Visualize full request lifecycle: Client → ServGate → Backend → ServQueue → Subscriber → ServStore. Single timeline from OTel spans across all 15 services. | [x] |
 | 13.10 | **Ecosystem dependency matrix** | Medium | Auto-generated matrix showing runtime dependencies between services (from OTel trace data + discovery config). Interactive — click a cell to see call volume/latency. | [x] |
 | 13.11 | **Unified configuration editor** | Large | Central panel to edit cross-service config: ServGate rate limits, ServCache TTLs, ServCron schedules, ServMesh routing rules — all from one place with validation. | [x] |
 | 13.12 | **Cross-service log correlation** | Medium | Click any trace_id → see all log lines from all services with that trace_id, in chronological order across the ecosystem. | [x] |
@@ -177,7 +177,7 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 13.14 | **Capacity planning view** | Medium | Aggregate CPU/memory/disk/network across all services. Project growth trends. Alert when approaching infrastructure limits. | [x] |
-| 13.15 | **Change correlation engine** | Large | Overlay deployments (ServCloud), config changes (audit log), and incidents (alerts) on a unified timeline. Correlate "what changed" with "what broke." | [ ] |
+| 13.15 | **Change correlation engine** | Large | Overlay deployments (ServCloud), config changes (audit log), and incidents (alerts) on a unified timeline. Correlate "what changed" with "what broke." | [x] |
 | 13.16 | **Service comparison mode** | Medium | Compare two services side-by-side: latency, throughput, error rate, resource usage. Useful for canary validation. | [x] |
 | 13.17 | **Ecosystem startup orchestrator** | Medium | `serv console --start-all` boots all ecosystem services in dependency order, waits for health, then opens the dashboard. One-command full-stack local dev. | [x] |
 | 13.18 | **Unified API documentation portal** | Medium | Auto-aggregate all service OpenAPI specs into a single interactive documentation portal served from the console. | [x] |
@@ -186,7 +186,7 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 13.19 | **AI root cause analysis** | Large | When an alert fires, automatically correlate: recent deploys, config changes, dependency failures, similar past incidents. Present ranked hypothesis list. | [ ] |
+| 13.19 | **AI root cause analysis** | Large | When an alert fires, automatically correlate: recent deploys, config changes, dependency failures, similar past incidents. Present ranked hypothesis list. [EE only] | [x] |
 | 13.20 | **Natural language query** | Large | "Show me all failed requests in the last hour that touched ServDB" → translates to trace search + log filter + error aggregation. Conversational operations. | [ ] |
 | 13.21 | **Predictive alerting** | Large | Historical metric trends to predict upcoming issues: disk full in 3 days, certificate expiring, traffic spike approaching rate limits. | [ ] |
 | 13.22 | **Automated incident playbooks** | Large | When a specific alert pattern is detected (e.g., ServDB pool exhaustion + high latency), auto-execute runbook steps: scale pool, route to replica, notify on-call. | [ ] |

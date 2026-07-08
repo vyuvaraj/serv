@@ -111,6 +111,10 @@ function initTabs() {
         fetchUpgradeDashboard();
       } else if (tabId === 'ai-observatory') {
         fetchAIMetrics();
+        fetchRootCauseAnalysis();
+      } else if (tabId === 'traces') {
+        fetchTraces();
+        fetchChangeCorrelationTimeline();
       } else if (tabId === 'docs') {
         const frame = document.getElementById('docs-frame');
         if (frame) frame.src = frame.src; // Force reload/refresh
@@ -2154,6 +2158,7 @@ async function showTraceDetail(traceId) {
     }
     const rootNode = await res.json();
     timeline.innerHTML = '';
+    renderSequencePipeline(rootNode);
     
     // Calculate critical path
     markCriticalPath(rootNode);
@@ -4978,6 +4983,141 @@ async function saveConfiguration() {
   alert(`Configuration saved successfully!\n- Rate Limit: ${rlimit}/sec\n- Cache TTL: ${ttl}s\n- Failure Threshold: ${failures} attempts`);
 }
 window.saveConfiguration = saveConfiguration;
+
+function renderSequencePipeline(rootNode) {
+  const container = document.getElementById('trace-visual-flow');
+  if (!container) return;
+
+  container.style.display = 'flex';
+  
+  const services = [];
+  function traverse(node) {
+    if (node.service && !services.includes(node.service)) {
+      services.push(node.service);
+    }
+    if (node.children) {
+      node.children.forEach(traverse);
+    }
+  }
+  traverse(rootNode);
+
+  let html = `<div style="font-weight:600; color:var(--text-secondary); margin-right: 1rem;">Flow:</div>`;
+  html += `
+    <div style="background:rgba(59,130,246,0.1); color:var(--primary); padding:0.25rem 0.5rem; border-radius:4px; font-weight:600;">Client</div>
+    <div style="color:var(--text-muted);">→</div>
+  `;
+
+  services.forEach((svc, index) => {
+    const isLast = index === services.length - 1;
+    const color = svc === 'ServGate' ? '#06b6d4' : svc === 'ServStore' ? '#10b981' : svc === 'ServQueue' ? '#f59e0b' : '#6366f1';
+    html += `
+      <div style="background:rgba(255,255,255,0.02); border:1px solid ${color}; color:${color}; padding:0.25rem 0.5rem; border-radius:4px; font-weight:600;">
+        ${escapeHtml(svc)}
+      </div>
+    `;
+    if (!isLast) {
+      html += `<div style="color:var(--text-muted);">→</div>`;
+    }
+  });
+
+  container.innerHTML = html;
+}
+window.renderSequencePipeline = renderSequencePipeline;
+
+async function fetchChangeCorrelationTimeline() {
+  const box = document.getElementById('correlation-timeline-box');
+  if (!box) return;
+
+  try {
+    const res = await fetch('/api/correlation/timeline');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const events = await res.json();
+
+    box.innerHTML = '';
+    
+    const line = document.createElement('div');
+    line.setAttribute('style', 'position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:rgba(255,255,255,0.05);');
+    box.appendChild(line);
+
+    events.forEach(ev => {
+      const date = new Date(ev.timestamp);
+      const timeStr = date.toLocaleTimeString();
+
+      const color = ev.type === 'alert' ? 'var(--danger)' : ev.type === 'deploy' ? 'var(--success)' : 'var(--warning)';
+      const dotColor = ev.type === 'alert' ? '#ef4444' : ev.type === 'deploy' ? '#10b981' : '#f59e0b';
+      
+      const item = document.createElement('div');
+      item.setAttribute('style', 'position:relative; margin-bottom:1.5rem; padding-left:0.5rem;');
+      item.innerHTML = `
+        <div style="position:absolute; left:-2rem; top:0.25rem; width:12px; height:12px; border-radius:50%; background:${dotColor}; border:2px solid #0f1120;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; font-weight:600;">
+          <span style="color:${color}; text-transform:uppercase; font-size:0.75rem; letter-spacing:0.05em;">[${ev.type}] ${escapeHtml(ev.title)}</span>
+          <span style="color:var(--text-muted); font-size:0.75rem;">${timeStr} (${escapeHtml(ev.source)})</span>
+        </div>
+        <p style="font-size:0.8rem; color:var(--text-secondary); margin:0.25rem 0 0 0; line-height:1.4;">${escapeHtml(ev.description)}</p>
+      `;
+      box.appendChild(item);
+    });
+  } catch (err) {
+    console.error(err);
+    box.innerHTML = `<span style="color:var(--danger);">Error loading correlation timeline: ${escapeHtml(err.message)}</span>`;
+  }
+}
+window.fetchChangeCorrelationTimeline = fetchChangeCorrelationTimeline;
+
+async function fetchRootCauseAnalysis() {
+  const promo = document.getElementById('ai-rootcause-promo');
+  const results = document.getElementById('ai-rootcause-results');
+  const list = document.getElementById('ai-rootcause-list');
+  if (!promo || !results || !list) return;
+
+  try {
+    const res = await fetch('/api/ai/root-cause?alertId=alert-db-latency');
+    if (res.status === 403) {
+      promo.style.display = 'block';
+      results.style.display = 'none';
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    promo.style.display = 'none';
+    results.style.display = 'block';
+    list.innerHTML = '';
+
+    data.hypotheses.forEach(hyp => {
+      const card = document.createElement('div');
+      card.setAttribute('style', 'background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:1.25rem; display:flex; flex-direction:column; gap:0.5rem;');
+      
+      let evidenceHtml = '';
+      hyp.evidence.forEach(ev => {
+        evidenceHtml += `<li style="margin-top:0.25rem;">${escapeHtml(ev)}</li>`;
+      });
+
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h4 style="margin:0; color:#fff; font-size:1rem;">Rank #${hyp.rank}: ${escapeHtml(hyp.title)}</h4>
+          <span class="badge online" style="background:rgba(16,185,129,0.1); color:var(--success);">${(hyp.probability * 100).toFixed(0)}% Match</span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin:0.25rem 0;">${escapeHtml(hyp.description)}</p>
+        <div style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); margin-top:0.25rem;">Correlated Evidence:</div>
+        <ul style="padding-left:1.25rem; font-size:0.8rem; color:var(--text-muted); margin:0;">
+          ${evidenceHtml}
+        </ul>
+        <div style="margin-top:0.5rem; background:rgba(59,130,246,0.05); border:1px solid rgba(59,130,246,0.1); padding:0.75rem; border-radius:6px; font-size:0.8rem; color:var(--primary);">
+          <strong>Recommended Action:</strong> ${escapeHtml(hyp.suggestion)}
+        </div>
+      `;
+      list.appendChild(card);
+    });
+  } catch (err) {
+    console.error(err);
+    promo.style.display = 'none';
+    results.style.display = 'block';
+    list.innerHTML = `<div class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error running diagnostics: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.fetchRootCauseAnalysis = fetchRootCauseAnalysis;
 
 
 

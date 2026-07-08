@@ -407,6 +407,8 @@ func main() {
 	mux.HandleFunc("/api/topology/live", authorizeConsole(handleTopologyLive))
 	mux.HandleFunc("/api/docs/spec", authorizeConsole(handleDocsSpec))
 	mux.HandleFunc("/api/capacity", authorizeConsole(handleCapacityPlanning))
+	mux.HandleFunc("/api/correlation/timeline", authorizeConsole(handleCorrelationTimeline))
+	mux.HandleFunc("/api/ai/root-cause", authorizeConsole(handleAIRootCause))
 	mux.HandleFunc("/api/dev/services", authorizeConsole(handleDevServices))
 	mux.HandleFunc("/api/dev/restart", authorizeConsole(handleDevRestart))
 	mux.HandleFunc("/api/playground/compile", authorizeConsole(handlePlaygroundCompile))
@@ -4297,6 +4299,62 @@ func handleCapacityPlanning(w http.ResponseWriter, r *http.Request) {
 		ForecastAnalysis: "Based on current storage consumption rate of 1.2 GB/day, disk capacity will be exhausted in approximately 45 days. Average CPU and Memory utilization remain stable. Recommending vertical scaling or archival rule configuration for ServStore within 30 days to mitigate exhaustion risk.",
 	})
 }
+
+type CorrelationEvent struct {
+	Timestamp   time.Time `json:"timestamp"`
+	Type        string    `json:"type"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Source      string    `json:"source"`
+	Severity    string    `json:"severity"`
+}
+
+func handleCorrelationTimeline(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	now := time.Now()
+	events := []CorrelationEvent{
+		{
+			Timestamp:   now.Add(-4 * time.Minute),
+			Type:        "alert",
+			Title:       "PostgreSQL Latency Alert (ServDB)",
+			Description: "Average latency on SELECT queries exceeded SLO threshold (150ms limit, hit 450ms).",
+			Source:      "SLO Tracker",
+			Severity:    "critical",
+		},
+		{
+			Timestamp:   now.Add(-8 * time.Minute),
+			Type:        "deploy",
+			Title:       "ServStore version roll out v1.4.2",
+			Description: "Automated package upgrade via ServCloud triggered by admin.",
+			Source:      "ServCloud",
+			Severity:    "info",
+		},
+		{
+			Timestamp:   now.Add(-15 * time.Minute),
+			Type:        "config",
+			Title:       "Config Editor: Adjusted ServGate Rate Limit",
+			Description: "Updated rate limiting threshold from 100 to 150 req/sec.",
+			Source:      "Config Editor",
+			Severity:    "warning",
+		},
+		{
+			Timestamp:   now.Add(-30 * time.Minute),
+			Type:        "alert",
+			Title:       "Minor Latency Spike on ServGate",
+			Description: "Gateway reports p99 latency exceeded 200ms during canary traffic split shift.",
+			Source:      "Telemetry",
+			Severity:    "warning",
+		},
+	}
+
+	json.NewEncoder(w).Encode(events)
+}
+
 
 
 

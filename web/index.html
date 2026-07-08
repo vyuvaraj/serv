@@ -804,6 +804,9 @@
                 <span class="badge online" id="waterfall-trace-id-badge">No Trace Selected</span>
               </div>
             </div>
+            <div id="trace-visual-flow" style="display:none; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; margin:1rem 0; justify-content:space-between; align-items:center; gap:0.5rem; font-size:0.8rem; overflow-x:auto;">
+              <!-- Dynamic flowchart blocks -->
+            </div>
             <div class="trace-spans-container" id="traces-timeline" style="margin-top: 1rem; min-height: 300px; max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem;">
               <div class="text-center text-muted" style="padding: 4rem 0;">Select a trace from the logs on the left to view the distributed spans execution tree.</div>
             </div>
@@ -836,6 +839,20 @@
             </div>
             <div class="console-logs-box" id="console-logs-screen">
               <div class="log-line system">[SYSTEM] ServConsole connected. Listening for events...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Change Correlation Timeline -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Change Correlation Timeline</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchChangeCorrelationTimeline()">↻ Refresh Correlation</button>
+            </div>
+            <p class="section-desc">Correlate system events chronologically: deployments, config edits, and alerts overlaid on a single timeline.</p>
+            <div style="position:relative; padding-left:2.5rem; margin-top:2rem;" id="correlation-timeline-box">
+              <!-- Chronological timeline list -->
             </div>
           </div>
         </div>
@@ -1565,6 +1582,31 @@
             <p class="section-desc">Active security alerts triggered by prompt injection filters or sensitive data leak blockers.</p>
             <div id="ai-safety-alerts-container" style="display:flex; flex-direction:column; gap:0.75rem;">
               <!-- Filled dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- AI Root Cause Analysis -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>AI Root Cause Analysis (EE Only)</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchRootCauseAnalysis()">⚡ Run Diagnostics</button>
+            </div>
+            <p class="section-desc">Correlate deployments, configuration parameters, and recent metric anomalies to identify root cause.</p>
+            
+            <!-- EE Promotional Banner -->
+            <div id="ai-rootcause-promo" style="display:none; background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.2); border-radius:8px; padding:1.5rem; text-align:center; margin-top:1.5rem;">
+              <span style="font-size:1.5rem;">🔒</span>
+              <h3 style="margin-top:0.5rem; color:var(--warning);">Enterprise Edition Required</h3>
+              <p style="font-size:0.85rem; color:var(--text-secondary); max-width:500px; margin:0.5rem auto 0 auto;">Unlock automated root-cause diagnostics, ranked fault hypothesis correlation, and self-healing recommendation steps by upgrading to Servverse Enterprise Edition.</p>
+            </div>
+            
+            <div id="ai-rootcause-results" style="display:none; margin-top:1.5rem;">
+              <h3 style="font-size:1.1rem; margin-bottom:1rem;">Ranked Hypotheses:</h3>
+              <div id="ai-rootcause-list" style="display:flex; flex-direction:column; gap:1rem;">
+                <!-- Dynamically filled -->
+              </div>
             </div>
           </div>
         </div>

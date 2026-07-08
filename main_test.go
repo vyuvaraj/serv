@@ -964,4 +964,36 @@ func TestHandleCapacityPlanning(t *testing.T) {
 	}
 }
 
+func TestCorrelationTimeline(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/correlation/timeline", nil)
+	w := httptest.NewRecorder()
+
+	handleCorrelationTimeline(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var res []CorrelationEvent
+	json.NewDecoder(resp.Body).Decode(&res)
+
+	if len(res) == 0 {
+		t.Error("expected correlation events, got 0")
+	}
+}
+
+func TestAIRootCause(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/ai/root-cause?alertId=db-latency", nil)
+	w := httptest.NewRecorder()
+
+	handleAIRootCause(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusForbidden {
+		t.Errorf("expected 200 or 403, got %d", resp.StatusCode)
+	}
+}
+
+
 
