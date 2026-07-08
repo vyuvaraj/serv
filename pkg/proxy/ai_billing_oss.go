@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func (h *GatewayHandler) handleLLMRouting(w http.ResponseWriter, r *http.Request, matchedRoute *Route, span interface{}) bool {
+func (h *GatewayHandler) handleLLMRouting(w http.ResponseWriter, r *http.Request, matchedRoute *Route, _ interface{}) bool {
 	if matchedRoute.LLMRouting == nil {
 		return false
 	}
