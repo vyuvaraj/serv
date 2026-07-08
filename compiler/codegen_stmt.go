@@ -1567,3 +1567,39 @@ func (c *Codegen) genGraphQLStmt(s *GraphQLStmt) (string, error) {
 func (c *Codegen) genMacroStmt(s *MacroStmt) (string, error) {
 	return fmt.Sprintf("// compile-time macro expanded: @%s(%s)\n", s.Name, strings.Join(s.Args, ", ")), nil
 }
+
+func (c *Codegen) genMeshStmt(s *MeshStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func init() {\n\t// Register Service Mesh declarations with ServMesh\n\t_ = func() %s\n}\n\n", bodyStr), nil
+}
+
+func (c *Codegen) genOnStmt(s *OnStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	var out bytes.Buffer
+	out.WriteString(fmt.Sprintf("func init() {\n"))
+	out.WriteString(fmt.Sprintf("\truntime.Subscribe(%q, func(%s string) {\n", s.Topic, s.Param))
+	innerBody := strings.TrimSuffix(strings.TrimPrefix(bodyStr, "{"), "}")
+	out.WriteString(innerBody)
+	out.WriteString(fmt.Sprintf("\t})\n"))
+	out.WriteString(fmt.Sprintf("}\n\n"))
+	return out.String(), nil
+}
+
+func (c *Codegen) genLockStmt(s *LockStmt) (string, error) {
+	keyStr, err := c.genExpression(s.Key)
+	if err != nil {
+		return "", err
+	}
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("runtime.WithLock(fmt.Sprintf(\"%%v\", %s), 5, func() %s)\n", keyStr, bodyStr), nil
+}
+

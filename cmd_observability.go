@@ -79,7 +79,7 @@ func runObservabilityApply() {
 	fmt.Printf("📋 Observability-as-code — %s\n", configPath)
 	fmt.Printf("   Target: %s\n", consoleURL)
 	if dryRun {
-		fmt.Println("   Mode:   dry-run (no changes will be applied)\n")
+		fmt.Println("   Mode:   dry-run (no changes will be applied)")
 	} else {
 		fmt.Println("")
 	}

@@ -277,6 +277,12 @@ func stmtToken(stmt Statement) Token {
 		return s.Token
 	case *AfterEachStmt:
 		return s.Token
+	case *MeshStmt:
+		return s.Token
+	case *OnStmt:
+		return s.Token
+	case *LockStmt:
+		return s.Token
 	default:
 		return Token{}
 	}

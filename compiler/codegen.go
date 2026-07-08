@@ -518,6 +518,12 @@ case *DestructureLetStmt:
 return c.genDestructureLetStmt(s)
 case *LetStmt:
 return c.genLetStmt(s)
+case *MeshStmt:
+return c.genMeshStmt(s)
+case *OnStmt:
+return c.genOnStmt(s)
+case *LockStmt:
+return c.genLockStmt(s)
 case *ReturnStmt:
 return c.genReturnStmt(s)
 case *YieldStmt:

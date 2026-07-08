@@ -843,3 +843,54 @@ func (p *Parser) parseMacroStatement() Statement {
 	}
 	return stmt
 }
+
+// parseMeshStatement parses: mesh { ... }
+func (p *Parser) parseMeshStatement() Statement {
+	stmt := &MeshStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+// parseOnStatement parses: on "topic" (event) { ... }
+func (p *Parser) parseOnStatement() Statement {
+	stmt := &OnStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Topic = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LPAREN) {
+		return nil
+	}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Param = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_RPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+// parseLockStatement parses: lock keyExpression { ... }
+func (p *Parser) parseLockStatement() Statement {
+	stmt := &LockStmt{Token: p.curToken}
+	p.nextToken() // consume 'lock'
+	stmt.Key = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+

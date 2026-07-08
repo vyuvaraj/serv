@@ -131,12 +131,15 @@ const (
 	TOKEN_TYPE       TokenType = "TYPE"
 	TOKEN_VALIDATE   TokenType = "VALIDATE"
 
-	// Keywords
 	TOKEN_BREAK      TokenType = "BREAK"
 	TOKEN_CONTINUE   TokenType = "CONTINUE"
 	TOKEN_BEFORE_EACH TokenType = "BEFORE_EACH"
 	TOKEN_AFTER_EACH  TokenType = "AFTER_EACH"
 	TOKEN_TIMEOUT    TokenType = "TIMEOUT"
+	TOKEN_MESH       TokenType = "MESH"
+	TOKEN_ON         TokenType = "ON"
+	TOKEN_LOCK       TokenType = "LOCK"
+	TOKEN_UNLOCK     TokenType = "UNLOCK"
 )
 
 type Token struct {
@@ -624,6 +627,10 @@ var keywords = map[string]TokenType{
 	"app":             TOKEN_APP,
 	"agent":           TOKEN_AGENT,
 	"table":           TOKEN_TABLE,
+	"mesh":            TOKEN_MESH,
+	"on":              TOKEN_ON,
+	"lock":            TOKEN_LOCK,
+	"unlock":          TOKEN_UNLOCK,
 }
 
 func lookupIdent(ident string) TokenType {

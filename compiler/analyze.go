@@ -103,6 +103,12 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 		return analyzeBlock(s.Body, nil)
 	case *AgentDecl:
 		return nil
+	case *MeshStmt:
+		return analyzeBlock(s.Body, nil)
+	case *OnStmt:
+		return analyzeBlock(s.Body, nil)
+	case *LockStmt:
+		return analyzeBlock(s.Body, nil)
 	}
 	return nil
 }

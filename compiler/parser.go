@@ -298,6 +298,12 @@ func (p *Parser) parseStatement() Statement {
 			return p.parseExpressionStatement()
 		}
 		return p.parseValidateStatement()
+	case TOKEN_MESH:
+		return p.parseMeshStatement()
+	case TOKEN_ON:
+		return p.parseOnStatement()
+	case TOKEN_LOCK:
+		return p.parseLockStatement()
 	case TOKEN_EXPORT:
 		return p.parseExportStatement()
 	case TOKEN_BREAK:

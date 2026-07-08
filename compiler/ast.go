@@ -1277,3 +1277,43 @@ func (m *MacroStmt) TokenLiteral() string { return m.Token.Literal }
 func (m *MacroStmt) String() string {
 	return "@" + m.Name + "(" + strings.Join(m.Args, ", ") + ")\n"
 }
+
+// MeshStmt represents mesh configuration block: mesh { ... }
+type MeshStmt struct {
+	Token Token
+	Body  *BlockStmt
+}
+
+func (m *MeshStmt) statementNode()       {}
+func (m *MeshStmt) TokenLiteral() string { return m.Token.Literal }
+func (m *MeshStmt) String() string {
+	return "mesh " + m.Body.String() + "\n"
+}
+
+// OnStmt represents declarative message handler: on "topic" (event) { ... }
+type OnStmt struct {
+	Token Token
+	Topic string
+	Param string
+	Body  *BlockStmt
+}
+
+func (o *OnStmt) statementNode()       {}
+func (o *OnStmt) TokenLiteral() string { return o.Token.Literal }
+func (o *OnStmt) String() string {
+	return "on \"" + o.Topic + "\" (" + o.Param + ") " + o.Body.String() + "\n"
+}
+
+// LockStmt represents native lock block: lock "key" { ... }
+type LockStmt struct {
+	Token Token
+	Key   Expression
+	Body  *BlockStmt
+}
+
+func (l *LockStmt) statementNode()       {}
+func (l *LockStmt) TokenLiteral() string { return l.Token.Literal }
+func (l *LockStmt) String() string {
+	return "lock " + l.Key.String() + " " + l.Body.String() + "\n"
+}
+

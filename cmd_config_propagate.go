@@ -72,7 +72,7 @@ func runConfigPropagate() {
 
 	fmt.Printf("⚙  Config Propagation — %s\n", configPath)
 	if dryRun {
-		fmt.Println("   Mode: dry-run\n")
+		fmt.Println("   Mode: dry-run")
 	} else {
 		fmt.Println("")
 	}
