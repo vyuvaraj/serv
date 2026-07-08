@@ -1625,12 +1625,12 @@ func (c *Codegen) genJobStmt(s *JobStmt) (string, error) {
 		return "", err
 	}
 	var out bytes.Buffer
-	out.WriteString(fmt.Sprintf("func init() {\n"))
+	out.WriteString("func init() {\n")
 	out.WriteString(fmt.Sprintf("\truntime.RegisterCronJob(%q, %q, func() {\n", s.Name, s.Spec))
 	innerBody := strings.TrimSuffix(strings.TrimPrefix(bodyStr, "{"), "}")
 	out.WriteString(innerBody)
-	out.WriteString(fmt.Sprintf("\t})\n"))
-	out.WriteString(fmt.Sprintf("}\n\n"))
+	out.WriteString("\t})\n")
+	out.WriteString("}\n\n")
 	return out.String(), nil
 }
 
