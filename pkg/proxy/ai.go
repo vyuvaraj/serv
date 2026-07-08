@@ -189,36 +189,3 @@ func SelectABPromptVersion(test PromptABTest, seed int) (string, string) {
 	}
 	return "", ""
 }
-
-func calculateGroundingScore(prompt, reply string) float64 {
-	pTokens := tokenize(prompt)
-	rTokens := tokenize(reply)
-	if len(pTokens) == 0 {
-		return 1.0
-	}
-	matches := 0
-	for k := range pTokens {
-		if _, ok := rTokens[k]; ok {
-			matches++
-		}
-	}
-	return float64(matches) / float64(len(pTokens))
-}
-
-func estimateTokens(reqBody, respBody []byte) int {
-	var respData map[string]interface{}
-	if json.Unmarshal(respBody, &respData) == nil {
-		if usage, ok := respData["usage"].(map[string]interface{}); ok {
-			if tt, ok := usage["total_tokens"].(float64); ok {
-				return int(tt)
-			}
-		}
-	}
-	reqLen := len(reqBody)
-	respLen := len(respBody)
-	est := (reqLen + respLen) / 4
-	if est < 1 {
-		return 1
-	}
-	return est
-}

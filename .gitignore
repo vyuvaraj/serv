@@ -4,3 +4,4 @@ servgate.exe
 dist/
 vendor/
 *_ee.go
+*_ee_test.go
