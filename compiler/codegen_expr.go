@@ -167,6 +167,8 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			switch e.Field {
 			case "complete":
 				return "runtime.AIComplete", nil
+			case "classify":
+				return "runtime.AIClassify", nil
 			case "embed":
 				return "runtime.AIEmbed", nil
 			case "chat":

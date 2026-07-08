@@ -337,6 +337,24 @@ func TestScaffoldingCLI(t *testing.T) {
 	if !strings.Contains(string(content), "workflow UserFlow (data)") {
 		t.Errorf("scaffold missing workflow block: %s", string(content))
 	}
+
+	// Test workflow generation from prompt description
+	promptFile := "order_workflow.srv"
+	defer os.Remove(promptFile)
+	runGenerateWorkflowFromPrompt("Order", "receives order -> validates payment -> notifies warehouse -> sends email")
+	content, err = os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatalf("failed to read generated workflow file: %v", err)
+	}
+	if !strings.Contains(string(content), "workflow OrderFlow(data)") {
+		t.Errorf("generated workflow missing workflow block: %s", string(content))
+	}
+	if !strings.Contains(string(content), "await receivesOrder") {
+		t.Errorf("generated workflow missing receivesOrder step: %s", string(content))
+	}
+	if !strings.Contains(string(content), "await sendsEmail") {
+		t.Errorf("generated workflow missing sendsEmail step: %s", string(content))
+	}
 }
 
 func TestSandboxConfigGeneration(t *testing.T) {

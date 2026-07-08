@@ -42,10 +42,20 @@ func runGenerate() {
 		runGenerateDBScaffold(os.Args[3])
 	case "workflow":
 		if len(os.Args) < 4 {
-			fmt.Println("Usage: serv generate workflow <name>")
+			fmt.Println("Usage: serv generate workflow <name> [--prompt <description>]")
 			os.Exit(1)
 		}
-		runGenerateWorkflowScaffold(os.Args[3])
+		prompt := ""
+		for idx, arg := range os.Args {
+			if arg == "--prompt" && idx+1 < len(os.Args) {
+				prompt = os.Args[idx+1]
+			}
+		}
+		if prompt != "" {
+			runGenerateWorkflowFromPrompt(os.Args[3], prompt)
+		} else {
+			runGenerateWorkflowScaffold(os.Args[3])
+		}
 	case "code":
 		if len(os.Args) < 4 {
 			fmt.Println("Usage: serv generate code <prompt>")
@@ -238,6 +248,61 @@ workflow %sFlow (data) {
 		os.Exit(1)
 	}
 	fmt.Printf("✓ Scaffolding complete: generated workflow definition at %s\n", outName)
+}
+
+func runGenerateWorkflowFromPrompt(name string, prompt string) {
+	fmt.Printf("Generating workflow %s based on description: %q...\n", name, prompt)
+	steps := []string{}
+	delimiters := []string{"->", "then", ","}
+	tempPrompt := prompt
+	for _, delim := range delimiters {
+		tempPrompt = strings.ReplaceAll(tempPrompt, delim, "|")
+	}
+	parts := strings.Split(tempPrompt, "|")
+	for _, p := range parts {
+		cleaned := strings.TrimSpace(p)
+		if cleaned != "" {
+			words := strings.Fields(cleaned)
+			funcName := ""
+			for idx, w := range words {
+				w = strings.Title(strings.ToLower(w))
+				reg := regexp.MustCompile("[^a-zA-Z0-9]")
+				w = reg.ReplaceAllString(w, "")
+				if idx == 0 {
+					w = strings.ToLower(w)
+				}
+				funcName += w
+			}
+			if funcName != "" {
+				steps = append(steps, funcName)
+			}
+		}
+	}
+
+	if len(steps) == 0 {
+		steps = []string{"processStep1", "processStep2"}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("// Workflow %s auto-generated from description: %q\n\n", name, prompt))
+	
+	for _, step := range steps {
+		sb.WriteString(fmt.Sprintf("fn %s(data) {\n\t// TODO: Implement step logic\n\treturn \"ok\"\n}\n\n", step))
+	}
+
+	sb.WriteString(fmt.Sprintf("workflow %sFlow(data) {\n", name))
+	for idx, step := range steps {
+		sb.WriteString(fmt.Sprintf("\tlet res%d = await %s(data)\n", idx+1, step))
+	}
+	sb.WriteString(fmt.Sprintf("\treturn res%d\n", len(steps)))
+	sb.WriteString("}\n")
+
+	outName := strings.ToLower(name) + "_workflow.srv"
+	if err := os.WriteFile(outName, []byte(sb.String()), 0644); err != nil {
+		fmt.Printf("Error writing generated workflow: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ Generated workflow definition at %s\n", outName)
 }
 
 func runGenerateSandbox(fileSrv string) {

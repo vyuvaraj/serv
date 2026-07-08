@@ -312,6 +312,7 @@ func InitBroker(connStr string) {}
 func InitAI(connStr string)     {}
 func AddAgent(name, system, model string, tools []string) {}
 func AIComplete(args ...interface{}) interface{} { return nil }
+func AIClassify(args ...interface{}) interface{} { return nil }
 func AIChat(args ...interface{}) interface{} { return nil }
 func AIEmbed(args ...interface{}) interface{} { return nil }
 

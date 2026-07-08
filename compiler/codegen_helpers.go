@@ -289,6 +289,8 @@ func stmtToken(stmt Statement) Token {
 		return s.Token
 	case *JobStmt:
 		return s.Token
+	case *RagStmt:
+		return s.Token
 	default:
 		return Token{}
 	}

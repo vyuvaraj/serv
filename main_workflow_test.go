@@ -181,3 +181,50 @@ test "workflow codegen compiles and runs" {
 		t.Error("Expected no workflow tests to fail")
 	}
 }
+
+func TestWorkflowAIClassify(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test_workflow_classify_*.srv")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	srvContent := `
+workflow TicketRouter(msg) {
+	let category = await ai.classify(msg, ["billing", "technical", "sales"])
+	return category
+}
+
+test "workflow classify runs" {
+	let res = workflow.start("TicketRouter", "I want a refund for my last invoice")
+	assert res != nil
+}
+`
+	if _, err := tmpFile.WriteString(srvContent); err != nil {
+		t.Fatalf("failed to write srv file: %v", err)
+	}
+	tmpFile.Close()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	done := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
+
+	runTests(tmpFile.Name(), false, "")
+
+	w.Close()
+	os.Stdout = oldStdout
+	output := <-done
+
+	t.Logf("Workflow classify output:\n%s", output)
+
+	if !strings.Contains(output, "PASS") {
+		t.Errorf("Expected workflow classify tests to pass, got output:\n%s", output)
+	}
+}

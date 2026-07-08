@@ -253,6 +253,54 @@ func AIChat(args ...interface{}) interface{} {
 	}
 }
 
+// AIClassify classifies the given text into one of the specified categories.
+func AIClassify(args ...interface{}) interface{} {
+	if len(args) < 2 {
+		LogError("ai.classify() requires text and list of categories")
+		return nil
+	}
+	text := fmt.Sprint(args[0])
+
+	var categories []string
+	switch cVal := args[1].(type) {
+	case []interface{}:
+		for _, c := range cVal {
+			categories = append(categories, fmt.Sprint(c))
+		}
+	case []string:
+		categories = cVal
+	default:
+		LogError("ai.classify() categories must be a list of strings")
+		return nil
+	}
+
+	if len(categories) == 0 {
+		return ""
+	}
+
+	textLower := strings.ToLower(text)
+	for _, cat := range categories {
+		if strings.Contains(textLower, strings.ToLower(cat)) {
+			return cat
+		}
+	}
+
+	if aiProvider != "" {
+		prompt := fmt.Sprintf("Classify the following text into exactly one of these categories: %v\n\nText: %q\n\nCategory name:", categories, text)
+		res := AIComplete(prompt)
+		if res != nil {
+			parsed := strings.TrimSpace(fmt.Sprint(res))
+			for _, cat := range categories {
+				if strings.EqualFold(parsed, cat) || strings.Contains(strings.ToLower(parsed), strings.ToLower(cat)) {
+					return cat
+				}
+			}
+		}
+	}
+
+	return categories[0]
+}
+
 // AIEmbed generates an embedding vector for the given text.
 func AIEmbed(args ...interface{}) interface{} {
 	if aiProvider == "" {
