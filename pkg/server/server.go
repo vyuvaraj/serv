@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/v1/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/v1/anomalies", s.handleGetAnomalies)
+	mux.HandleFunc("/api/v1/anomalies/explain", s.handleExplainAnomaly)
 	mux.HandleFunc("/api/logs", s.handleIngestLog)
 	mux.HandleFunc("/api/trace/anomaly/slow-spans", s.handleSlowSpans)
 	mux.HandleFunc("/api/trace/anomaly/slo-breach-predict", s.handleSloBreachPredict)
@@ -450,6 +451,25 @@ func (s *Server) handleGetAnomalies(w http.ResponseWriter, req *http.Request) {
 	anomalies := s.traceStore.GetAnomalies()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(anomalies)
+}
+
+func (s *Server) handleExplainAnomaly(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	traceID := req.URL.Query().Get("traceId")
+	explanation, err := s.ExplainAnomaly(traceID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(explanation)
 }
 
 func (s *Server) handleSlowSpans(w http.ResponseWriter, req *http.Request) {
