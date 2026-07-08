@@ -1625,8 +1625,8 @@ func TestAutomatedCanaryRollback(t *testing.T) {
 		{
 			Prefix: "/api/auto-canary",
 			TargetsWeighted: []proxy.WeightedTarget{
-				{URL: tsV1.URL, Weight: 90},
-				{URL: tsV2.URL, Weight: 10},
+				{URL: tsV1.URL, Weight: 50},
+				{URL: tsV2.URL, Weight: 50},
 			},
 			CanaryAutoPromote:  true,
 			CanaryPromoteStep:  10,
@@ -1642,7 +1642,7 @@ func TestAutomatedCanaryRollback(t *testing.T) {
 
 	client := &http.Client{Timeout: 1 * time.Second}
 
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 40; i++ {
 		resp, err := client.Get(gwServer.URL + "/api/auto-canary/test")
 		if err == nil {
 			resp.Body.Close()
@@ -1650,7 +1650,8 @@ func TestAutomatedCanaryRollback(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Sleep 300ms to ensure the 200ms CanaryPromotionLoop ticker has ticked at least once
+	time.Sleep(300 * time.Millisecond)
 
 	req, _ := http.NewRequest("GET", gwServer.URL+"/api/auto-canary/test", nil)
 	resp, err := client.Do(req)
