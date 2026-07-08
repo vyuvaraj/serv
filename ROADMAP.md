@@ -136,7 +136,7 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
 | 12.1 | **Extract proxy handlers** | Large | Move all service proxy logic (ServGate, ServStore, ServQueue, ServAuth, etc.) from main.go into `pkg/proxy/` with proper handler structs and interfaces | [ ] |
-| 12.2 | **Extract WebSocket push engine** | Medium | Move real-time dashboard push (metrics, logs, traces) into `pkg/ws/` with subscriber management | [ ] |
+| 12.2 | **Extract WebSocket push engine** | Medium | Move real-time dashboard push (metrics, logs, traces) into `pkg/ws/` with subscriber management | [x] |
 | 12.3 | **Extract dashboard tab controllers** | Large | Each dashboard tab (Gateway, Storage, Queue, Auth, DB, etc.) becomes its own package under `pkg/tabs/` | [ ] |
 | 12.4 | **Extract AI/incident panels** | Medium | Move AI agent observatory and incident timeline logic into `pkg/ai/` and `pkg/incidents/` properly | [ ] |
 | 12.5 | **Service topology auto-discovery** | Medium | Parse OTel trace spans to auto-build dependency graph (7.3). Requires dedicated `pkg/topology/` | [ ] |
@@ -169,7 +169,7 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | 13.9 | **End-to-end request flow** | Large | Visualize full request lifecycle: Client → ServGate → Backend → ServQueue → Subscriber → ServStore. Single timeline from OTel spans across all 15 services. | [ ] |
 | 13.10 | **Ecosystem dependency matrix** | Medium | Auto-generated matrix showing runtime dependencies between services (from OTel trace data + discovery config). Interactive — click a cell to see call volume/latency. | [ ] |
 | 13.11 | **Unified configuration editor** | Large | Central panel to edit cross-service config: ServGate rate limits, ServCache TTLs, ServCron schedules, ServMesh routing rules — all from one place with validation. | [ ] |
-| 13.12 | **Cross-service log correlation** | Medium | Click any trace_id → see all log lines from all services with that trace_id, in chronological order across the ecosystem. | [ ] |
+| 13.12 | **Cross-service log correlation** | Medium | Click any trace_id → see all log lines from all services with that trace_id, in chronological order across the ecosystem. | [x] |
 | 13.13 | **Ecosystem upgrade dashboard** | Medium | Show current versions of all running services, compare against latest releases from ServRegistry, highlight version incompatibilities, offer upgrade via ServCloud. | [ ] |
 
 ### Operational Intelligence
@@ -178,9 +178,9 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 |---|------|--------|-------------|--------|
 | 13.14 | **Capacity planning view** | Medium | Aggregate CPU/memory/disk/network across all services. Project growth trends. Alert when approaching infrastructure limits. | [ ] |
 | 13.15 | **Change correlation engine** | Large | Overlay deployments (ServCloud), config changes (audit log), and incidents (alerts) on a unified timeline. Correlate "what changed" with "what broke." | [ ] |
-| 13.16 | **Service comparison mode** | Medium | Compare two services side-by-side: latency, throughput, error rate, resource usage. Useful for canary validation. | [ ] |
-| 13.17 | **Ecosystem startup orchestrator** | Medium | `serv console --start-all` boots all ecosystem services in dependency order, waits for health, then opens the dashboard. One-command full-stack local dev. | [ ] |
-| 13.18 | **Unified API documentation portal** | Medium | Auto-aggregate all service OpenAPI specs into a single interactive documentation portal served from the console. | [ ] |
+| 13.16 | **Service comparison mode** | Medium | Compare two services side-by-side: latency, throughput, error rate, resource usage. Useful for canary validation. | [x] |
+| 13.17 | **Ecosystem startup orchestrator** | Medium | `serv console --start-all` boots all ecosystem services in dependency order, waits for health, then opens the dashboard. One-command full-stack local dev. | [x] |
+| 13.18 | **Unified API documentation portal** | Medium | Auto-aggregate all service OpenAPI specs into a single interactive documentation portal served from the console. | [x] |
 
 ### AI-Powered Operations
 

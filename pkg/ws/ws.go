@@ -61,3 +61,10 @@ func (b *EventBroadcaster) HandleEvents(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 }
+
+func (b *EventBroadcaster) ActiveCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.clients)
+}
+

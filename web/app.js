@@ -112,6 +112,9 @@ function initTabs() {
       } else if (tabId === 'docs') {
         const frame = document.getElementById('docs-frame');
         if (frame) frame.src = frame.src; // Force reload/refresh
+        fetchApiSpecs();
+      } else if (tabId === 'topology') {
+        initServiceComparison();
       }
     });
   });
@@ -133,6 +136,7 @@ function initPolling() {
         STATE.components[comp.name] = {
           online: comp.online,
           latency: comp.latency_ms || 0,
+          url: comp.url || '',
           details: comp.details
         };
       });
@@ -2109,6 +2113,7 @@ async function showTraceDetail(traceId) {
   const timeline = document.getElementById('traces-timeline');
   const badge = document.getElementById('waterfall-trace-id-badge');
   const replayBtn = document.getElementById('btn-replay-trace');
+  const traceLogsBtn = document.getElementById('btn-trace-logs');
   const expandBtn = document.getElementById('btn-expand-all-spans');
   const collapseBtn = document.getElementById('btn-collapse-all-spans');
   const cpToggleLabel = document.getElementById('critical-path-toggle-label');
@@ -2117,6 +2122,7 @@ async function showTraceDetail(traceId) {
   if (!timeline) return;
   
   if (replayBtn) replayBtn.style.display = 'none';
+  if (traceLogsBtn) traceLogsBtn.style.display = 'none';
   if (expandBtn) expandBtn.style.display = 'none';
   if (collapseBtn) collapseBtn.style.display = 'none';
   if (cpToggleLabel) cpToggleLabel.style.display = 'none';
@@ -2143,6 +2149,7 @@ async function showTraceDetail(traceId) {
 
     STATE.selectedTraceId = traceId;
     if (replayBtn) replayBtn.style.display = 'inline-block';
+    if (traceLogsBtn) traceLogsBtn.style.display = 'inline-block';
     if (expandBtn) expandBtn.style.display = 'inline-block';
     if (collapseBtn) collapseBtn.style.display = 'inline-block';
     if (cpToggleLabel) cpToggleLabel.style.display = 'inline-flex';
@@ -2926,6 +2933,11 @@ function initAlertsUI() {
   const replayBtn = document.getElementById('btn-replay-trace');
   if (replayBtn) {
     replayBtn.addEventListener('click', replaySelectedTrace);
+  }
+
+  const traceLogsBtn = document.getElementById('btn-trace-logs');
+  if (traceLogsBtn) {
+    traceLogsBtn.addEventListener('click', showTraceLogs);
   }
 }
 
@@ -4299,4 +4311,179 @@ async function undeployCloudService(name) {
   }
 }
 window.undeployCloudService = undeployCloudService;
+
+async function showTraceLogs() {
+  const traceId = STATE.selectedTraceId;
+  if (!traceId) return;
+
+  try {
+    const res = await fetch(`/api/logs?trace_id=${traceId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const entries = await res.json();
+
+    if (!entries || entries.length === 0) {
+      alert(`No log entries found correlating to Trace ID: ${traceId}`);
+      return;
+    }
+
+    const logLines = entries.map(e => `[${new Date(e.timestamp).toLocaleTimeString()}] [${e.service.toUpperCase()}] [${e.level.toUpperCase()}] ${e.message}`).join('\n');
+    alert(`Correlated Logs for Trace ID ${traceId}:\n\n` + logLines);
+  } catch (err) {
+    alert(`Failed to fetch correlated logs: ${err.message}`);
+  }
+}
+window.showTraceLogs = showTraceLogs;
+
+function initServiceComparison() {
+  const selectA = document.getElementById('compare-svc-a');
+  const selectB = document.getElementById('compare-svc-b');
+  if (!selectA || !selectB) return;
+
+  const names = Object.keys(STATE.components);
+  if (names.length === 0) return;
+
+  // Clear existing options
+  selectA.innerHTML = '';
+  selectB.innerHTML = '';
+
+  names.forEach((name, idx) => {
+    const optA = document.createElement('option');
+    optA.value = name;
+    optA.textContent = name;
+    if (idx === 0) optA.selected = true;
+    selectA.appendChild(optA);
+
+    const optB = document.createElement('option');
+    optB.value = name;
+    optB.textContent = name;
+    if (idx === 1 || (names.length === 1 && idx === 0)) optB.selected = true;
+    selectB.appendChild(optB);
+  });
+
+  updateComparison();
+}
+window.initServiceComparison = initServiceComparison;
+
+function updateComparison() {
+  const selectA = document.getElementById('compare-svc-a');
+  const selectB = document.getElementById('compare-svc-b');
+  if (!selectA || !selectB) return;
+
+  const nameA = selectA.value;
+  const nameB = selectB.value;
+
+  const compA = STATE.components[nameA];
+  const compB = STATE.components[nameB];
+
+  document.getElementById('compare-header-a').textContent = nameA;
+  document.getElementById('compare-header-b').textContent = nameB;
+
+  if (compA) {
+    const statusEl = document.getElementById('compare-status-a');
+    statusEl.textContent = compA.online ? 'ONLINE' : 'OFFLINE';
+    statusEl.className = compA.online ? 'badge online' : 'badge offline';
+    document.getElementById('compare-latency-a').textContent = compA.online ? `${compA.latency} ms` : '—';
+    document.getElementById('compare-url-a').textContent = compA.url || '—';
+  }
+
+  if (compB) {
+    const statusEl = document.getElementById('compare-status-b');
+    statusEl.textContent = compB.online ? 'ONLINE' : 'OFFLINE';
+    statusEl.className = compB.online ? 'badge online' : 'badge offline';
+    document.getElementById('compare-latency-b').textContent = compB.online ? `${compB.latency} ms` : '—';
+    document.getElementById('compare-url-b').textContent = compB.url || '—';
+  }
+}
+window.updateComparison = updateComparison;
+
+STATE.apiSpecs = {};
+
+async function fetchApiSpecs() {
+  const select = document.getElementById('docs-service-select');
+  const details = document.getElementById('docs-spec-details');
+  if (!select || !details) return;
+
+  try {
+    const res = await fetch('/api/docs/spec');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const specs = await res.json();
+    STATE.apiSpecs = specs;
+
+    select.innerHTML = '';
+    const serviceNames = Object.keys(specs);
+    if (serviceNames.length === 0) {
+      details.innerHTML = '<div>No API specs discovered.</div>';
+      return;
+    }
+
+    serviceNames.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+
+    loadSelectedDocsSpec();
+  } catch (err) {
+    console.error('Failed to fetch API specs:', err);
+    details.innerHTML = `<div style="color:var(--danger);">Error loading directory: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.fetchApiSpecs = fetchApiSpecs;
+
+function loadSelectedDocsSpec() {
+  const select = document.getElementById('docs-service-select');
+  const details = document.getElementById('docs-spec-details');
+  if (!select || !details) return;
+
+  const name = select.value;
+  const spec = STATE.apiSpecs[name];
+  if (!spec) {
+    details.innerHTML = '<div>No spec data.</div>';
+    return;
+  }
+
+  const info = spec.info || {};
+  let html = `
+    <div style="font-weight: 600; font-size: 1rem; color: #fff;">${escapeHtml(info.title || name)}</div>
+    <div style="color: var(--text-secondary); margin-bottom: 0.5rem;">Version: ${escapeHtml(info.version || '1.0.0')}</div>
+    <p style="margin: 0; color: var(--text-secondary);">${escapeHtml(info.description || '')}</p>
+    <div style="border-top: 1px solid rgba(255,255,255,0.05); margin-top:0.75rem; padding-top:0.75rem; display:flex; flex-direction:column; gap:0.5rem;">
+  `;
+
+  const paths = spec.paths || {};
+  const pathKeys = Object.keys(paths);
+  if (pathKeys.length === 0) {
+    html += '<div class="text-muted">No endpoints defined.</div>';
+  } else {
+    pathKeys.forEach(p => {
+      const methods = paths[p];
+      Object.keys(methods).forEach(m => {
+        const op = methods[m];
+        const methodUpper = m.toUpperCase();
+        let badgeColor = 'rgba(255,255,255,0.1)';
+        if (methodUpper === 'GET') badgeColor = 'rgba(16, 185, 129, 0.15); color:var(--success);';
+        else if (methodUpper === 'POST') badgeColor = 'rgba(59, 130, 246, 0.15); color:var(--primary);';
+        else if (methodUpper === 'DELETE') badgeColor = 'rgba(239, 68, 68, 0.15); color:var(--danger);';
+
+        html += `
+          <div style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.03); border-radius: 4px; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              <span class="badge" style="background:${badgeColor}; font-size: 0.7rem; font-weight: bold; padding: 0.1rem 0.3rem;">${methodUpper}</span>
+              <code style="font-size:0.8rem; color:#fff; word-break: break-all;">${escapeHtml(p)}</code>
+            </div>
+            <div style="color: var(--text-secondary); font-size:0.75rem; padding-left: 0.25rem;">${escapeHtml(op.summary || '')}</div>
+          </div>
+        `;
+      });
+    });
+  }
+
+  html += '</div>';
+  details.innerHTML = html;
+}
+window.loadSelectedDocsSpec = loadSelectedDocsSpec;
+
+
+
 

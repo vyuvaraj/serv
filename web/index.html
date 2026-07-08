@@ -780,6 +780,7 @@
                   Show Critical Path
                 </label>
                 <button id="btn-replay-trace" class="btn btn-warning btn-sm" style="display: none; padding: 0.25rem 0.5rem; font-size: 0.8rem; font-weight: bold; border-radius: 4px; cursor: pointer;">⚡ Replay Request</button>
+                <button id="btn-trace-logs" class="btn btn-secondary btn-sm" style="display: none; padding: 0.25rem 0.5rem; font-size: 0.8rem; font-weight: bold; border-radius: 4px; cursor: pointer;">📋 Show Trace Logs</button>
                 <span class="badge online" id="waterfall-trace-id-badge">No Trace Selected</span>
               </div>
             </div>
@@ -1489,8 +1490,9 @@
 
       <!-- TAB: LIVE TOPOLOGY -->
       <div class="tab-pane" id="tab-topology">
-        <div class="pane-grid vertical-stack">
-          <div class="card glass-card">
+        <div class="pane-grid">
+          <!-- Left: Live Topology Info -->
+          <div class="card glass-card span-2">
             <div class="card-header">
               <h2>Live Service Topology</h2>
             </div>
@@ -1498,6 +1500,46 @@
             <div class="text-center text-muted" style="padding: 4rem 0;">
               <p style="font-size:2rem; margin-bottom:1rem;">🌐</p>
               <p>Topology data populates as services emit traces. Use the Dependency Graph tab for the force-directed view.</p>
+            </div>
+          </div>
+
+          <!-- Right: Service Comparison Mode (13.16 / UC.16) -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Service Comparison</h2>
+            </div>
+            <p class="section-desc">Select any two services to compare their runtime health metrics side-by-side.</p>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+              <div style="flex: 1;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">Service A</label>
+                <select id="compare-svc-a" class="form-control" style="width:100%; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" onchange="updateComparison()"></select>
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">Service B</label>
+                <select id="compare-svc-b" class="form-control" style="width:100%; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" onchange="updateComparison()"></select>
+              </div>
+            </div>
+            <div class="comparison-results" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem; font-size:0.9rem;">
+                <span style="font-weight: 600;">Metric</span>
+                <span id="compare-header-a" style="color: var(--primary); font-weight: 600;">Svc A</span>
+                <span id="compare-header-b" style="color: var(--accent); font-weight: 600;">Svc B</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size:0.85rem;">
+                <span>Status</span>
+                <span id="compare-status-a" class="badge">—</span>
+                <span id="compare-status-b" class="badge">—</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size:0.85rem;">
+                <span>Latency</span>
+                <span id="compare-latency-a">—</span>
+                <span id="compare-latency-b">—</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size:0.85rem;">
+                <span>Endpoint URL</span>
+                <span id="compare-url-a" style="font-family:var(--font-mono); font-size:0.75rem; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+                <span id="compare-url-b" style="font-family:var(--font-mono); font-size:0.75rem; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1543,8 +1585,22 @@
 
       <!-- TAB: DOCUMENTATION -->
       <div class="tab-pane" id="tab-docs">
-        <div class="pane-grid vertical-stack">
-          <div class="card glass-card" style="padding: 0; min-height: calc(100vh - 120px); display: flex; flex-direction: column;">
+        <div class="pane-grid">
+          <!-- Left: Ecosystem API Specs Explorer -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>API Spec Directory</h2>
+            </div>
+            <p class="section-desc">Inspect auto-discovered service endpoint schemas.</p>
+            <select id="docs-service-select" class="form-control" style="width:100%; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; margin-bottom: 1rem;" onchange="loadSelectedDocsSpec()"></select>
+            
+            <div id="docs-spec-details" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.05); border-radius:6px; padding:1rem; overflow-y:auto; max-height: 500px; font-size:0.85rem; display:flex; flex-direction:column; gap:0.75rem;">
+              <div>Loading API directory...</div>
+            </div>
+          </div>
+
+          <!-- Right: Ecosystem Documentation (ServDocs) -->
+          <div class="card glass-card span-2" style="padding: 0; min-height: calc(100vh - 120px); display: flex; flex-direction: column;">
             <div class="card-header" style="padding: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05);">
               <h2>Ecosystem Documentation (ServDocs)</h2>
             </div>

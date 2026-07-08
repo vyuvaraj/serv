@@ -18,6 +18,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"regexp"
 	"strings"
@@ -58,6 +59,7 @@ var (
 	docsUrl     = flag.String("docs-url", "http://localhost:8084", "ServDocs base URL")
 	authToken   = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
+	startAll    = flag.Bool("start-all", false, "Boot all ecosystem services in dependency order on startup")
 )
 
 // ServDiscovery is the structure of the SERVVERSE_DISCOVERY JSON manifest.
@@ -199,6 +201,10 @@ var configMu sync.Mutex
 
 func main() {
 	flag.Parse()
+
+	if *startAll {
+		go orchestrateStartup()
+	}
 
 	// Verify cryptographic license if building Enterprise Edition
 	verifyEnterpriseLicense()
@@ -397,6 +403,7 @@ func main() {
 	registerEnterpriseHandlers(mux)
 
 	mux.HandleFunc("/api/topology/live", authorizeConsole(handleTopologyLive))
+	mux.HandleFunc("/api/docs/spec", authorizeConsole(handleDocsSpec))
 	mux.HandleFunc("/api/dev/services", authorizeConsole(handleDevServices))
 	mux.HandleFunc("/api/dev/restart", authorizeConsole(handleDevRestart))
 	mux.HandleFunc("/api/playground/compile", authorizeConsole(handlePlaygroundCompile))
@@ -473,6 +480,79 @@ func main() {
 		log.Println("Console: Server exited cleanly")
 	}
 }
+
+func orchestrateStartup() {
+	// Give the console server a split second to bind port
+	time.Sleep(500 * time.Millisecond)
+
+	log.Println("[orchestrator] Starting all ecosystem services in dependency order...")
+	
+	services := []struct {
+		name string
+		exec string
+		args []string
+		port int
+	}{
+		{"ServStore", "./servstore.exe", []string{}, 8081},
+		{"ServQueue", "./servqueue.exe", []string{}, 8082},
+		{"ServDB", "./servdb.exe", []string{}, 8097},
+		{"ServAuth", "./servauth.exe", []string{}, 8098},
+		{"ServGate", "./servgate.exe", []string{}, 8080},
+		{"ServMesh", "./servmesh.exe", []string{}, 8089},
+		{"ServCron", "./servcron.exe", []string{}, 8087},
+		{"ServDocs", "./servdocs.exe", []string{}, 8084},
+	}
+
+	for _, svc := range services {
+		execPath := svc.exec
+		// Try current directory, then check parent directory paths
+		if _, err := os.Stat(execPath); os.IsNotExist(err) {
+			execPath = "../" + svc.name + "/" + strings.ToLower(svc.name)
+			if _, err2 := os.Stat(execPath + ".exe"); err2 == nil {
+				execPath = execPath + ".exe"
+			} else if _, err3 := os.Stat(execPath); err3 != nil {
+				execPath = "../" + svc.name
+				if _, err4 := os.Stat(execPath + ".exe"); err4 == nil {
+					execPath = execPath + ".exe"
+				} else {
+					log.Printf("[orchestrator] Executable for %s not found: skipping", svc.name)
+					continue
+				}
+			}
+		}
+
+		log.Printf("[orchestrator] Launching %s (%s)...", svc.name, execPath)
+		cmd := exec.Command(execPath, svc.args...)
+		err := cmd.Start()
+		if err != nil {
+			log.Printf("[orchestrator] Failed to start %s: %v", svc.name, err)
+			continue
+		}
+		
+		// Wait for healthz
+		log.Printf("[orchestrator] Waiting for %s to become healthy...", svc.name)
+		healthy := false
+		client := http.Client{Timeout: 500 * time.Millisecond}
+		for i := 0; i < 5; i++ {
+			time.Sleep(500 * time.Millisecond)
+			resp, err := client.Get(fmt.Sprintf("http://localhost:%d/healthz", svc.port))
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					healthy = true
+					break
+				}
+			}
+		}
+		if healthy {
+			log.Printf("[orchestrator] %s is ONLINE", svc.name)
+		} else {
+			log.Printf("[orchestrator] Warning: %s failed health probe", svc.name)
+		}
+	}
+	log.Println("[orchestrator] Ecosystem startup orchestration finished.")
+}
+
 
 
 
@@ -1460,10 +1540,7 @@ func handleDbQuery(w http.ResponseWriter, r *http.Request) {
 	addAuditLog(user, fmt.Sprintf("SQL Query (%s): %.60s", driver, query), r.Method, r.URL.Path, http.StatusOK)
 }
 
-var (
-	clients   = make(map[chan string]bool)
-	clientsMu sync.Mutex
-)
+var wsEventBroadcaster = ws.NewEventBroadcaster()
 
 func startEventBroadcaster(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -1473,10 +1550,7 @@ func startEventBroadcaster(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			clientsMu.Lock()
-			numClients := len(clients)
-			clientsMu.Unlock()
-			if numClients == 0 {
+			if wsEventBroadcaster.ActiveCount() == 0 {
 				continue
 			}
 
@@ -1496,26 +1570,12 @@ func startEventBroadcaster(ctx context.Context) {
 				continue
 			}
 
-			payload := string(bytes)
-			clientsMu.Lock()
-			for ch := range clients {
-				select {
-				case ch <- payload:
-				default:
-				}
-			}
-			clientsMu.Unlock()
+			wsEventBroadcaster.Broadcast(string(bytes))
 		}
 	}
 }
 
-var wsEventBroadcaster = ws.NewEventBroadcaster()
-
 func handleEvents(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("decomposed") == "true" {
-		wsEventBroadcaster.HandleEvents(w, r)
-		return
-	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
@@ -1528,16 +1588,8 @@ func handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	ch := make(chan string, 10)
-	clientsMu.Lock()
-	clients[ch] = true
-	clientsMu.Unlock()
-
-	defer func() {
-		clientsMu.Lock()
-		delete(clients, ch)
-		clientsMu.Unlock()
-		close(ch)
-	}()
+	wsEventBroadcaster.Register(ch)
+	defer wsEventBroadcaster.Unregister(ch)
 
 	statuses := []ComponentStatus{
 		checkStatus("ServGate", *gateUrl),
@@ -2311,6 +2363,7 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	svcFilter := query.Get("service")
 	levelFilter := query.Get("level")
+	traceFilter := query.Get("trace_id")
 	rawSearch := query.Get("search")
 	searchFilter := strings.ToLower(rawSearch)
 
@@ -2323,6 +2376,9 @@ func handleGetLogs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if levelFilter != "" && !strings.EqualFold(logEntry.Level, levelFilter) {
+			continue
+		}
+		if traceFilter != "" && !strings.EqualFold(logEntry.TraceID, traceFilter) {
 			continue
 		}
 		if searchFilter != "" {
@@ -4193,6 +4249,65 @@ func handleConsoleCloudHistory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
+
+func handleDocsSpec(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	specs := make(map[string]any)
+	services := []struct {
+		name string
+		url  string
+	}{
+		{"ServGate", *gateUrl},
+		{"ServStore", *storeUrl},
+		{"ServQueue", *queueUrl},
+		{"ServAuth", *authUrl},
+		{"ServDB", *dbUrl},
+	}
+
+	client := http.Client{Timeout: 500 * time.Millisecond}
+	for _, svc := range services {
+		specUrl := fmt.Sprintf("%s/openapi.json", strings.TrimSuffix(svc.url, "/"))
+		resp, err := client.Get(specUrl)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			var specData any
+			if err2 := json.NewDecoder(resp.Body).Decode(&specData); err2 == nil {
+				specs[svc.name] = specData
+				resp.Body.Close()
+				continue
+			}
+			resp.Body.Close()
+		}
+
+		specs[svc.name] = map[string]any{
+			"openapi": "3.0.0",
+			"info": map[string]any{
+				"title":       svc.name + " API Portal",
+				"version":     "1.0.0",
+				"description": fmt.Sprintf("Auto-discovered API endpoints for %s at %s", svc.name, svc.url),
+			},
+			"paths": map[string]any{
+				"/healthz": map[string]any{
+					"get": map[string]any{
+						"summary": "Health status check",
+						"responses": map[string]any{
+							"200": map[string]any{
+								"description": "Service is healthy",
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	json.NewEncoder(w).Encode(specs)
+}
+
 
 
 
