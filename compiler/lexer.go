@@ -143,6 +143,7 @@ const (
 	TOKEN_BUCKET     TokenType = "BUCKET"
 	TOKEN_GATE       TokenType = "GATE"
 	TOKEN_JOB        TokenType = "JOB"
+	TOKEN_RAG        TokenType = "RAG"
 )
 
 type Token struct {
@@ -637,6 +638,7 @@ var keywords = map[string]TokenType{
 	"bucket":          TOKEN_BUCKET,
 	"gate":            TOKEN_GATE,
 	"job":             TOKEN_JOB,
+	"rag":             TOKEN_RAG,
 }
 
 func lookupIdent(ident string) TokenType {

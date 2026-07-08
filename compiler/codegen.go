@@ -530,6 +530,8 @@ case *GateStmt:
 return c.genGateStmt(s)
 case *JobStmt:
 return c.genJobStmt(s)
+case *RagStmt:
+return c.genRagStmt(s)
 case *ReturnStmt:
 return c.genReturnStmt(s)
 case *YieldStmt:

@@ -310,6 +310,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseGateStatement()
 	case TOKEN_JOB:
 		return p.parseJobStatement()
+	case TOKEN_RAG:
+		return p.parseRagStatement()
 	case TOKEN_EXPORT:
 		return p.parseExportStatement()
 	case TOKEN_BREAK:

@@ -1638,4 +1638,13 @@ func (c *Codegen) genJobStmt(s *JobStmt) (string, error) {
 	return out.String(), nil
 }
 
+func (c *Codegen) genRagStmt(s *RagStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func init() {\n\t// Register RAG pipeline from source %q\n\t_ = func() %s\n}\n\n", s.Source, bodyStr), nil
+}
+
+
 

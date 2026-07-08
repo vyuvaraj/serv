@@ -942,4 +942,20 @@ func (p *Parser) parseJobStatement() Statement {
 	return stmt
 }
 
+// parseRagStatement parses: rag "servstore://docs" { ... }
+func (p *Parser) parseRagStatement() Statement {
+	stmt := &RagStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Source = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+
 

@@ -1357,4 +1357,18 @@ func (j *JobStmt) String() string {
 	return "job " + j.Name + " " + j.Spec + " " + j.Body.String() + "\n"
 }
 
+// RagStmt represents native RAG pipeline declaration: rag "servstore://docs" { ... }
+type RagStmt struct {
+	Token Token
+	Source string
+	Body  *BlockStmt
+}
+
+func (r *RagStmt) statementNode()       {}
+func (r *RagStmt) TokenLiteral() string { return r.Token.Literal }
+func (r *RagStmt) String() string {
+	return "rag \"" + r.Source + "\" " + r.Body.String() + "\n"
+}
+
+
 

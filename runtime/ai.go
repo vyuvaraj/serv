@@ -198,6 +198,32 @@ func AIStream(args ...interface{}) interface{} {
 	return nil
 }
 
+// AIEval evaluates output quality against a reference string (AI.14).
+func AIEval(args ...interface{}) interface{} {
+	if len(args) < 2 {
+		LogError("ai.eval() requires at least prompt and expected reference parameters")
+		return 0.0
+	}
+	prompt := fmt.Sprint(args[0])
+	expected := fmt.Sprint(args[1])
+
+	// Calculate basic similarity (mock semantic analysis)
+	actual := fmt.Sprint(AIComplete(prompt))
+	if len(actual) == 0 || len(expected) == 0 {
+		return 0.0
+	}
+
+	matches := 0
+	for i := 0; i < len(actual) && i < len(expected); i++ {
+		if actual[i] == expected[i] {
+			matches++
+		}
+	}
+	score := float64(matches) / float64(len(expected))
+	return score
+}
+
+
 // AIChat sends a multi-message chat request.
 // Accepts an array of maps: [{"role": "user", "content": "..."}]
 func AIChat(args ...interface{}) interface{} {
