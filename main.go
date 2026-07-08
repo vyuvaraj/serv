@@ -43,6 +43,11 @@ var (
 		"console-client-id": "console-secret-key-9876",
 	}
 
+	// AI.32 stuffing detection variables
+	failedLoginsIP   = make(map[string][]time.Time)
+	failedLoginsIPMu sync.Mutex
+
+
 	// JWKS Keys
 	jwtRSAPrivateKey *rsa.PrivateKey
 	jwtRSAPublicKey  *rsa.PublicKey
@@ -334,6 +339,9 @@ func main() {
 	mux.HandleFunc("/api/auth/sessions", handleSessions)
 	mux.HandleFunc("/api/auth/secrets/encrypt", handleSecretsEncrypt)
 	mux.HandleFunc("/api/auth/secrets/decrypt", handleSecretsDecrypt)
+	mux.HandleFunc("/api/auth/risk", handleAdaptiveRiskScore)
+	mux.HandleFunc("/api/auth/security/stuffing-detector", handleCredentialStuffing)
+
 
 	// Wrap in ServShared middleware: OTel tracing → JWT auth → tenant enforcement → handlers
 	serverHandler := ServShared.TraceMiddleware("servauth",
@@ -470,6 +478,13 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !verifyPassword(req.Password, user.Password) {
+		// AI.32 track stuffing IP
+		ip := r.RemoteAddr
+		if idx := strings.Index(ip, ":"); idx > 0 {
+			ip = ip[:idx]
+		}
+		recordFailedLogin(ip)
+
 		usersMu.Lock()
 		u := users[userKey]
 		u.FailedAttempts++
@@ -1237,4 +1252,71 @@ func handleRotateJWKS(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf(`{"status":"success","rotated_to":"%s"}`, kid)))
 }
+
+func recordFailedLogin(ip string) {
+	failedLoginsIPMu.Lock()
+	defer failedLoginsIPMu.Unlock()
+	failedLoginsIP[ip] = append(failedLoginsIP[ip], time.Now())
+}
+
+func handleAdaptiveRiskScore(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Default mock risk scoring algorithm checking typical indicators
+	ua := r.Header.Get("User-Agent")
+	ip := r.RemoteAddr
+	timeHour := time.Now().Hour()
+
+	risk := 0.1
+	// Logins during unusual hours (e.g. 1 AM to 5 AM) increase risk
+	if timeHour >= 1 && timeHour <= 5 {
+		risk += 0.3
+	}
+	// Missing User-Agent increases risk
+	if ua == "" {
+		risk += 0.2
+	}
+	// Localhost flag risk reduction
+	if strings.HasPrefix(ip, "127.0.0.1") || strings.HasPrefix(ip, "[::1]") {
+		risk = 0.05
+	}
+
+	if risk > 1.0 {
+		risk = 1.0
+	}
+
+	requireMFA := risk >= 0.5
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(fmt.Sprintf(`{"risk_score":%.2f,"require_mfa":%t}`, risk, requireMFA)))
+}
+
+func handleCredentialStuffing(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	failedLoginsIPMu.Lock()
+	defer failedLoginsIPMu.Unlock()
+
+	stuffingIPs := []string{}
+	now := time.Now()
+
+	// Detect if any IP has had more than 3 failures in the last 60 seconds
+	for ip, attempts := range failedLoginsIP {
+		recent := 0
+		for _, t := range attempts {
+			if now.Sub(t) < 60*time.Second {
+				recent++
+			}
+		}
+		if recent >= 3 {
+			stuffingIPs = append(stuffingIPs, ip)
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"stuffing_detected": len(stuffingIPs) > 0,
+		"flagged_ips":        stuffingIPs,
+	})
+}
+
 
