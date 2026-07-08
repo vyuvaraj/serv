@@ -3,3 +3,4 @@ servgate.exe
 .build/
 dist/
 vendor/
+*_ee.go

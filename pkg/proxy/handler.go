@@ -822,17 +822,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// AI.15: Token & Cost Budget Check
-		h.apiUsageMu.Lock()
-		tokensUsed := h.apiTokenUsage[apiKeyVal]
-		costUsed := h.apiCostUsage[apiKeyVal]
-		h.apiUsageMu.Unlock()
-
-		if keyInfo.MaxTokensPerDay > 0 && tokensUsed >= keyInfo.MaxTokensPerDay {
-			WriteJSONError(w, r, "Too Many Requests: Token budget exceeded", "ERR_TOKEN_BUDGET_EXCEEDED", http.StatusTooManyRequests)
-			return
-		}
-		if keyInfo.MaxCostPerDay > 0 && costUsed >= keyInfo.MaxCostPerDay {
-			WriteJSONError(w, r, "Too Many Requests: Cost budget exceeded", "ERR_COST_BUDGET_EXCEEDED", http.StatusTooManyRequests)
+		if h.checkAIBudgets(w, r, &matchedRoute, apiKeyVal) {
 			return
 		}
 
@@ -1023,77 +1013,13 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		prompt := extractPrompt(reqBody)
 
-		// AI.19: Semantic Rate Limiting
-		if matchedRoute.SemanticRateLimit && prompt != "" {
-			h.recentPromptsMu.Lock()
-			recent := h.recentPrompts[matchedRoute.Prefix]
-			isDuplicate := false
-			tfNew := tokenize(prompt)
-			magNew := getMagnitude(tfNew)
-			if magNew > 0 {
-				for _, rPrompt := range recent {
-					tfOld := tokenize(rPrompt)
-					magOld := getMagnitude(tfOld)
-					sim := cosineSimilarity(tfNew, tfOld, magNew, magOld)
-					if sim > 0.90 {
-						isDuplicate = true
-						break
-					}
-				}
-			}
-			if isDuplicate {
-				h.recentPromptsMu.Unlock()
-				otel.EndSpan(span, fmt.Errorf("AI Semantic Rate Limiting: too semantically similar to recent request"), map[string]interface{}{})
-				WriteJSONError(w, r, "Too Many Requests: Semantic rate limit exceeded", "ERR_SEMANTIC_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
-				return
-			}
-			recent = append([]string{prompt}, recent...)
-			if len(recent) > 20 {
-				recent = recent[:20]
-			}
-			h.recentPrompts[matchedRoute.Prefix] = recent
-			h.recentPromptsMu.Unlock()
+		// Apply AI Request extensions (delegated to build-tagged helper)
+		var ok bool
+		reqBody, ok = h.applyAIRequestExtensions(w, r, &matchedRoute, span, reqBody)
+		if !ok {
+			return
 		}
-
-		// AI.16: Prompt A/B Testing & injection
-		if matchedRoute.PromptABTest != nil && prompt != "" {
-			vName, vTpl := SelectABPromptVersion(*matchedRoute.PromptABTest, int(time.Now().UnixNano()))
-			if vName != "" {
-				w.Header().Set("X-AB-Version", vName)
-				var data map[string]interface{}
-				if json.Unmarshal(reqBody, &data) == nil {
-					newSystemPrompt := strings.ReplaceAll(vTpl, "{{text}}", prompt)
-					if _, ok := data["prompt"]; ok {
-						data["prompt"] = newSystemPrompt
-					} else if msgs, ok := data["messages"].([]interface{}); ok {
-						replaced := false
-						for _, msgVal := range msgs {
-							if msgMap, ok := msgVal.(map[string]interface{}); ok {
-								if msgMap["role"] == "system" {
-									msgMap["content"] = newSystemPrompt
-									replaced = true
-									break
-								}
-							}
-						}
-						if !replaced {
-							newSystemMsg := map[string]interface{}{
-								"role":    "system",
-								"content": newSystemPrompt,
-							}
-							data["messages"] = append([]interface{}{newSystemMsg}, msgs...)
-						}
-					}
-					reqBody, _ = json.Marshal(data)
-					prompt = extractPrompt(reqBody) // update prompt
-				}
-			}
-		}
-
-		// Store original prompt in context for response scoring
-		if matchedRoute.ResponseQualityScore && prompt != "" {
-			r = r.WithContext(context.WithValue(r.Context(), "original_prompt", prompt))
-		}
+		prompt = extractPrompt(reqBody)
 
 		// 1. AI Prompt Guard
 		if matchedRoute.PromptGuard && prompt != "" {
@@ -1408,29 +1334,8 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Body.Close()
 
-		if matchedRoute.ResponseQualityScore {
-			if origPromptVal := resp.Request.Context().Value("original_prompt"); origPromptVal != nil {
-				origPrompt := origPromptVal.(string)
-				llmReply := ""
-				var respData map[string]interface{}
-				if json.Unmarshal(bodyBytes, &respData) == nil {
-					if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
-						if choice, ok := choices[0].(map[string]interface{}); ok {
-							if msg, ok := choice["message"].(map[string]interface{}); ok {
-								llmReply, _ = msg["content"].(string)
-							}
-						}
-					} else if reply, ok := respData["reply"].(string); ok {
-						llmReply = reply
-					}
-				}
-				if llmReply == "" {
-					llmReply = string(bodyBytes)
-				}
-				score := calculateGroundingScore(origPrompt, llmReply)
-				resp.Header.Set("X-Grounding-Score", fmt.Sprintf("%.2f", score))
-			}
-		}
+		// Apply AI Response extensions (delegated to build-tagged helper)
+		h.applyAIResponseExtensions(&matchedRoute, resp.Request, resp, bodyBytes)
 
 		// Run native Go Plugin Response Middleware if registered
 		if matchedRoute.GoMiddleware != "" {
@@ -1517,16 +1422,8 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	proxy.ServeHTTP(rec, r)
 
-	if matchedRoute.RequireAPIKey && rec.StatusCode < 400 {
-		apiKeyVal := r.Header.Get("X-API-Key")
-		respBytes := rec.Body()
-		totalTokens := estimateTokens(reqBody, respBytes)
-
-		h.apiUsageMu.Lock()
-		h.apiTokenUsage[apiKeyVal] += totalTokens
-		h.apiCostUsage[apiKeyVal] += float64(totalTokens) * 0.000002
-		h.apiUsageMu.Unlock()
-	}
+	// Charge tokens consumed (delegated to build-tagged helper)
+	h.chargeAITokens(&matchedRoute, r, rec, reqBody)
 
 	if len(matchedRoute.TargetsWeighted) > 1 && selectedTarget == matchedRoute.TargetsWeighted[1].URL {
 		h.canaryStatsMu.Lock()
