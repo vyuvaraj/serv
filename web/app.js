@@ -4695,7 +4695,6 @@ async function fetchCapacityPlanning() {
     analysisEl.innerHTML = `<span style="color:var(--danger);">Error loading forecast: ${escapeHtml(err.message)}</span>`;
   }
 }
-}
 window.fetchCapacityPlanning = fetchCapacityPlanning;
 
 async function fetchMeshStatus() {
