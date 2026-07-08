@@ -355,6 +355,10 @@
             <svg class="icon" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
             <span class="tab-label">Dashboards</span>
           </button>
+          <button class="tab-btn" data-tab="docs">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93z"/></svg>
+            <span class="tab-label">Documentation</span>
+          </button>
         </nav>
       </aside>
 
@@ -1386,6 +1390,34 @@
                 </div>
           </div>
         </div>
+
+        <div class="pane-grid mt-4">
+          <!-- ServCloud Managed Services -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>ServCloud Managed Services</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-cloud" onclick="fetchCloudServices()">↻ Refresh Services</button>
+            </div>
+            <p class="section-desc">Monitor live running microservices deployed in the Servverse serverless PaaS runtime.</p>
+            <div class="table-container" style="margin-top: 1rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="cloud-services-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Service Name</th>
+                    <th style="padding: 0.75rem;">Internal Port</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem;">Uptime</th>
+                    <th style="padding: 0.75rem;">Memory / CPU</th>
+                    <th style="padding: 0.75rem; text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="cloud-services-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="6" class="text-center text-muted" style="padding: 2rem;">Loading services...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- TAB: AI OBSERVATORY -->
@@ -1505,6 +1537,19 @@
               <div class="text-center text-muted" style="grid-column:1/-1; padding:2rem 0;">
                 Drag widgets here or click "+ Add Widget"
               </div>
+            </div>
+        </div>
+      </div>
+
+      <!-- TAB: DOCUMENTATION -->
+      <div class="tab-pane" id="tab-docs">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card" style="padding: 0; min-height: calc(100vh - 120px); display: flex; flex-direction: column;">
+            <div class="card-header" style="padding: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <h2>Ecosystem Documentation (ServDocs)</h2>
+            </div>
+            <div style="flex-grow: 1; width: 100%; position: relative; min-height: 600px;">
+              <iframe id="docs-frame" src="/api/proxy/docs/" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; background: #0f1120;"></iframe>
             </div>
           </div>
         </div>

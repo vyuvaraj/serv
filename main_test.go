@@ -166,6 +166,7 @@ func TestHandleStatusHealthz(t *testing.T) {
 	oldCache := *cacheUrl
 	oldRegistry := *registryUrl
 	oldCloud := *cloudUrl
+	oldDocs := *docsUrl
 	defer func() {
 		*gateUrl     = oldGate
 		*storeUrl    = oldStore
@@ -181,6 +182,7 @@ func TestHandleStatusHealthz(t *testing.T) {
 		*cacheUrl    = oldCache
 		*registryUrl = oldRegistry
 		*cloudUrl    = oldCloud
+		*docsUrl     = oldDocs
 	}()
 
 	mockSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +195,7 @@ func TestHandleStatusHealthz(t *testing.T) {
 	}))
 	defer mockSrv.Close()
 
-	// Point all 14 service URLs at the mock server
+	// Point all 15 service URLs at the mock server
 	*gateUrl     = mockSrv.URL
 	*storeUrl    = mockSrv.URL
 	*queueUrl    = mockSrv.URL
@@ -208,6 +210,7 @@ func TestHandleStatusHealthz(t *testing.T) {
 	*cacheUrl    = mockSrv.URL
 	*registryUrl = mockSrv.URL
 	*cloudUrl    = mockSrv.URL
+	*docsUrl     = mockSrv.URL
 
 	req := httptest.NewRequest("GET", "/api/status", nil)
 	w := httptest.NewRecorder()
@@ -228,8 +231,8 @@ func TestHandleStatusHealthz(t *testing.T) {
 		t.Fatal("expected components list in response")
 	}
 
-	if len(components) != 14 {
-		t.Fatalf("expected 14 components, got %d", len(components))
+	if len(components) != 15 {
+		t.Fatalf("expected 15 components, got %d", len(components))
 	}
 
 	for _, c := range components {

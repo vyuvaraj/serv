@@ -106,8 +106,12 @@ function initTabs() {
         fetchSLOTargets();
       } else if (tabId === 'deployments') {
         fetchDeployments();
+        fetchCloudServices();
       } else if (tabId === 'ai-observatory') {
         fetchAIMetrics();
+      } else if (tabId === 'docs') {
+        const frame = document.getElementById('docs-frame');
+        if (frame) frame.src = frame.src; // Force reload/refresh
       }
     });
   });
@@ -145,6 +149,7 @@ function initPolling() {
         fetchSLOTargets();
       } else if (STATE.activeTab === 'deployments') {
         fetchDeployments();
+        fetchCloudServices();
       }
     } catch (err) {
       logEvent('error', `Status polling failed: ${err.message}`);
@@ -4182,3 +4187,116 @@ async function fetchMailPreferences() {
   }
 }
 window.fetchMailPreferences = fetchMailPreferences;
+
+// --- ServCloud Console Client Integrations (UC.6 / 13.6) ---
+async function fetchCloudServices() {
+  const list = document.getElementById('cloud-services-list');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/cloud/services');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const services = await res.json();
+
+    list.innerHTML = '';
+    if (!services || services.length === 0) {
+      list.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 2rem;">No services deployed in ServCloud.</td></tr>`;
+      return;
+    }
+
+    services.forEach(svc => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.03)';
+      tr.style.transition = 'background-color 0.2s';
+
+      const statusBadge = svc.pid > 0
+        ? `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">RUNNING (PID: ${svc.pid})</span>`
+        : `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">STOPPED</span>`;
+
+      // Get uptime or duration info
+      let uptimeStr = '—';
+      if (svc.start_time) {
+        const start = new Date(svc.start_time);
+        const diffMs = new Date() - start;
+        const diffMins = Math.floor(diffMs / 60000);
+        uptimeStr = diffMins > 60
+          ? `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`
+          : `${diffMins}m`;
+      }
+
+      // Memory/CPU metrics
+      const memCpu = svc.stats
+        ? `${(svc.stats.memory_bytes / 1024 / 1024).toFixed(2)} MB / ${(svc.stats.cpu_percentage || 0).toFixed(1)}%`
+        : '—';
+
+      tr.innerHTML = `
+        <td style="padding: 0.75rem; font-weight:600; color:#fff;">${escapeHtml(svc.name)}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${svc.port}</td>
+        <td style="padding: 0.75rem;">${statusBadge}</td>
+        <td style="padding: 0.75rem;">${uptimeStr}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${memCpu}</td>
+        <td style="padding: 0.75rem; text-align: right; display: flex; gap: 0.5rem; justify-content: flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="showCloudServiceLogs('${escapeHtml(svc.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Logs</button>
+          <button class="btn btn-secondary btn-sm" onclick="updateCloudServiceEnv('${escapeHtml(svc.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Env</button>
+          <button class="btn btn-danger btn-sm" onclick="undeployCloudService('${escapeHtml(svc.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Undeploy</button>
+        </td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch cloud services:', err);
+    list.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading services: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchCloudServices = fetchCloudServices;
+
+async function showCloudServiceLogs(name) {
+  try {
+    const res = await fetch(`/api/cloud/services/${name}/logs`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const logs = await res.json();
+    alert(`Last 10 Log lines for ${name}:\n\n` + (logs && logs.length > 0 ? logs.join('\n') : 'No logs recorded.'));
+  } catch (err) {
+    alert(`Failed to fetch logs: ${err.message}`);
+  }
+}
+window.showCloudServiceLogs = showCloudServiceLogs;
+
+async function updateCloudServiceEnv(name) {
+  const jsonStr = prompt(`Enter environment variables for ${name} in JSON format (e.g. {"PORT_OFFSET": "100", "DEBUG": "true"}):`, '{}');
+  if (jsonStr === null) return;
+
+  try {
+    const env = JSON.parse(jsonStr);
+    const res = await fetch(`/api/cloud/services/${name}/env`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(env)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Environment variables updated, rolling deployment triggered for ${name}!`);
+    fetchCloudServices();
+  } catch (err) {
+    alert(`Error updating environment: ${err.message}`);
+  }
+}
+window.updateCloudServiceEnv = updateCloudServiceEnv;
+
+async function undeployCloudService(name) {
+  if (!confirm(`Are you sure you want to undeploy service "${name}"? This stops the running instance and frees resources.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cloud/services/${name}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Undeployed service ${name} successfully.`);
+    fetchCloudServices();
+  } catch (err) {
+    alert(`Undeploy failed: ${err.message}`);
+  }
+}
+window.undeployCloudService = undeployCloudService;
+

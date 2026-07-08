@@ -55,6 +55,7 @@ var (
 	cacheUrl    = flag.String("cache-url", "http://localhost:8086", "ServCache base URL")
 	registryUrl = flag.String("registry-url", "http://localhost:8088", "ServRegistry base URL")
 	cloudUrl    = flag.String("cloud-url", "http://localhost:8085", "ServCloud base URL")
+	docsUrl     = flag.String("docs-url", "http://localhost:8084", "ServDocs base URL")
 	authToken   = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	gateConfig = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 )
@@ -77,6 +78,7 @@ type ServDiscovery struct {
 	Cache        string `json:"cache"`         // ServCache base URL
 	Registry     string `json:"registry"`      // ServRegistry base URL
 	Cloud        string `json:"cloud"`         // ServCloud base URL
+	Docs         string `json:"docs"`          // ServDocs base URL
 	ConsolePort  int    `json:"console_port"`  // Override listen port
 	JWTSecret    string `json:"jwt_secret"`   // Shared JWT signing secret
 	OTLPEndpoint string `json:"otlp_endpoint"` // Shared OpenTelemetry collector
@@ -105,6 +107,7 @@ func loadDiscovery() ServDiscovery {
 		Cache:        *cacheUrl,
 		Registry:     *registryUrl,
 		Cloud:        *cloudUrl,
+		Docs:         *docsUrl,
 		ConsolePort:  *port,
 		AuthToken:    *authToken,
 		GateConfig:   *gateConfig,
@@ -156,6 +159,7 @@ func loadDiscovery() ServDiscovery {
 	if manifest.Cache != "" { d.Cache = manifest.Cache }
 	if manifest.Registry != "" { d.Registry = manifest.Registry }
 	if manifest.Cloud != "" { d.Cloud = manifest.Cloud }
+	if manifest.Docs != "" { d.Docs = manifest.Docs }
 
 	return d
 }
@@ -216,10 +220,11 @@ func main() {
 	*cacheUrl    = activeDiscovery.Cache
 	*registryUrl = activeDiscovery.Registry
 	*cloudUrl    = activeDiscovery.Cloud
+	*docsUrl     = activeDiscovery.Docs
 	*port        = activeDiscovery.ConsolePort
 	*authToken   = activeDiscovery.AuthToken
 	*gateConfig  = activeDiscovery.GateConfig
-
+ 
 	log.Printf("[discovery] ServGate     → %s", *gateUrl)
 	log.Printf("[discovery] ServStore    → %s", *storeUrl)
 	log.Printf("[discovery] ServQueue    → %s", *queueUrl)
@@ -234,6 +239,7 @@ func main() {
 	log.Printf("[discovery] ServCache    → %s", *cacheUrl)
 	log.Printf("[discovery] ServRegistry → %s", *registryUrl)
 	log.Printf("[discovery] ServCloud    → %s", *cloudUrl)
+	log.Printf("[discovery] ServDocs     → %s", *docsUrl)
 	if activeDiscovery.OTLPEndpoint != "" {
 		log.Printf("[discovery] OTLP      → %s", activeDiscovery.OTLPEndpoint)
 	}
@@ -304,7 +310,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Invalid cloud-url: %v", err)
 	}
-
+	docsU, err := url.Parse(*docsUrl)
+	if err != nil {
+		log.Fatalf("Invalid docs-url: %v", err)
+	}
+ 
 	// Create reverse proxies
 	gateProxy := httputil.NewSingleHostReverseProxy(gURL)
 	storeProxy := httputil.NewSingleHostReverseProxy(sURL)
@@ -319,7 +329,8 @@ func main() {
 	cacheProxy    := httputil.NewSingleHostReverseProxy(cacheU)
 	registryProxy := httputil.NewSingleHostReverseProxy(registryU)
 	cloudProxy    := httputil.NewSingleHostReverseProxy(cloudU)
-
+	docsProxy     := httputil.NewSingleHostReverseProxy(docsU)
+ 
 	// Adjust Director to rewrite request path and set Authorization headers
 	proxy.ConfigureProxyDirector(gateProxy, gURL, "/api/proxy/gate", *authToken, getProxyActionName, addAuditLog)
 	proxy.ConfigureProxyDirector(storeProxy, sURL, "/api/proxy/store", "", getProxyActionName, addAuditLog)
@@ -334,6 +345,7 @@ func main() {
 	proxy.ConfigureProxyDirector(cacheProxy, cacheU, "/api/proxy/cache", "", getProxyActionName, addAuditLog)
 	proxy.ConfigureProxyDirector(registryProxy, registryU, "/api/proxy/registry", "", getProxyActionName, addAuditLog)
 	proxy.ConfigureProxyDirector(cloudProxy, cloudU, "/api/proxy/cloud", "", getProxyActionName, addAuditLog)
+	proxy.ConfigureProxyDirector(docsProxy, docsU, "/api/proxy/docs", "", getProxyActionName, addAuditLog)
 
 	mux := http.NewServeMux()
 
@@ -410,6 +422,7 @@ func main() {
 	mux.Handle("/api/proxy/cache/",    authorizeConsole(cacheProxy.ServeHTTP))
 	mux.Handle("/api/proxy/registry/", authorizeConsole(registryProxy.ServeHTTP))
 	mux.Handle("/api/proxy/cloud/",    authorizeConsole(cloudProxy.ServeHTTP))
+	mux.Handle("/api/proxy/docs/",     authorizeConsole(docsProxy.ServeHTTP))
 
 	// Serve embedded web assets (falls back to ./web on disk if needed for dev)
 	webFS, _ := fs.Sub(webAssets, "web")
@@ -507,6 +520,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 		checkStatus("ServCache", *cacheUrl),
 		checkStatus("ServRegistry", *registryUrl),
 		checkStatus("ServCloud", *cloudUrl),
+		checkStatus("ServDocs", *docsUrl),
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{
@@ -2079,6 +2093,7 @@ func startAlertMonitoring(ctx context.Context) {
 				{"ServCache", *cacheUrl},
 				{"ServRegistry", *registryUrl},
 				{"ServCloud", *cloudUrl},
+				{"ServDocs", *docsUrl},
 			}
 
 			for _, c := range components {
