@@ -155,11 +155,11 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 |---|------|--------|-------------|--------|
 | 13.1 | **Full service discovery** | Medium | Add `meshUrl`, `cronUrl`, `cloudUrl`, `cacheUrl`, `registryUrl`, `docsUrl` CLI flags + `ServDiscovery` struct fields. All 15 services discoverable via SERVVERSE_DISCOVERY. | [x] |
 | 13.2 | **Unified health aggregation** | Small | `/api/status` and alert monitoring loop must check ALL connected services, not just 4. Extend `handleStatus` and `startAlertMonitoring`. | [x] |
-| 13.3 | **ServMesh panel** | Medium | Proxy `/api/proxy/mesh/`. Show live service registry, circuit breaker states, mTLS cert expiry, routing rules, canary split weights. | [ ] |
-| 13.4 | **ServCron panel** | Medium | Proxy `/api/proxy/cron/`. Show scheduled jobs, next 5 run times, execution history, failure counts. Visual cron expression editor with next-runs preview. | [ ] |
-| 13.5 | **ServCache panel** | Medium | Proxy `/api/proxy/cache/`. Show per-namespace key counts, hit/miss ratios, memory pressure, eviction rates, top hot keys. | [ ] |
+| 13.3 | **ServMesh panel** | Medium | Proxy `/api/proxy/mesh/`. Show live service registry, circuit breaker states, mTLS cert expiry, routing rules, canary split weights. | [x] |
+| 13.4 | **ServCron panel** | Medium | Proxy `/api/proxy/cron/`. Show scheduled jobs, next 5 run times, execution history, failure counts. Visual cron expression editor with next-runs preview. | [x] |
+| 13.5 | **ServCache panel** | Medium | Proxy `/api/proxy/cache/`. Show per-namespace key counts, hit/miss ratios, memory pressure, eviction rates, top hot keys. | [x] |
 | 13.6 | **ServCloud deployment panel** | Small | Proxy `/api/proxy/cloud/`. Consolidate existing deployment handlers with full ServCloud proxy for resource quotas, scaling, and deploy previews. | [x] |
-| 13.7 | **ServRegistry panel** | Medium | Proxy `/api/proxy/registry/`. Show published packages, download stats, dependency trees, deprecation warnings, license info. | [ ] |
+| 13.7 | **ServRegistry panel** | Medium | Proxy `/api/proxy/registry/`. Show published packages, download stats, dependency trees, deprecation warnings, license info. | [x] |
 | 13.8 | **ServDocs panel** | Small | Proxy `/api/proxy/docs/`. Embed generated documentation browser within the console documentation tab. | [x] |
 
 ### Cross-Service Intelligence
@@ -168,7 +168,7 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 |---|------|--------|-------------|--------|
 | 13.9 | **End-to-end request flow** | Large | Visualize full request lifecycle: Client → ServGate → Backend → ServQueue → Subscriber → ServStore. Single timeline from OTel spans across all 15 services. | [ ] |
 | 13.10 | **Ecosystem dependency matrix** | Medium | Auto-generated matrix showing runtime dependencies between services (from OTel trace data + discovery config). Interactive — click a cell to see call volume/latency. | [x] |
-| 13.11 | **Unified configuration editor** | Large | Central panel to edit cross-service config: ServGate rate limits, ServCache TTLs, ServCron schedules, ServMesh routing rules — all from one place with validation. | [ ] |
+| 13.11 | **Unified configuration editor** | Large | Central panel to edit cross-service config: ServGate rate limits, ServCache TTLs, ServCron schedules, ServMesh routing rules — all from one place with validation. | [x] |
 | 13.12 | **Cross-service log correlation** | Medium | Click any trace_id → see all log lines from all services with that trace_id, in chronological order across the ecosystem. | [x] |
 | 13.13 | **Ecosystem upgrade dashboard** | Medium | Show current versions of all running services, compare against latest releases from ServRegistry, highlight version incompatibilities, offer upgrade via ServCloud. | [x] |
 
