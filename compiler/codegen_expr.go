@@ -171,6 +171,8 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.AIEmbed", nil
 			case "chat":
 				return "runtime.AIChat", nil
+			case "stream":
+				return "runtime.AIStream", nil
 			}
 		}
 

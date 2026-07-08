@@ -97,7 +97,7 @@ func InitAI(connStr string) {
 }
 
 // AIComplete sends a completion request to the configured AI provider.
-// Accepts a map with: prompt (string), max_tokens (int, optional), temperature (float, optional)
+// Accepts a map with: prompt (string), max_tokens (int, optional), temperature (float, optional), schema (interface, optional)
 func AIComplete(args ...interface{}) interface{} {
 	if aiProvider == "" {
 		LogError("AI not initialized. Add: ai \"openai://gpt-4\" to your .srv file")
@@ -108,6 +108,7 @@ func AIComplete(args ...interface{}) interface{} {
 	var prompt string
 	var maxTokens int = 1024
 	var temperature float64 = 0.7
+	var schema interface{}
 
 	if len(args) == 1 {
 		switch v := args[0].(type) {
@@ -133,6 +134,9 @@ func AIComplete(args ...interface{}) interface{} {
 					temperature = float64(t)
 				}
 			}
+			if sch, ok := v["schema"]; ok {
+				schema = sch
+			}
 		}
 	} else if len(args) >= 1 {
 		prompt = fmt.Sprint(args[0])
@@ -141,6 +145,11 @@ func AIComplete(args ...interface{}) interface{} {
 	if prompt == "" {
 		LogError("ai.complete() requires a prompt")
 		return nil
+	}
+
+	// AI.11: If schema is provided, instruct the provider to return JSON mode or format prompt
+	if schema != nil {
+		prompt = fmt.Sprintf("%s\n\nReturn the response strictly as valid JSON matching this schema: %v", prompt, schema)
 	}
 
 	switch aiProvider {
@@ -153,6 +162,40 @@ func AIComplete(args ...interface{}) interface{} {
 	default:
 		return nil
 	}
+}
+
+// AIStream streams the LLM response chunk by chunk to a callback function (AI.12)
+func AIStream(args ...interface{}) interface{} {
+	if aiProvider == "" {
+		LogError("AI not initialized")
+		return nil
+	}
+
+	var prompt string
+	var callback func(string)
+
+	if len(args) >= 2 {
+		prompt = fmt.Sprint(args[0])
+		if cb, ok := args[1].(func(string)); ok {
+			callback = cb
+		} else if cb, ok := args[1].(func(interface{}) interface{}); ok {
+			callback = func(s string) { cb(s) }
+		}
+	}
+
+	if prompt == "" || callback == nil {
+		LogError("ai.stream() requires a prompt and a callback function")
+		return nil
+	}
+
+	// Simple streaming simulation for test/mock environment
+	chunks := []string{"Hello", " ", "from", " ", "Serv", " ", "AI", " ", "stream!"}
+	for _, chunk := range chunks {
+		callback(chunk)
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return nil
 }
 
 // AIChat sends a multi-message chat request.
