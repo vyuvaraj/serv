@@ -241,3 +241,91 @@ func checkNullSafety(stmt Statement) []Diagnostic {
 
 	return diags
 }
+
+// analyzeInterfaceSatisfaction checks compile-time verification that structs implement declared interfaces (LANG.8)
+func analyzeInterfaceSatisfaction(program *Program) []Diagnostic {
+	var diags []Diagnostic
+
+	// 1. Gather all interfaces
+	interfaces := make(map[string]*InterfaceDecl)
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *InterfaceDecl:
+			interfaces[s.Name] = s
+		case *ExportStmt:
+			if inner, ok := s.Inner.(*InterfaceDecl); ok {
+				interfaces[inner.Name] = inner
+			}
+		}
+	}
+
+	// 2. Gather all structs
+	structs := make(map[string]*StructDecl)
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *StructDecl:
+			structs[s.Name] = s
+		case *ExportStmt:
+			if inner, ok := s.Inner.(*StructDecl); ok {
+				structs[inner.Name] = inner
+			}
+		}
+	}
+
+	// 3. Gather all methods for each struct receiver
+	methods := make(map[string]map[string]*MethodDecl)
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *MethodDecl:
+			if _, exists := methods[s.TypeName]; !exists {
+				methods[s.TypeName] = make(map[string]*MethodDecl)
+			}
+			methods[s.TypeName][s.Name] = s
+		case *ExportStmt:
+			if inner, ok := s.Inner.(*MethodDecl); ok {
+				if _, exists := methods[inner.TypeName]; !exists {
+					methods[inner.TypeName] = make(map[string]*MethodDecl)
+				}
+				methods[inner.TypeName][inner.Name] = inner
+			}
+		}
+	}
+
+	// Check assignments: let x: Interface = StructLiteral
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *LetStmt:
+			if s.Type != "" {
+				if iface, isIface := interfaces[s.Type]; isIface {
+					if structLit, isStructLit := s.Value.(*StructLiteral); isStructLit {
+						strName := structLit.TypeName
+						structMethods := methods[strName]
+						for _, m := range iface.Methods {
+							mDecl, hasMethod := structMethods[m.Name]
+							if !hasMethod {
+								diags = append(diags, Diagnostic{
+									Line:     s.Token.Line,
+									Col:      s.Token.Col,
+									Severity: "error",
+									Message:  fmt.Sprintf("struct '%s' does not implement interface '%s' (missing method '%s')", strName, iface.Name, m.Name),
+								})
+							} else {
+								if len(mDecl.Params) != len(m.Params) {
+									diags = append(diags, Diagnostic{
+										Line:     s.Token.Line,
+										Col:      s.Token.Col,
+										Severity: "error",
+										Message:  fmt.Sprintf("method '%s.%s' signature mismatch: expected %d parameters, got %d", strName, m.Name, len(m.Params), len(mDecl.Params)),
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return diags
+}
+

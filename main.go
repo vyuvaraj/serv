@@ -323,6 +323,9 @@ func main() {
 	case "trace":
 		runTraceCmd()
 
+	case "playground":
+		runPlayground()
+
 	case "queue":
 		subcmd := ""
 		if len(os.Args) >= 3 {
@@ -419,5 +422,6 @@ func printUsage() {
 	fmt.Println("  serv generate --from-openapi <spec.yaml> [-o <out.srv>]  Generate .srv route stubs from OpenAPI spec")
 	fmt.Println("  serv observability init                                   Create .serv/observability.yaml template")
 	fmt.Println("  serv observability apply [--dry-run]                     Provision alert rules, SLOs, and dashboards")
+	fmt.Println("  serv playground [--port <p>]                             Start the hosted browser-based editor")
 	fmt.Println("  serv lsp-action --file <file> --line <line> [--type <type>] Resolve LSP code action recommendation")
 }

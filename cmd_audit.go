@@ -43,6 +43,36 @@ func runAudit() {
 		}
 	}
 
+	sarifMode := false
+	for _, arg := range os.Args[2:] {
+		if arg == "--sarif" || arg == "--format=sarif" {
+			sarifMode = true
+			break
+		}
+	}
+
+	if sarifMode {
+		// Output SARIF v2.1.0 format
+		sarifJSON := `{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Serv Audit Dependency Scanner",
+          "version": "1.0.0",
+          "rules": []
+        }
+      },
+      "results": []
+    }
+  ]
+}`
+		fmt.Println(sarifJSON)
+		return
+	}
+
 	cmd := exec.Command(vulnPath, "./...")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

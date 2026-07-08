@@ -196,10 +196,8 @@ func (p *Parser) parseTypeAliasStatement() Statement {
 	if !p.expectPeek(TOKEN_ASSIGN) {
 		return nil
 	}
-	if !p.expectPeek(TOKEN_IDENT) {
-		return nil
-	}
-	stmt.BaseType = p.curToken.Literal
+	p.nextToken()
+	stmt.BaseType = p.parseTypeAnnotation()
 	return stmt
 }
 

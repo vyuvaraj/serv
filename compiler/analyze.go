@@ -52,6 +52,12 @@ func Analyze(program *Program) []Diagnostic {
 	// ARCH.8: Bounded context domain boundaries checks
 	diags = append(diags, analyzeDomainBoundaries(program)...)
 
+	// LANG.8: Interface satisfaction checking
+	diags = append(diags, analyzeInterfaceSatisfaction(program)...)
+
+	// LANG.3: Compiler plugin system
+	diags = append(diags, LoadAndRunPlugins(program, ".")...)
+
 	for _, stmt := range program.Statements {
 		diags = append(diags, analyzeStatement(stmt, program)...)
 	}
