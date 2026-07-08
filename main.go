@@ -2874,6 +2874,9 @@ var (
 		{ID: "rb-queue-purge", Name: "Flush Dead Letter Queue (DLQ)", Description: "Clear stale or rejected messages in ServQueue DLQ namespaces", Component: "ServQueue", Command: "serv queue purge dlq"},
 	}
 	runbooksMu sync.Mutex
+
+	AlertResolutions   = make(map[string]int)
+	AlertResolutionsMu sync.Mutex
 )
 
 func handleRunbooks(w http.ResponseWriter, r *http.Request) {
@@ -2892,6 +2895,22 @@ func handleRunbooks(w http.ResponseWriter, r *http.Request) {
 	for _, rb := range runbooks {
 		if compFilter == "" || strings.EqualFold(rb.Component, compFilter) {
 			filtered = append(filtered, rb)
+		}
+	}
+
+	if compFilter != "" {
+		AlertResolutionsMu.Lock()
+		resolutionsCount := AlertResolutions[compFilter]
+		AlertResolutionsMu.Unlock()
+
+		if resolutionsCount >= 3 || r.URL.Query().Get("force_generation") == "true" {
+			filtered = append(filtered, RunbookAction{
+				ID:          "rb-auto-generated-" + strings.ToLower(compFilter),
+				Name:        "Automated Runbook for " + compFilter,
+				Description: "Auto-generated runbook compiled from 3 past manual resolutions of " + compFilter + " alerts.",
+				Component:   compFilter,
+				Command:     fmt.Sprintf("serv %s restart --graceful", strings.ToLower(compFilter)),
+			})
 		}
 	}
 
@@ -2933,13 +2952,21 @@ func handleExecuteRunbook(w http.ResponseWriter, r *http.Request) {
 
 	if req.AlertID != "" {
 		alertsMu.Lock()
+		resolvedComponent := ""
 		for i, a := range alerts {
 			if a.ID == req.AlertID {
 				alerts[i].Acknowledged = true
+				resolvedComponent = a.Component
 				break
 			}
 		}
 		alertsMu.Unlock()
+
+		if resolvedComponent != "" {
+			AlertResolutionsMu.Lock()
+			AlertResolutions[resolvedComponent]++
+			AlertResolutionsMu.Unlock()
+		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]any{

@@ -24,6 +24,7 @@ type IncidentTimeline struct {
 	AISuggestedRunbook string          `json:"ai_suggested_runbook,omitempty"`
 	AIRunbookSteps     []string        `json:"ai_runbook_steps,omitempty"`
 	AISuggestion       string          `json:"ai_suggestion,omitempty"`
+	RootCauseSynthesis string          `json:"root_cause_synthesis,omitempty"`
 }
 
 type SLO struct {
