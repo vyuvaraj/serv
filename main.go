@@ -317,6 +317,9 @@ func main() {
 	case "tunnel":
 		runTunnelCmd()
 
+	case "config":
+		runConfigCmd()
+
 	case "trace":
 		runTraceCmd()
 
@@ -400,7 +403,9 @@ func printUsage() {
 	fmt.Println("  serv deploy --target <target> [file.srv]   Generate deploy config (fly, railway, render, k8s, docker)")
 	fmt.Println("  serv monitor [port-or-url]                 Terminal htop-style live dashboard for a running service")
 	fmt.Println("  serv tunnel <port> [options]               Expose a local service via the ServTunnel relay server")
-	fmt.Println("  serv dev [file.srv] [--services all]       Start full dev environment (infra + hot-reload)")
+	fmt.Println("  serv dev [file.srv] [--dashboard]         Start full dev environment (with optional terminal TUI)")
+	fmt.Println("  serv config init                          Create starter .serv/config.yaml")
+	fmt.Println("  serv config propagate [--dry-run]         Push configuration settings to active services")
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
 	fmt.Println("  serv doctor                                Run compatibility and health checks on all Servverse services")
 	fmt.Println("  serv status                                Print live health, uptime, and latency stats for all services")

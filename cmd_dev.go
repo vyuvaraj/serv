@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,6 +36,7 @@ func runDevCmd() {
 	servicesFlag := devCmd.String("services", "store,queue,cache,gate", "Comma-separated services to start (store,queue,cache,cron,gate,trace,all)")
 	portFlag := devCmd.String("port", "8080", "Port for the user's .srv service")
 	noConsoleFlag := devCmd.Bool("no-console", false, "Skip opening ServConsole dashboard")
+	dashboardFlag := devCmd.Bool("dashboard", false, "Show live terminal TUI dashboard with service health and stats")
 	if err := devCmd.Parse(os.Args[2:]); err != nil {
 		fmt.Printf("Error parsing arguments: %v\n", err)
 		os.Exit(1)
@@ -113,6 +115,9 @@ func runDevCmd() {
 	fmt.Printf("  Press Ctrl+C to stop all services\n\n")
 
 	// Run the user service with hot reload
+	if *dashboardFlag {
+		go startDevDashboard(procs)
+	}
 	startWorkspaceWatcher(procs)
 	wg.Add(1)
 	go func() {
@@ -305,3 +310,54 @@ func startWorkspaceWatcher(procs []*devProcess) {
 		}
 	}()
 }
+
+// startDevDashboard runs a periodic terminal refresh showing live service health,
+// implementing the DX.26 k9s-style terminal dashboard for 'serv dev --dashboard'.
+func startDevDashboard(procs []*devProcess) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	clearLine := "\033[2J\033[H" // ANSI clear screen + move to top
+
+	for range ticker.C {
+		timestamp := time.Now().Format("15:04:05")
+
+		// Build status board
+		var sb strings.Builder
+		sb.WriteString(clearLine)
+		sb.WriteString("┌─────────────────────────────────────────────────────────────┐\n")
+		sb.WriteString(fmt.Sprintf("│  ▲ Serv Dev Dashboard                         %s  │\n", timestamp))
+		sb.WriteString("├──────────────────┬──────────┬──────────┬────────────────────┤\n")
+		sb.WriteString("│ SERVICE          │ PORT     │ STATUS   │ HEALTH             │\n")
+		sb.WriteString("├──────────────────┼──────────┼──────────┼────────────────────┤\n")
+
+		for _, proc := range procs {
+			running := proc.cmd != nil && proc.cmd.Process != nil
+			healthy := false
+			if running {
+				healthy = checkDevHealth(proc.port)
+			}
+
+			status := "  ●  DOWN"
+			if running && healthy {
+				status = "  ●  UP  "
+			} else if running {
+				status = "  ●  STARTING"
+			}
+
+			healthStr := "─"
+			if healthy {
+				healthStr = "OK"
+			}
+
+			sb.WriteString(fmt.Sprintf("│ %-16s │ %-8s │ %-8s │ %-18s │\n",
+				proc.name, ":"+proc.port, status, healthStr))
+		}
+
+		sb.WriteString("└──────────────────┴──────────┴──────────┴────────────────────┘\n")
+		sb.WriteString("  Press Ctrl+C to stop all services\n")
+
+		fmt.Print(sb.String())
+	}
+}
+
