@@ -87,13 +87,16 @@ type Route struct {
 	GoMiddleware       string            `json:"go_middleware,omitempty"`       // Name of native Go middleware plugin
 	RequireAPIKey      bool              `json:"require_api_key,omitempty"`     // Require client API key
 	AllowedTenants     []string          `json:"allowed_tenants,omitempty"`     // Tenants allowed on this route
-	RequestTransform   map[string]string `json:"request_transform,omitempty"`   // Declarative request JSON transformations
-	ResponseTransform  map[string]string `json:"response_transform,omitempty"`  // Declarative response JSON transformations
-	GraphQLFederation  map[string]string `json:"graphql_federation,omitempty"`  // GraphQL Query-to-backend routing mappings
-	MCPEnabled         bool              `json:"mcp_enabled,omitempty"`         // Enable MCP tool call parsing and tracking
-	LLMRouting         *LLMRoutingConfig `json:"llm_routing,omitempty"`         // LLM primary and fallback cost-routing configuration
-	WASMSplit          *WASMSplitConfig  `json:"wasm_split,omitempty"`          // A/B test split for WASM middlewares
-	MaxBodySize        int64             `json:"max_body_size,omitempty"`       // Max request body size in bytes
+	RequestTransform      map[string]string `json:"request_transform,omitempty"`   // Declarative request JSON transformations
+	ResponseTransform     map[string]string `json:"response_transform,omitempty"`  // Declarative response JSON transformations
+	GraphQLFederation     map[string]string `json:"graphql_federation,omitempty"`  // GraphQL Query-to-backend routing mappings
+	MCPEnabled            bool              `json:"mcp_enabled,omitempty"`         // Enable MCP tool call parsing and tracking
+	LLMRouting            *LLMRoutingConfig `json:"llm_routing,omitempty"`         // LLM primary and fallback cost-routing configuration
+	WASMSplit             *WASMSplitConfig  `json:"wasm_split,omitempty"`          // A/B test split for WASM middlewares
+	MaxBodySize           int64             `json:"max_body_size,omitempty"`       // Max request body size in bytes
+	PromptABTest          *PromptABTest     `json:"prompt_ab_test,omitempty"`      // AI Prompt A/B Test Config
+	ResponseQualityScore  bool              `json:"response_quality_score,omitempty"` // AI Response Quality Scoring
+	SemanticRateLimit     bool              `json:"semantic_rate_limit,omitempty"`   // AI Semantic Rate Limiting
 }
 
 type MetricsTracker struct {
@@ -208,9 +211,14 @@ type GatewayHandler struct {
 	transportsMu   sync.RWMutex
 	limiters       map[string]*BackpressureLimiter // route prefix -> backpressure limiter
 	limitersMu     sync.RWMutex
-	apiKeys        map[string]APIKey
-	apiKeysMu      sync.RWMutex
-	aiBilling      *AIBillingTracker
+	apiKeys          map[string]APIKey
+	apiKeysMu        sync.RWMutex
+	aiBilling        *AIBillingTracker
+	apiTokenUsage    map[string]int
+	apiCostUsage     map[string]float64
+	apiUsageMu       sync.Mutex
+	recentPrompts    map[string][]string
+	recentPromptsMu  sync.Mutex
 
 	// PS.3: Backpressure Routing
 	targetLoad     map[string]int
@@ -340,6 +348,9 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		limiters:        limiters,
 		apiKeys:         make(map[string]APIKey),
 		aiBilling:       NewAIBillingTracker(),
+		apiTokenUsage:    make(map[string]int),
+		apiCostUsage:     make(map[string]float64),
+		recentPrompts:    make(map[string][]string),
 		targetLoad:      make(map[string]int),
 		revokedSessions: make(map[string]time.Time),
 		canaryStats:     make(map[string]*canaryStatsRecord),
@@ -810,6 +821,21 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// AI.15: Token & Cost Budget Check
+		h.apiUsageMu.Lock()
+		tokensUsed := h.apiTokenUsage[apiKeyVal]
+		costUsed := h.apiCostUsage[apiKeyVal]
+		h.apiUsageMu.Unlock()
+
+		if keyInfo.MaxTokensPerDay > 0 && tokensUsed >= keyInfo.MaxTokensPerDay {
+			WriteJSONError(w, r, "Too Many Requests: Token budget exceeded", "ERR_TOKEN_BUDGET_EXCEEDED", http.StatusTooManyRequests)
+			return
+		}
+		if keyInfo.MaxCostPerDay > 0 && costUsed >= keyInfo.MaxCostPerDay {
+			WriteJSONError(w, r, "Too Many Requests: Cost budget exceeded", "ERR_COST_BUDGET_EXCEEDED", http.StatusTooManyRequests)
+			return
+		}
+
 		// Inject tenant into request context
 		r = r.WithContext(context.WithValue(r.Context(), "tenant", keyInfo.Tenant))
 	}
@@ -991,11 +1017,83 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Read request body to apply AI checks
 	var reqBody []byte
-	if matchedRoute.PromptGuard || matchedRoute.PiiRedact || matchedRoute.SemanticCache {
+	if matchedRoute.PromptGuard || matchedRoute.PiiRedact || matchedRoute.SemanticCache || matchedRoute.SemanticRateLimit || matchedRoute.PromptABTest != nil || matchedRoute.ResponseQualityScore {
 		reqBody, _ = io.ReadAll(r.Body)
 		r.Body.Close()
 
 		prompt := extractPrompt(reqBody)
+
+		// AI.19: Semantic Rate Limiting
+		if matchedRoute.SemanticRateLimit && prompt != "" {
+			h.recentPromptsMu.Lock()
+			recent := h.recentPrompts[matchedRoute.Prefix]
+			isDuplicate := false
+			tfNew := tokenize(prompt)
+			magNew := getMagnitude(tfNew)
+			if magNew > 0 {
+				for _, rPrompt := range recent {
+					tfOld := tokenize(rPrompt)
+					magOld := getMagnitude(tfOld)
+					sim := cosineSimilarity(tfNew, tfOld, magNew, magOld)
+					if sim > 0.90 {
+						isDuplicate = true
+						break
+					}
+				}
+			}
+			if isDuplicate {
+				h.recentPromptsMu.Unlock()
+				otel.EndSpan(span, fmt.Errorf("AI Semantic Rate Limiting: too semantically similar to recent request"), map[string]interface{}{})
+				WriteJSONError(w, r, "Too Many Requests: Semantic rate limit exceeded", "ERR_SEMANTIC_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
+				return
+			}
+			recent = append([]string{prompt}, recent...)
+			if len(recent) > 20 {
+				recent = recent[:20]
+			}
+			h.recentPrompts[matchedRoute.Prefix] = recent
+			h.recentPromptsMu.Unlock()
+		}
+
+		// AI.16: Prompt A/B Testing & injection
+		if matchedRoute.PromptABTest != nil && prompt != "" {
+			vName, vTpl := SelectABPromptVersion(*matchedRoute.PromptABTest, int(time.Now().UnixNano()))
+			if vName != "" {
+				w.Header().Set("X-AB-Version", vName)
+				var data map[string]interface{}
+				if json.Unmarshal(reqBody, &data) == nil {
+					newSystemPrompt := strings.ReplaceAll(vTpl, "{{text}}", prompt)
+					if _, ok := data["prompt"]; ok {
+						data["prompt"] = newSystemPrompt
+					} else if msgs, ok := data["messages"].([]interface{}); ok {
+						replaced := false
+						for _, msgVal := range msgs {
+							if msgMap, ok := msgVal.(map[string]interface{}); ok {
+								if msgMap["role"] == "system" {
+									msgMap["content"] = newSystemPrompt
+									replaced = true
+									break
+								}
+							}
+						}
+						if !replaced {
+							newSystemMsg := map[string]interface{}{
+								"role":    "system",
+								"content": newSystemPrompt,
+							}
+							data["messages"] = append([]interface{}{newSystemMsg}, msgs...)
+						}
+					}
+					reqBody, _ = json.Marshal(data)
+					prompt = extractPrompt(reqBody) // update prompt
+				}
+			}
+		}
+
+		// Store original prompt in context for response scoring
+		if matchedRoute.ResponseQualityScore && prompt != "" {
+			r = r.WithContext(context.WithValue(r.Context(), "original_prompt", prompt))
+		}
 
 		// 1. AI Prompt Guard
 		if matchedRoute.PromptGuard && prompt != "" {
@@ -1267,7 +1365,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine if we need to capture the response body (for caching or access logging)
-	needCapture := routeCache != nil && cacheKey != ""
+	needCapture := (routeCache != nil && cacheKey != "") || matchedRoute.RequireAPIKey || matchedRoute.ResponseQualityScore
 	rec := NewStatusRecordingResponseWriter(w, needCapture)
 
 	// Add canary target header for observability
@@ -1309,6 +1407,30 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("failed to read response body: %w", err)
 		}
 		resp.Body.Close()
+
+		if matchedRoute.ResponseQualityScore {
+			if origPromptVal := resp.Request.Context().Value("original_prompt"); origPromptVal != nil {
+				origPrompt := origPromptVal.(string)
+				llmReply := ""
+				var respData map[string]interface{}
+				if json.Unmarshal(bodyBytes, &respData) == nil {
+					if choices, ok := respData["choices"].([]interface{}); ok && len(choices) > 0 {
+						if choice, ok := choices[0].(map[string]interface{}); ok {
+							if msg, ok := choice["message"].(map[string]interface{}); ok {
+								llmReply, _ = msg["content"].(string)
+							}
+						}
+					} else if reply, ok := respData["reply"].(string); ok {
+						llmReply = reply
+					}
+				}
+				if llmReply == "" {
+					llmReply = string(bodyBytes)
+				}
+				score := calculateGroundingScore(origPrompt, llmReply)
+				resp.Header.Set("X-Grounding-Score", fmt.Sprintf("%.2f", score))
+			}
+		}
 
 		// Run native Go Plugin Response Middleware if registered
 		if matchedRoute.GoMiddleware != "" {
@@ -1395,6 +1517,17 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	proxy.ServeHTTP(rec, r)
 
+	if matchedRoute.RequireAPIKey && rec.StatusCode < 400 {
+		apiKeyVal := r.Header.Get("X-API-Key")
+		respBytes := rec.Body()
+		totalTokens := estimateTokens(reqBody, respBytes)
+
+		h.apiUsageMu.Lock()
+		h.apiTokenUsage[apiKeyVal] += totalTokens
+		h.apiCostUsage[apiKeyVal] += float64(totalTokens) * 0.000002
+		h.apiUsageMu.Unlock()
+	}
+
 	if len(matchedRoute.TargetsWeighted) > 1 && selectedTarget == matchedRoute.TargetsWeighted[1].URL {
 		h.canaryStatsMu.Lock()
 		stats, ok := h.canaryStats[selectedTarget]
@@ -1414,7 +1547,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store response in cache if applicable
-	if needCapture && rec.StatusCode >= 200 && rec.StatusCode < 300 {
+	if routeCache != nil && cacheKey != "" && rec.StatusCode >= 200 && rec.StatusCode < 300 {
 		routeCache.Set(cacheKey, rec.Body(), rec.StatusCode, rec.CapturedHeaders())
 	}
 

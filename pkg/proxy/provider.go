@@ -15,10 +15,12 @@ import (
 )
 
 type APIKey struct {
-	Key           string   `json:"key"`
-	Tenant        string   `json:"tenant"`
-	RateLimitRPM  int      `json:"rate_limit_rpm"`
-	AllowedRoutes []string `json:"allowed_routes"`
+	Key             string   `json:"key"`
+	Tenant          string   `json:"tenant"`
+	RateLimitRPM    int      `json:"rate_limit_rpm"`
+	AllowedRoutes   []string `json:"allowed_routes"`
+	MaxTokensPerDay int      `json:"max_tokens_per_day,omitempty"`
+	MaxCostPerDay   float64  `json:"max_cost_per_day,omitempty"`
 }
 
 type GatewayConfig struct {
