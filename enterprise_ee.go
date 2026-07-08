@@ -12,6 +12,7 @@ import (
 func registerEnterpriseHandlers(mux *http.ServeMux) {
 	var sloTracker = incidents.NewSLOTracker()
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
+	mux.HandleFunc("/api/anomalies/explain", authorizeConsole(handleExplainAnomaly))
 	mux.HandleFunc("/api/slo", authorizeConsole(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("decomposed") == "true" {
 			sloTracker.HandleSLO(w, r)

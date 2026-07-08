@@ -14,6 +14,7 @@ func registerEnterpriseHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(eeRequired))
 	mux.HandleFunc("/api/slo", authorizeConsole(eeRequired))
 	mux.HandleFunc("/api/runbooks", authorizeConsole(eeRequired))
+	mux.HandleFunc("/api/anomalies/explain", authorizeConsole(eeRequired))
 	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(eeRequired))
 	mux.HandleFunc("/api/dashboards", authorizeConsole(eeRequired))
 	mux.HandleFunc("/api/provision/store", authorizeConsole(eeRequired))
