@@ -34,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/v1/traces", s.handleIngest)
 	mux.HandleFunc("/api/traces", s.handleListTraces)
+	mux.HandleFunc("/api/v1/traces/search", s.handleNaturalLanguageSearch)
 	mux.HandleFunc("/api/dependency-graph", s.handleDependencyGraph)
 	mux.HandleFunc("/api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("/api/v1/metrics", s.handleGetMetrics)
@@ -268,6 +269,43 @@ func (s *Server) handleListTraces(w http.ResponseWriter, req *http.Request) {
 		}
 		if durationFilter != "" {
 			if limit, err := strconv.ParseFloat(durationFilter, 64); err == nil && t.DurationMs < limit {
+				continue
+			}
+		}
+		filtered = append(filtered, t)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(filtered)
+}
+
+func (s *Server) handleNaturalLanguageSearch(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	query := req.URL.Query().Get("q")
+	filters, err := s.ResolveNaturalLanguageQuery(query)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	traces := s.traceStore.ListTraces()
+	filtered := make([]store.TraceSummary, 0)
+
+	for _, t := range traces {
+		if svc, ok := filters["service"]; ok && !strings.Contains(strings.ToLower(t.Service), strings.ToLower(svc)) {
+			continue
+		}
+		if errorFilter, ok := filters["error"]; ok && errorFilter == "true" && t.ErrorCount == 0 {
+			continue
+		}
+		if minDuration, ok := filters["min_duration_ms"]; ok {
+			if limit, err := strconv.ParseFloat(minDuration, 64); err == nil && t.DurationMs < limit {
 				continue
 			}
 		}

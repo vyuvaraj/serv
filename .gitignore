@@ -4,3 +4,5 @@
 .build/
 dist/
 servtrace
+*_ee.go
+*_ee_test.go
