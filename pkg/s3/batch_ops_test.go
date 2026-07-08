@@ -32,6 +32,7 @@ func TestS3BatchOperations(t *testing.T) {
 	defer server.Close()
 
 	client := &http.Client{}
+	defer client.CloseIdleConnections()
 
 	ctx := context.Background()
 
