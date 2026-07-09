@@ -146,6 +146,9 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 		if strings.Contains(fileGoCode, "regexp.") {
 			fileImports[`"regexp"`] = true
 		}
+		if strings.Contains(fileGoCode, "json.") {
+			fileImports[`"encoding/json"`] = true
+		}
 
 		for _, stmt := range fileProg.Statements {
 			if ext, ok := stmt.(*compiler.ExternFnStmt); ok {

@@ -637,5 +637,8 @@ func (c *Codegen) GenerateFileHeader(fileImports map[string]bool) string {
 	if fileImports[`"strings"`] {
 		out.WriteString("var _ = strings.Join // ensure strings is used\n\n")
 	}
+	if fileImports[`"encoding/json"`] {
+		out.WriteString("var _ = json.Marshal // ensure json is used\n\n")
+	}
 	return out.String()
 }
