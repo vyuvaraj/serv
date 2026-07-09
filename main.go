@@ -989,6 +989,12 @@ func discoverySource() string {
 	return "cli-flags/defaults"
 }
 
+var (
+	EnterpriseRegisterSession = func(token string, username string) error { return nil }
+	EnterpriseVerifySession   = func(token string) bool { return true }
+	EnterpriseRevokeSession   = func(token string) error { return nil }
+)
+
 func authorizeConsole(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jwtSec := os.Getenv("SERV_JWT_SECRET")
@@ -1011,7 +1017,7 @@ func authorizeConsole(next http.HandlerFunc) http.HandlerFunc {
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		username, role, ok := validateJWT(token, jwtSecBytes)
-		if !ok {
+		if !ok || !EnterpriseVerifySession(token) {
 			http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 			return
 		}
@@ -1272,6 +1278,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to generate session token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = EnterpriseRegisterSession(localToken, username)
 	
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
@@ -1289,6 +1296,16 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 func handleLogout(w http.ResponseWriter, r *http.Request) {
 	user := r.Header.Get("X-Console-User")
 	addAuditLog(user, "User Logged Out", "POST", "/api/auth/logout", http.StatusOK)
+
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token == "" {
+		if cookie, err := r.Cookie("token"); err == nil {
+			token = cookie.Value
+		}
+	}
+	if token != "" {
+		_ = EnterpriseRevokeSession(token)
+	}
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "token",
