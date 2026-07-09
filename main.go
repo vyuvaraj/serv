@@ -42,7 +42,30 @@ var (
 
 	packageIndexMu sync.RWMutex
 	packageIndex   = make(map[string]*registry.PackageIndexItem)
+
+	marketplaceMu sync.RWMutex
+	marketplace   = []MarketplaceItem{
+		{
+			Name:        "auth-token-filter",
+			Version:     "1.0.0",
+			Type:        "wasm_filter",
+			Description: "Standard Bearer Token authentication filter compiled to WASM",
+			Publisher:   "Servverse Team",
+			URL:         "https://serv.dev/marketplace/auth-token-filter-1.0.0.wasm",
+			CreatedAt:   time.Now(),
+		},
+	}
 )
+
+type MarketplaceItem struct {
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Type        string    `json:"type"` // "template", "wasm_filter", "workflow"
+	Description string    `json:"description"`
+	Publisher   string    `json:"publisher"`
+	URL         string    `json:"url"`
+	CreatedAt   time.Time `json:"created_at"`
+}
 
 func main() {
 	addr := flag.String("addr", ":8088", "Registry server listen address")
@@ -121,6 +144,10 @@ func main() {
 	// Schema Registry API
 	mux.HandleFunc("/api/v1/schemas/", handleSchemasAPI)
 	mux.HandleFunc("/api/v1/schemas/validate", handleSchemaValidationAPI)
+
+	// Marketplace API
+	mux.HandleFunc("/api/v1/marketplace/list", handleMarketplaceList)
+	mux.HandleFunc("/api/v1/marketplace/publish", handleMarketplacePublish)
 
 	// Web dashboard static files
 	mux.HandleFunc("/", handleWebDashboard)
@@ -1098,4 +1125,40 @@ func handleSchemaValidationAPI(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"valid":true}`))
 	}
 }
+
+func handleMarketplaceList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	marketplaceMu.RLock()
+	defer marketplaceMu.RUnlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(marketplace)
+}
+
+func handleMarketplacePublish(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var item MarketplaceItem
+	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if item.Name == "" || item.Version == "" || item.Type == "" {
+		http.Error(w, "name, version, and type are required", http.StatusBadRequest)
+		return
+	}
+	item.CreatedAt = time.Now()
+
+	marketplaceMu.Lock()
+	marketplace = append(marketplace, item)
+	marketplaceMu.Unlock()
+
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"status":"published"}`))
+}
+
 

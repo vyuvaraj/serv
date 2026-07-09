@@ -353,3 +353,43 @@ func TestSchemaRegistryAPI(t *testing.T) {
 		}
 	}
 }
+
+func TestMarketplace(t *testing.T) {
+	// 1. Get initial marketplace list
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/marketplace/list", nil)
+	wGet := httptest.NewRecorder()
+	handleMarketplaceList(wGet, reqGet)
+
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", wGet.Code)
+	}
+
+	var list []MarketplaceItem
+	if err := json.Unmarshal(wGet.Body.Bytes(), &list); err != nil {
+		t.Fatalf("failed to parse list: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "auth-token-filter" {
+		t.Errorf("unexpected initial marketplace items: %+v", list)
+	}
+
+	// 2. Publish new item
+	newItem := `{"name":"custom-workflow","version":"2.1.0","type":"workflow","description":"Test custom workflow template","publisher":"Alice","url":"https://serv.dev/marketplace/custom-workflow.json"}`
+	reqPub := httptest.NewRequest(http.MethodPost, "/api/v1/marketplace/publish", strings.NewReader(newItem))
+	wPub := httptest.NewRecorder()
+	handleMarketplacePublish(wPub, reqPub)
+
+	if wPub.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 Created, got %d", wPub.Code)
+	}
+
+	// 3. Verify new item is listed
+	wGet2 := httptest.NewRecorder()
+	handleMarketplaceList(wGet2, reqGet)
+	if err := json.Unmarshal(wGet2.Body.Bytes(), &list); err != nil {
+		t.Fatalf("failed to parse list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Errorf("expected 2 marketplace items, got %d", len(list))
+	}
+}
+
