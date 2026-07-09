@@ -229,10 +229,26 @@ func (s *Server) handleTopics(w http.ResponseWriter, r *http.Request) {
 	case "transform":
 		s.handleRegisterTransform(w, r, namespacedTopic)
 	case "dlq":
-		if len(parts) >= 6 && parts[1] == "v1" && parts[5] == "summary" {
-			s.handleDLQSummary(w, r, namespacedTopic)
-		} else if len(parts) >= 5 && parts[1] != "v1" && parts[4] == "summary" {
-			s.handleDLQSummary(w, r, namespacedTopic)
+		if len(parts) >= 6 && parts[1] == "v1" {
+			if parts[5] == "summary" {
+				s.handleDLQSummary(w, r, namespacedTopic)
+			} else if parts[5] == "triage" {
+				s.handleDLQTriage(w, r, namespacedTopic)
+			} else if parts[5] == "requeue" {
+				s.handleDLQRequeue(w, r, namespacedTopic)
+			} else {
+				s.handleRegisterDLQ(w, r, namespacedTopic)
+			}
+		} else if len(parts) >= 5 && parts[1] != "v1" {
+			if parts[4] == "summary" {
+				s.handleDLQSummary(w, r, namespacedTopic)
+			} else if parts[4] == "triage" {
+				s.handleDLQTriage(w, r, namespacedTopic)
+			} else if parts[4] == "requeue" {
+				s.handleDLQRequeue(w, r, namespacedTopic)
+			} else {
+				s.handleRegisterDLQ(w, r, namespacedTopic)
+			}
 		} else {
 			s.handleRegisterDLQ(w, r, namespacedTopic)
 		}
@@ -257,6 +273,60 @@ func (s *Server) handleDLQSummary(w http.ResponseWriter, r *http.Request, topic 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
+}
+
+func (s *Server) handleDLQTriage(w http.ResponseWriter, r *http.Request, topic string) {
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+	triages, err := s.engine.TriageDLQ(topic)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(triages)
+}
+
+func (s *Server) handleDLQRequeue(w http.ResponseWriter, r *http.Request, topic string) {
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		MessageID string `json:"message_id"`
+		Payload   string `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request body", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+
+	triages, err := s.engine.TriageDLQ(topic)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
+		return
+	}
+	
+	var targetTopic string
+	for _, t := range triages {
+		if t.MessageID == req.MessageID {
+			targetTopic = t.SourceTopic
+			break
+		}
+	}
+	if targetTopic == "" {
+		targetTopic = topic
+	}
+
+	err = s.engine.RequeuePatchedMessage(targetTopic, req.MessageID, req.Payload)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"success"}`))
 }
 
 func (s *Server) handleAnomalies(w http.ResponseWriter, r *http.Request, topic string) {
