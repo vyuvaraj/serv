@@ -27,11 +27,11 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 - [x] **Span metrics generation**: Auto-calculate throughput and latency percentiles (p50/p90/p99) on ingest. [June 29, 2026]
 
 ## Phase 4: Production Observability (Next Level)
-- [ ] **Trace Sampling Strategies**: Head-based and tail-based sampling with configurable rates per service.
+- [x] **Trace Sampling Strategies**: Head-based and tail-based sampling with configurable rates per service. [July 9, 2026]
 - [x] **Span Anomaly Detection**: Detect latency spikes and error bursts automatically. Alert via ServConsole. [June 29, 2026]
-- [ ] **Trace Comparison**: Compare two traces side-by-side to identify regression causes.
+- [x] **Trace Comparison**: Compare two traces side-by-side to identify regression causes. [July 9, 2026]
 - [ ] **Service Map Generation**: Auto-build dependency graph from trace parent-child relationships.
-- [ ] **Retention Policies**: Configurable TTL per service. Auto-archive old traces to ServStore.
+- [x] **Retention Policies**: Configurable TTL per service. Auto-archive old traces to ServStore. [July 9, 2026]
 - [x] **Metrics Derivation**: Extract RED metrics (Rate, Error, Duration) from traces. No separate metrics pipeline needed. [June 30, 2026]
 - [x] **Trace-to-Log Correlation**: Link trace spans directly to structured log entries via shared trace_id. [June 29, 2026]
 - [ ] **Distributed Context Baggage**: Propagate custom key-value pairs across service boundaries via trace context.
@@ -40,9 +40,9 @@ This roadmap outlines the planned development phases for the ServTrace distribut
 - [ ] **`serv trace search` CLI** — Search traces by service, operation, error, or duration threshold from the terminal; output as JSON or ASCII waterfall (DevOps)
 - [ ] **Continuous Profiling Integration** — Link pprof CPU/memory profiles to trace spans; surface hot-path profiles in the ServConsole waterfall view alongside latency (Performance)
 - [ ] **Adaptive Sampling Rate** — Dynamically raise sampling rate when error rate spikes and lower it when traffic is healthy — reduces overhead in normal operation while capturing all errors (Performance / DevOps)
-- [ ] **Trace Comparison** — Compare two traces side-by-side to identify regression causes (DX)
+- [x] **Trace Comparison** — Compare two traces side-by-side to identify regression causes (DX) [July 9, 2026]
 - [ ] **Service Map Generation** — Auto-build dependency graph from trace parent-child relationships. Feed to ServConsole topology view (Integration)
-- [ ] **Retention Policies** — Configurable TTL per service. Auto-archive old traces to ServStore. Prevent unbounded disk growth (Reliability)
+- [x] **Retention Policies** — Configurable TTL per service. Auto-archive old traces to ServStore. Prevent unbounded disk growth (Reliability) [July 9, 2026]
 - [ ] **Distributed Context Baggage** — Propagate custom key-value pairs across service boundaries via trace context (Integration)
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.

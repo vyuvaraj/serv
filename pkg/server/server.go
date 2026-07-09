@@ -21,6 +21,7 @@ type Server struct {
 func NewServer(ts *store.Store) *Server {
 	s := &Server{traceStore: ts}
 	s.startSelfHealingLoop()
+	s.startRetentionCleanerLoop()
 	return s
 }
 
@@ -46,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/trace/anomaly/slow-spans", s.handleSlowSpans)
 	mux.HandleFunc("/api/trace/anomaly/slo-breach-predict", s.handleSloBreachPredict)
 	mux.HandleFunc("/api/v1/tuning/recommendations", s.handleTuningRecommendations)
+	mux.HandleFunc("/api/v1/traces/compare", s.handleCompareTraces)
 	
 	mux.HandleFunc("/api/traces/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
@@ -666,5 +668,114 @@ func (s *Server) triggerRollback(service string) {
 		fmt.Printf("[Self-Healing] Rollback failed with status: %d\n", resp.StatusCode)
 	}
 }
+
+type TraceComparisonInfo struct {
+	TraceID    string             `json:"traceId"`
+	DurationMs float64            `json:"durationMs"`
+	SpanCount  int                `json:"spanCount"`
+	ErrorCount int                `json:"errorCount"`
+	Services   map[string]float64 `json:"services"`
+}
+
+type TraceComparison struct {
+	TraceA          TraceComparisonInfo `json:"traceA"`
+	TraceB          TraceComparisonInfo `json:"traceB"`
+	DurationDiffMs  float64             `json:"durationDiffMs"`
+	SpanCountDiff   int                 `json:"spanCountDiff"`
+	ErrorCountDiff  int                 `json:"errorCountDiff"`
+	CommonServices  []string            `json:"commonServices"`
+}
+
+func (s *Server) handleCompareTraces(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	traceIDA := req.URL.Query().Get("a")
+	traceIDB := req.URL.Query().Get("b")
+
+	if traceIDA == "" || traceIDB == "" {
+		http.Error(w, "Both 'a' and 'b' query parameters (trace IDs) are required", http.StatusBadRequest)
+		return
+	}
+
+	treeA, okA := s.traceStore.GetTraceTree(traceIDA)
+	treeB, okB := s.traceStore.GetTraceTree(traceIDB)
+
+	if !okA || !okB {
+		http.Error(w, "One or both traces not found", http.StatusNotFound)
+		return
+	}
+
+	infoA := s.getComparisonInfo(traceIDA, treeA)
+	infoB := s.getComparisonInfo(traceIDB, treeB)
+
+	commonServices := []string{}
+	for svc := range infoA.Services {
+		if _, exists := infoB.Services[svc]; exists {
+			commonServices = append(commonServices, svc)
+		}
+	}
+
+	comparison := TraceComparison{
+		TraceA:         infoA,
+		TraceB:         infoB,
+		DurationDiffMs: infoB.DurationMs - infoA.DurationMs,
+		SpanCountDiff:  infoB.SpanCount - infoA.SpanCount,
+		ErrorCountDiff: infoB.ErrorCount - infoA.ErrorCount,
+		CommonServices: commonServices,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(comparison)
+}
+
+func (s *Server) getComparisonInfo(traceID string, root *store.SpanNode) TraceComparisonInfo {
+	services := make(map[string]float64)
+	spanCount := 0
+	errorCount := 0
+
+	var traverse func(node *store.SpanNode)
+	traverse = func(node *store.SpanNode) {
+		if node == nil {
+			return
+		}
+		spanCount++
+		if node.Span.Status == 2 {
+			errorCount++
+		}
+		services[node.Span.Service] += node.DurationMs
+
+		for _, child := range node.Children {
+			traverse(child)
+		}
+	}
+
+	traverse(root)
+
+	duration := 0.0
+	if root != nil {
+		duration = root.DurationMs
+	}
+
+	return TraceComparisonInfo{
+		TraceID:    traceID,
+		DurationMs: duration,
+		SpanCount:  spanCount,
+		ErrorCount: errorCount,
+		Services:   services,
+	}
+}
+
+func (s *Server) startRetentionCleanerLoop() {
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		for range ticker.C {
+			s.traceStore.CleanExpiredTraces()
+		}
+	}()
+}
+
 
 

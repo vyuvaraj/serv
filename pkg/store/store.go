@@ -157,7 +157,8 @@ func (s *Store) AddSpans(newSpans []Span) {
 			for _, char := range traceID {
 				hash += int(char)
 			}
-			s.sampled[traceID] = (hash % 100) < s.samplingRate
+			rate := s.getServiceSamplingRate(span.Service)
+			s.sampled[traceID] = (hash % 100) < rate
 		}
 
 		// Prevent duplicate spans
@@ -634,4 +635,81 @@ func (s *Store) GetSamplingRateForTest() int {
 	defer s.mu.RUnlock()
 	return s.samplingRate
 }
+
+func (s *Store) getServiceSamplingRate(service string) int {
+	if service == "" {
+		return s.samplingRate
+	}
+	normalized := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(service, "-", "_"), ".", "_"))
+	envKey := "SERV_TRACE_SAMPLING_RATE_" + normalized
+	if val := os.Getenv(envKey); val != "" {
+		if rate, err := strconv.Atoi(val); err == nil {
+			return rate
+		}
+	}
+	return s.samplingRate
+}
+
+func (s *Store) getServiceTTL(service string) time.Duration {
+	defaultTTL := 24 * time.Hour
+	if val := os.Getenv("SERV_TRACE_DEFAULT_TTL"); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			defaultTTL = d
+		}
+	}
+	if service == "" {
+		return defaultTTL
+	}
+	normalized := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(service, "-", "_"), ".", "_"))
+	envKey := "SERV_TRACE_TTL_" + normalized
+	if val := os.Getenv(envKey); val != "" {
+		if d, err := time.ParseDuration(val); err == nil {
+			return d
+		}
+	}
+	return defaultTTL
+}
+
+func (s *Store) CleanExpiredTraces() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	var activeOrder []string
+
+	for _, traceID := range s.order {
+		spans, exists := s.spans[traceID]
+		if !exists || len(spans) == 0 {
+			continue
+		}
+
+		minStartNano := spans[0].StartTime
+		service := spans[0].Service
+		for _, span := range spans {
+			if span.StartTime < minStartNano {
+				minStartNano = span.StartTime
+				service = span.Service
+			}
+		}
+
+		ttl := s.getServiceTTL(service)
+		startTime := time.Unix(0, minStartNano)
+
+		if now.Sub(startTime) > ttl {
+			evicted := s.spans[traceID]
+			delete(s.spans, traceID)
+			isSampled := s.sampled[traceID]
+			delete(s.sampled, traceID)
+			delete(s.traceLogs, traceID)
+
+			if isSampled && s.OnEvict != nil && len(evicted) > 0 {
+				go s.OnEvict(traceID, evicted)
+			}
+		} else {
+			activeOrder = append(activeOrder, traceID)
+		}
+	}
+	s.order = activeOrder
+}
+
 
