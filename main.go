@@ -67,12 +67,66 @@ type MarketplaceItem struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type ACLStore struct {
+	mu       sync.Mutex
+	filePath string
+	Owners   map[string]string `json:"owners"` // package name or scope -> public key hex
+}
+
+func NewACLStore(filePath string) *ACLStore {
+	store := &ACLStore{
+		filePath: filePath,
+		Owners:   make(map[string]string),
+	}
+	store.load()
+	return store
+}
+
+func (s *ACLStore) load() {
+	data, err := os.ReadFile(s.filePath)
+	if err == nil {
+		_ = json.Unmarshal(data, &s.Owners)
+	}
+}
+
+func (s *ACLStore) save() {
+	data, err := json.MarshalIndent(s.Owners, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(s.filePath, data, 0644)
+	}
+}
+
+func (s *ACLStore) Authorize(packageName, pubKeyHex string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	keyToCheck := packageName
+	if strings.HasPrefix(packageName, "@") && strings.Contains(packageName, "/") {
+		keyToCheck = strings.Split(packageName, "/")[0]
+	}
+
+	owner, exists := s.Owners[keyToCheck]
+	if !exists {
+		s.Owners[keyToCheck] = pubKeyHex
+		s.save()
+		return true
+	}
+
+	return owner == pubKeyHex
+}
+
+var aclStore *ACLStore
+
+
 func main() {
 	addr := flag.String("addr", ":8088", "Registry server listen address")
 	s3Endpoint := flag.String("s3-endpoint", "http://localhost:9000", "ServStore/S3 endpoint URL")
 	s3AccessKey := flag.String("s3-access-key", "admin", "S3 access key")
 	s3SecretKey := flag.String("s3-secret-key", "admin123", "S3 secret key")
 	flag.Parse()
+
+	aclStore = NewACLStore("acls.json")
+
 
 	// Override with env variables if set
 	if envPort := os.Getenv("PORT"); envPort != "" {
@@ -277,10 +331,25 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sanitize name
-	name = strings.TrimSpace(filepath.Base(name))
+	var safeName string
+	if strings.HasPrefix(name, "@") && strings.Count(name, "/") == 1 {
+		parts := strings.Split(name, "/")
+		org := parts[0]
+		pkg := parts[1]
+		safeName = org + "/" + strings.TrimSpace(filepath.Base(pkg))
+	} else {
+		safeName = strings.TrimSpace(filepath.Base(name))
+	}
+	name = safeName
 	version = strings.TrimSpace(filepath.Base(version))
 	if name == "" || name == "." || name == "/" || version == "" {
 		WriteJSONError(w, r, "Invalid package name or version", "ERR_INVALID_PACKAGE_VERSION", http.StatusBadRequest)
+		return
+	}
+
+	// Verify ACL authorization
+	if !aclStore.Authorize(name, pubKeyHex) {
+		WriteJSONError(w, r, "Forbidden: Namespace or Package owned by another publisher", "ERR_FORBIDDEN", http.StatusForbidden)
 		return
 	}
 
@@ -333,7 +402,8 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Upload tarball payload to S3 key structure: {name}/{version}/{name}-{version}.tar.gz
-	objectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz", name, version, name, version)
+	safeFilename := strings.ReplaceAll(name, "/", "-")
+	objectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz", name, version, safeFilename, version)
 	_, err = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(objectKey),
@@ -347,7 +417,7 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Upload signature companion to S3
-	sigObjectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz.sig", name, version, name, version)
+	sigObjectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz.sig", name, version, safeFilename, version)
 	_, err = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(bucketName),
 		Key:         aws.String(sigObjectKey),
@@ -409,7 +479,27 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 	var name, version string
 
 	parts := strings.Split(path, "/")
-	if len(parts) == 3 {
+	if len(parts) == 4 && strings.HasPrefix(parts[0], "@") {
+		name = parts[0] + "/" + parts[1]
+		version = parts[2]
+		if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
+			metadataKey := fmt.Sprintf("%s/metadata.json", name)
+			metaResp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(metadataKey),
+			})
+			if err == nil {
+				defer metaResp.Body.Close()
+				var metadata registry.PackageMetadata
+				metaData, merr := io.ReadAll(metaResp.Body)
+				if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
+					version = resolution.ResolveBestVersion(version, metadata.Versions)
+				}
+			}
+		}
+		safeFilename := strings.ReplaceAll(name, "/", "-")
+		s3Key = fmt.Sprintf("%s/%s/%s-%s.tar.gz", name, version, safeFilename, version)
+	} else if len(parts) == 3 {
 		name = parts[0]
 		version = parts[1]
 		if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
@@ -462,8 +552,13 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s3Key = path
 		if len(parts) >= 2 {
-			name = parts[0]
-			version = parts[1]
+			if strings.HasPrefix(parts[0], "@") && len(parts) >= 3 {
+				name = parts[0] + "/" + parts[1]
+				version = parts[2]
+			} else {
+				name = parts[0]
+				version = parts[1]
+			}
 		}
 	}
 
@@ -534,7 +629,12 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(path, "/")
 
 	var name, version string
-	if len(parts) == 1 {
+	if len(parts) >= 2 && strings.HasPrefix(parts[0], "@") {
+		name = parts[0] + "/" + parts[1]
+		if len(parts) == 3 {
+			version = parts[2]
+		}
+	} else if len(parts) == 1 {
 		name = parts[0]
 	} else if len(parts) == 2 {
 		name = parts[0]

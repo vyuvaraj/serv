@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -392,4 +393,32 @@ func TestMarketplace(t *testing.T) {
 		t.Errorf("expected 2 marketplace items, got %d", len(list))
 	}
 }
+
+func TestACLStoreAndScopedPublish(t *testing.T) {
+	tempFile := filepath.Join(t.TempDir(), "acls.json")
+	store := NewACLStore(tempFile)
+
+	pubKey1 := "pubkey1111111111111111111111111111111111111111111111111111111111"
+	pubKey2 := "pubkey2222222222222222222222222222222222222222222222222222222222"
+
+	if !store.Authorize("@org/package1", pubKey1) {
+		t.Errorf("Expected TOFU authorize to succeed for key 1")
+	}
+
+	if !store.Authorize("@org/package2", pubKey1) {
+		t.Errorf("Expected authorize to succeed for same owner on other package in scope")
+	}
+
+	if store.Authorize("@org/package3", pubKey2) {
+		t.Errorf("Expected authorize to fail for different owner on the same scope")
+	}
+
+	if !store.Authorize("unscoped-pkg", pubKey2) {
+		t.Errorf("Expected TOFU authorize to succeed for unscoped package")
+	}
+	if store.Authorize("unscoped-pkg", pubKey1) {
+		t.Errorf("Expected authorize to fail for unscoped package with different owner")
+	}
+}
+
 
