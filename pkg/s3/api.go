@@ -1451,6 +1451,7 @@ func (g *Gateway) handlePutObject(w http.ResponseWriter, r *http.Request, bucket
 	if obj.VersionID != "" && obj.VersionID != "null" {
 		w.Header().Set("x-amz-version-id", obj.VersionID)
 	}
+	metrics.ObserveS3Upload(obj.Size, true)
 	g.notifyEvent("ObjectCreated:Put", bucket, key, obj.Size, obj.ETag)
 	w.WriteHeader(http.StatusOK)
 }
@@ -1580,6 +1581,7 @@ func (g *Gateway) handleGetObject(w http.ResponseWriter, r *http.Request, bucket
 		w.Header().Set("x-amz-meta-blake3", obj.Checksum)
 	}
 
+	metrics.ObserveS3Download(obj.Size, true)
 	_, _ = w.Write(buf)
 }
 
@@ -1715,6 +1717,7 @@ func (g *Gateway) handleDeleteObject(w http.ResponseWriter, r *http.Request, buc
 	if obj.VersionID != "" && obj.VersionID != "null" {
 		w.Header().Set("x-amz-version-id", obj.VersionID)
 	}
+	metrics.ObserveS3Delete(true)
 	g.notifyEvent("ObjectRemoved:Delete", bucket, key, obj.Size, obj.ETag)
 	w.WriteHeader(http.StatusNoContent)
 }

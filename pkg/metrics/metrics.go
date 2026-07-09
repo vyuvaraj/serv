@@ -14,7 +14,44 @@ var (
 		requestCount:      make(map[string]int64),
 		inFlightRequests:  0,
 	}
+
+	s3UploadBytes    int64
+	s3DownloadBytes  int64
+	s3Operations     = make(map[string]int64) // key: op|status
+	s3Mu             sync.Mutex
 )
+
+func ObserveS3Upload(bytesCount int64, success bool) {
+	s3Mu.Lock()
+	defer s3Mu.Unlock()
+	s3UploadBytes += bytesCount
+	status := "success"
+	if !success {
+		status = "error"
+	}
+	s3Operations[fmt.Sprintf("upload|%s", status)]++
+}
+
+func ObserveS3Download(bytesCount int64, success bool) {
+	s3Mu.Lock()
+	defer s3Mu.Unlock()
+	s3DownloadBytes += bytesCount
+	status := "success"
+	if !success {
+		status = "error"
+	}
+	s3Operations[fmt.Sprintf("download|%s", status)]++
+}
+
+func ObserveS3Delete(success bool) {
+	s3Mu.Lock()
+	defer s3Mu.Unlock()
+	status := "success"
+	if !success {
+		status = "error"
+	}
+	s3Operations[fmt.Sprintf("delete|%s", status)]++
+}
 
 type MetricsRegistry struct {
 	mu                sync.RWMutex
@@ -90,6 +127,26 @@ func Handler() http.Handler {
 				fmt.Fprintf(w, "servstore_http_request_duration_seconds_count{method=\"%s\",path=\"%s\"} %d\n", method, path, count)
 			}
 		}
+
+		// Write S3 latency and throughput performance metrics
+		s3Mu.Lock()
+		fmt.Fprintln(w, "\n# HELP servstore_s3_upload_bytes_total Total number of bytes uploaded to S3.")
+		fmt.Fprintln(w, "# TYPE servstore_s3_upload_bytes_total counter")
+		fmt.Fprintf(w, "servstore_s3_upload_bytes_total %d\n", s3UploadBytes)
+
+		fmt.Fprintln(w, "\n# HELP servstore_s3_download_bytes_total Total number of bytes downloaded from S3.")
+		fmt.Fprintln(w, "# TYPE servstore_s3_download_bytes_total counter")
+		fmt.Fprintf(w, "servstore_s3_download_bytes_total %d\n", s3DownloadBytes)
+
+		fmt.Fprintln(w, "\n# HELP servstore_s3_operations_total Total number of S3 actions executed.")
+		fmt.Fprintln(w, "# TYPE servstore_s3_operations_total counter")
+		for key, count := range s3Operations {
+			parts := splitKey(key)
+			if len(parts) == 2 {
+				fmt.Fprintf(w, "servstore_s3_operations_total{op=\"%s\",status=\"%s\"} %d\n", parts[0], parts[1], count)
+			}
+		}
+		s3Mu.Unlock()
 	})
 }
 
