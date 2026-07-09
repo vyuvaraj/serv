@@ -1532,5 +1532,58 @@ tr:hover td {
   to { transform: rotate(360deg); }
 }
 
+/* ─── Workflow Designer Nodes (UI.4) ─── */
+.designer-node {
+  position: absolute;
+  width: 160px;
+  min-height: 70px;
+  padding: 0.5rem;
+  background: var(--bg-glass-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  color: var(--text-primary);
+  user-select: none;
+  cursor: grab;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.designer-node:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.designer-node.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+
+.designer-node:active {
+  cursor: grabbing;
+}
+
+/* Colors based on node type */
+.designer-node.state {
+  border-left: 4px solid #3b82f6;
+}
+.designer-node.task {
+  border-left: 4px solid #a855f7;
+}
+.designer-node.condition {
+  border-left: 4px solid #fbbf24;
+}
+.designer-node.delay {
+  border-left: 4px solid #06b6d4;
+}
+.designer-node.success {
+  border-left: 4px solid #10b981;
+}
+.designer-node.fail {
+  border-left: 4px solid #ef4444;
+}
+
+
 
 

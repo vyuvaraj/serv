@@ -5237,6 +5237,237 @@ async function executePlaybook(id) {
 }
 window.executePlaybook = executePlaybook;
 
+// --- Visual Workflow Designer (UI.4) ---
+let designerNodes = [];
+let selectedNodeId = null;
+let nodeCounter = 0;
+
+function initWorkflowDesigner() {
+  const container = document.getElementById('workflow-nodes-container');
+  const workspace = document.getElementById('workflow-designer-workspace');
+  if (!container || !workspace) return;
+
+  console.log('[ServConsole] Initializing Workflow Designer...');
+
+  // 1. Tool addition buttons
+  document.querySelectorAll('.tool-add-node').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.getAttribute('data-type');
+      addDesignerNode(type);
+    });
+  });
+
+  // 2. Clear canvas
+  document.getElementById('btn-clear-workflow-canvas').addEventListener('click', () => {
+    designerNodes = [];
+    selectedNodeId = null;
+    nodeCounter = 0;
+    renderDesigner();
+  });
+
+  // 3. Save properties
+  document.getElementById('btn-save-node-properties').addEventListener('click', () => {
+    if (!selectedNodeId) return;
+    const node = designerNodes.find(n => n.id === selectedNodeId);
+    if (node) {
+      node.name = document.getElementById('prop-node-name').value;
+      node.action = document.getElementById('prop-node-action').value;
+      node.next = document.getElementById('prop-node-next').value;
+      renderDesigner();
+    }
+  });
+
+  // 4. Delete node
+  document.getElementById('btn-delete-node').addEventListener('click', () => {
+    if (!selectedNodeId) return;
+    designerNodes = designerNodes.filter(n => n.id !== selectedNodeId);
+    selectedNodeId = null;
+    renderDesigner();
+  });
+
+  // 5. Generate / Export DSL
+  document.getElementById('btn-export-workflow-dsl').addEventListener('click', () => {
+    const dsl = generateWorkflowDSL();
+    alert("Generated Serv DSL Workflow:\n\n" + dsl);
+  });
+
+  // Seed default nodes for demonstration
+  addDesignerNode('state', 100, 150, 'start', 'initializeOrder', 'processPayment');
+  addDesignerNode('task', 300, 150, 'processPayment', 'chargeCreditCard', 'complete');
+  addDesignerNode('success', 500, 150, 'complete');
+}
+
+function addDesignerNode(type, x, y, name, action, next) {
+  nodeCounter++;
+  const node = {
+    id: `node-${nodeCounter}`,
+    type: type,
+    name: name || `${type}_${nodeCounter}`,
+    action: action || '',
+    next: next || '',
+    x: x || 50 + (nodeCounter * 40) % 300,
+    y: y || 100 + (nodeCounter * 30) % 200
+  };
+  designerNodes.push(node);
+  renderDesigner();
+}
+
+function renderDesigner() {
+  const container = document.getElementById('workflow-nodes-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  
+  designerNodes.forEach(node => {
+    const el = document.createElement('div');
+    el.className = `designer-node ${node.type} ${node.id === selectedNodeId ? 'selected' : ''}`;
+    el.style.left = `${node.x}px`;
+    el.style.top = `${node.y}px`;
+    
+    let emoji = '🔵';
+    if (node.type === 'task') emoji = '⚙️';
+    if (node.type === 'condition') emoji = '🔀';
+    if (node.type === 'delay') emoji = '⏳';
+    if (node.type === 'success') emoji = '🟢';
+    if (node.type === 'fail') emoji = '🔴';
+
+    el.innerHTML = `
+      <div style="font-weight:bold; font-size:0.8rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:0.25rem; margin-bottom:0.25rem; display:flex; align-items:center; gap:0.25rem;">
+        <span>${emoji}</span><span>${node.type.toUpperCase()}</span>
+      </div>
+      <div style="font-size:0.85rem; color:#fff; font-weight:600;">${node.name}</div>
+      ${node.action ? `<div style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.25rem;">${node.action}</div>` : ''}
+    `;
+
+    // Click handler to select
+    el.addEventListener('mousedown', (e) => {
+      selectedNodeId = node.id;
+      showPropertiesPanel(node);
+      
+      // Node dragging
+      const startX = e.clientX - node.x;
+      const startY = e.clientY - node.y;
+      
+      const moveHandler = (moveEv) => {
+        node.x = moveEv.clientX - startX;
+        node.y = moveEv.clientY - startY;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        drawConnections();
+      };
+      
+      const upHandler = () => {
+        document.removeEventListener('mousemove', moveHandler);
+        document.removeEventListener('mouseup', upHandler);
+        updateDSLPreview();
+      };
+      
+      document.addEventListener('mousemove', moveHandler);
+      document.addEventListener('mouseup', upHandler);
+    });
+
+    container.appendChild(el);
+  });
+
+  drawConnections();
+  updateDSLPreview();
+}
+
+function showPropertiesPanel(node) {
+  document.getElementById('property-editor-empty').style.display = 'none';
+  const panel = document.getElementById('property-editor-panel');
+  panel.style.display = 'flex';
+
+  document.getElementById('prop-node-name').value = node.name;
+  document.getElementById('prop-node-action').value = node.action;
+  document.getElementById('prop-node-next').value = node.next;
+
+  // Toggle fields based on node type
+  const isEndNode = node.type === 'success' || node.type === 'fail';
+  document.getElementById('prop-group-action').style.display = isEndNode ? 'none' : 'block';
+  document.getElementById('prop-group-transition').style.display = isEndNode ? 'none' : 'block';
+}
+
+function drawConnections() {
+  const svg = document.getElementById('workflow-svg-lines');
+  if (!svg) return;
+
+  // Remove existing paths except defs
+  const paths = svg.querySelectorAll('path');
+  paths.forEach(p => p.remove());
+
+  designerNodes.forEach(node => {
+    if (node.next) {
+      const target = designerNodes.find(n => n.name === node.next);
+      if (target) {
+        // Draw connection from node to target
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        
+        // Compute connection points
+        const startX = node.x + 80;
+        const startY = node.y + 35;
+        const endX = target.x + 80;
+        const endY = target.y + 35;
+
+        // Draw curve
+        const dx = Math.abs(endX - startX) * 0.5;
+        const d = `M ${startX} ${startY} C ${startX + dx} ${startY}, ${endX - dx} ${endY}, ${endX} ${endY}`;
+        
+        path.setAttribute('d', d);
+        path.setAttribute('stroke', '#6366f1');
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('marker-end', 'url(#arrow)');
+        
+        svg.appendChild(path);
+      }
+    }
+  });
+}
+
+function generateWorkflowDSL() {
+  let dsl = `workflow customWorkflow(input) {\n`;
+  
+  // Collect execution steps in logical order starting from nodes that have no parents
+  designerNodes.forEach(node => {
+    if (node.type === 'success') {
+      dsl += `    step "${node.name}" {\n        return true\n    }\n\n`;
+    } else if (node.type === 'fail') {
+      dsl += `    step "${node.name}" {\n        return false\n    }\n\n`;
+    } else {
+      let actionStr = node.action || 'noop()';
+      dsl += `    step "${node.name}" {\n`;
+      dsl += `        ${actionStr}\n`;
+      if (node.next) {
+        dsl += `        next "${node.next}"\n`;
+      }
+      dsl += `    }\n\n`;
+    }
+  });
+
+  dsl += `}`;
+  return dsl;
+}
+
+function updateDSLPreview() {
+  const preview = document.getElementById('workflow-dsl-preview');
+  if (preview) {
+    preview.textContent = generateWorkflowDSL();
+  }
+}
+
+// Bind to DOMContentLoaded hook
+document.addEventListener('DOMContentLoaded', () => {
+  // Add workflow designer to active tabs binding
+  const tabBtn = document.querySelector('.tab-btn[data-tab="workflow-designer"]');
+  if (tabBtn) {
+    tabBtn.addEventListener('click', () => {
+      initWorkflowDesigner();
+    });
+  }
+});
+
+
 
 
 
