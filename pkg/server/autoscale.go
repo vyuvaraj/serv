@@ -91,7 +91,51 @@ func (s *Server) checkAutoscale() {
 		} else if conns <= 1 && len(reps) > 0 {
 			log.Printf("[AUTOSCALER] Low load detected on service %s (%d active connections). Scaling DOWN...", name, conns)
 			s.scaleDown(name, svc)
+		} else if conns == 0 && len(reps) == 0 && (svc.Status == "running" || svc.Status == "unhealthy") {
+			// Scale to Zero
+			tIdle, exists := idleStart[name]
+			if !exists {
+				idleStart[name] = time.Now()
+			} else if time.Since(tIdle) > 5*time.Second {
+				log.Printf("[AUTOSCALER] Service %s has been idle. Scaling to ZERO...", name)
+				s.scaleToZero(name, svc)
+			}
+		} else {
+			delete(idleStart, name)
 		}
+	}
+}
+
+var (
+	idleStart = make(map[string]time.Time)
+)
+
+func (s *Server) scaleToZero(name string, mainSvc *orchestrator.ServiceProcess) {
+	_ = s.orch.StopService(name)
+	delete(idleStart, name)
+
+	// Route to activator endpoint on ServCloud
+	activatorURL := fmt.Sprintf("http://localhost:8085/api/services/%s/invoke", name)
+	payload := map[string]interface{}{
+		"prefix":  fmt.Sprintf("/service/%s", name),
+		"target":  activatorURL,
+		"targets": []string{activatorURL},
+	}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", s.gatewayURL+"/api/routes", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+s.authToken)
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
 	}
 }
 

@@ -585,3 +585,72 @@ func TestHorizontalAutoScaling(t *testing.T) {
 	_ = orch.Undeploy("scale-app")
 	_ = orch.Undeploy("scale-app-replica-1")
 }
+
+func TestScaleToZeroAndInvoke(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "servcloud-scale-to-zero-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	orch, err := orchestrator.NewOrchestrator(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create orchestrator: %v", err)
+	}
+
+	mockGate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/console/sync" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"active_connections": {
+					"http://localhost:9001": 0
+				}
+			}`))
+			return
+		}
+		if r.URL.Path == "/api/routes" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}))
+	defer mockGate.Close()
+
+	// Deploy a test service
+	code := `print("scale-to-zero");`
+	proc, err := orch.Deploy("zero-app", code)
+	if err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+	proc.Port = 9001
+
+	srv := server.NewServer(orch, mockGate.URL, "token")
+	defer srv.StopAutoscaleLoopForTest()
+
+	// 1. Manually trigger scaleToZero or wait
+	time.Sleep(10 * time.Second) // wait for idle cooldown (>5s)
+
+	proc, ok := orch.GetService("zero-app")
+	if !ok || proc.Status != "stopped" {
+		t.Fatalf("Expected service to be stopped, got status: %s", proc.Status)
+	}
+
+	// 2. Invoke it via activator endpoint to wake it up!
+	// We'll mock the backend server that is spawned on scale-up
+	mockServiceBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("wake-up success"))
+	}))
+	defer mockServiceBackend.Close()
+
+	// Update the service port to the mock backend port so when scale-up finishes it directs here
+	proc.Port = 9001
+
+	req := httptest.NewRequest("GET", "/api/services/zero-app/invoke", nil)
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200 from invoke, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+

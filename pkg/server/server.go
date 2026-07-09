@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"time"
 
@@ -85,6 +87,11 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		
+		if len(parts) == 4 && parts[3] == "invoke" {
+			s.handleInvoke(w, r, name)
+			return
+		}
+
 		if len(parts) == 3 {
 			if r.Method == http.MethodDelete {
 				s.handleUndeploy(w, r, name)
@@ -323,3 +330,40 @@ func (s *Server) handleUpdateEnv(w http.ResponseWriter, r *http.Request, name st
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(newProc)
 }
+
+func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request, name string) {
+	proc, ok := s.orch.GetService(name)
+	if !ok {
+		http.Error(w, "Service not found", http.StatusNotFound)
+		return
+	}
+
+	if proc.Status == "stopped" || proc.Status == "failed" {
+		history := s.orch.GetHistory()
+		var code string
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].ServiceName == name {
+				code = history[i].Code
+				break
+			}
+		}
+		if code == "" {
+			http.Error(w, "No code snapshot found to deploy", http.StatusInternalServerError)
+			return
+		}
+
+		newProc, err := s.orch.DeployWithEnv(name, code, proc.Env)
+		if err != nil {
+			http.Error(w, "Scale up failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		proc = newProc
+
+		s.registerWithGateway(name, proc.Port)
+	}
+
+	targetURL, _ := url.Parse(fmt.Sprintf("http://localhost:%d", proc.Port))
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.ServeHTTP(w, r)
+}
+

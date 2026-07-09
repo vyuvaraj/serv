@@ -430,6 +430,19 @@ func (o *Orchestrator) stopService(proc *ServiceProcess) {
 	proc.Status = "stopped"
 }
 
+func (o *Orchestrator) StopService(name string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	proc, ok := o.services[name]
+	if !ok {
+		return fmt.Errorf("service not found: %s", name)
+	}
+	o.stopService(proc)
+	return nil
+}
+
+
 func (o *Orchestrator) Undeploy(name string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
