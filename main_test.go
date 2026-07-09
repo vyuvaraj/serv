@@ -1064,6 +1064,52 @@ func TestHandleExecutePlaybook(t *testing.T) {
 	}
 }
 
+func TestDesignerAndStudioEndpoints(t *testing.T) {
+	// 1. Test Designer Layout
+	reqLayout := httptest.NewRequest("GET", "/api/v1/designer/layout", nil)
+	wLayout := httptest.NewRecorder()
+	handleDesignerLayout(wLayout, reqLayout)
+	if wLayout.Code != http.StatusOK {
+		t.Errorf("expected 200 for layout, got %d", wLayout.Code)
+	}
+	if !strings.Contains(wLayout.Body.String(), "gate") {
+		t.Errorf("expected gate node in layout, got %s", wLayout.Body.String())
+	}
+
+	// 2. Test Designer Sync
+	syncPayload := `{"nodes":[{"id":"api-service","type":"service"}],"links":[]}`
+	reqSync := httptest.NewRequest("POST", "/api/v1/designer/sync", strings.NewReader(syncPayload))
+	wSync := httptest.NewRecorder()
+	handleDesignerSync(wSync, reqSync)
+	if wSync.Code != http.StatusOK {
+		t.Errorf("expected 200 for sync, got %d", wSync.Code)
+	}
+	if !strings.Contains(wSync.Body.String(), "service api-service") {
+		t.Errorf("expected synced code to declare api-service, got %s", wSync.Body.String())
+	}
+
+	// 3. Test Studio Projects
+	reqProjects := httptest.NewRequest("GET", "/api/v1/studio/projects", nil)
+	wProjects := httptest.NewRecorder()
+	handleStudioProjects(wProjects, reqProjects)
+	if wProjects.Code != http.StatusOK {
+		t.Errorf("expected 200 for projects, got %d", wProjects.Code)
+	}
+
+	// 4. Test Studio Debug breakpoint
+	debugPayload := `{"action":"set_breakpoint","file":"main.srv","line":12}`
+	reqDebug := httptest.NewRequest("POST", "/api/v1/studio/debug", strings.NewReader(debugPayload))
+	wDebug := httptest.NewRecorder()
+	handleStudioDebug(wDebug, reqDebug)
+	if wDebug.Code != http.StatusOK {
+		t.Errorf("expected 200 for debug, got %d", wDebug.Code)
+	}
+	if !strings.Contains(wDebug.Body.String(), "tenant_id") {
+		t.Errorf("expected breakpoint state in response, got %s", wDebug.Body.String())
+	}
+}
+
+
 
 
 
