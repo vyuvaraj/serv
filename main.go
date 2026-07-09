@@ -4260,15 +4260,16 @@ func handleConsoleCloudServicesItem(w http.ResponseWriter, r *http.Request) {
 
 	client := &http.Client{Timeout: 3 * time.Second}
 	var targetURL string
-	if action == "logs" {
+	switch action {
+	case "logs":
 		targetURL = fmt.Sprintf("%s/api/services/%s/logs", strings.TrimSuffix(*cloudUrl, "/"), name)
-	} else if action == "stats" {
+	case "stats":
 		targetURL = fmt.Sprintf("%s/api/services/%s/stats", strings.TrimSuffix(*cloudUrl, "/"), name)
-	} else if action == "rollback" {
+	case "rollback":
 		targetURL = fmt.Sprintf("%s/api/services/%s/rollback", strings.TrimSuffix(*cloudUrl, "/"), name)
-	} else if action == "env" {
+	case "env":
 		targetURL = fmt.Sprintf("%s/api/services/%s/env", strings.TrimSuffix(*cloudUrl, "/"), name)
-	} else {
+	default:
 		targetURL = fmt.Sprintf("%s/api/services/%s", strings.TrimSuffix(*cloudUrl, "/"), name)
 	}
 
