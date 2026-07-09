@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,25 @@ func TestHTTPPublish(t *testing.T) {
 	pubCount := metrics["messages_published_total"].(float64)
 	if pubCount != 1 {
 		t.Errorf("Expected messages_published_total to be 1, got %v", pubCount)
+	}
+
+	// Verify Prometheus metrics endpoint
+	reqProm, err := http.NewRequest("GET", "http://127.0.0.1:8084/metrics", nil)
+	if err != nil {
+		t.Fatalf("Failed to create metrics request: %v", err)
+	}
+	reqProm.Header.Set("Authorization", "Bearer "+token)
+
+	promResp, err := http.DefaultClient.Do(reqProm)
+	if err != nil {
+		t.Fatalf("Failed to fetch prometheus metrics: %v", err)
+	}
+	defer promResp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(promResp.Body)
+	bodyStr := string(bodyBytes)
+	if !strings.Contains(bodyStr, "servqueue_messages_published_total") {
+		t.Errorf("Expected Prometheus metrics to contain servqueue_messages_published_total, got %s", bodyStr)
 	}
 }
 

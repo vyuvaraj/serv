@@ -47,6 +47,7 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
+	mux.HandleFunc("/metrics", s.handlePrometheusMetrics)
 	mux.HandleFunc("/api/version", ServShared.VersionHandler("servqueue", "1.0.0"))
 	mux.HandleFunc("/api/topics/", s.handleTopics)
 	mux.HandleFunc("/api/v1/topics/", s.handleTopics)
@@ -569,6 +570,36 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		"wal_entries":      walEntries,
 		"delayed_messages": delayedMsgs,
 	})
+}
+
+func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	walEntries, _ := s.engine.GetWALEntries()
+	depth := 0
+	if walEntries != nil {
+		depth = len(walEntries)
+	}
+
+	fmt.Fprintf(w, "# HELP servqueue_messages_published_total Total messages published to the queue.\n")
+	fmt.Fprintf(w, "# TYPE servqueue_messages_published_total counter\n")
+	fmt.Fprintf(w, "servqueue_messages_published_total %d\n\n", s.engine.Metrics.MessagesPublished)
+
+	fmt.Fprintf(w, "# HELP servqueue_wasm_executions_total Total WASM pipeline executions.\n")
+	fmt.Fprintf(w, "# TYPE servqueue_wasm_executions_total counter\n")
+	fmt.Fprintf(w, "servqueue_wasm_executions_total %d\n\n", s.engine.Metrics.WasmExecutions)
+
+	fmt.Fprintf(w, "# HELP servqueue_wasm_execution_errors_total Total WASM execution failures.\n")
+	fmt.Fprintf(w, "# TYPE servqueue_wasm_execution_errors_total counter\n")
+	fmt.Fprintf(w, "servqueue_wasm_execution_errors_total %d\n\n", s.engine.Metrics.WasmExecutionErrors)
+
+	fmt.Fprintf(w, "# HELP servqueue_queue_depth Current size/depth of the WAL queue.\n")
+	fmt.Fprintf(w, "# TYPE servqueue_queue_depth gauge\n")
+	fmt.Fprintf(w, "servqueue_queue_depth %d\n\n", depth)
+
+	fmt.Fprintf(w, "# HELP servqueue_consumer_lag Current simulated consumer lag offset.\n")
+	fmt.Fprintf(w, "# TYPE servqueue_consumer_lag gauge\n")
+	lag := depth / 2
+	fmt.Fprintf(w, "servqueue_consumer_lag %d\n", lag)
 }
 
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
