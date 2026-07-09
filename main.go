@@ -15,6 +15,7 @@ import (
 	"github.com/vyuvaraj/ServShared"
 	"servmail/pkg/delivery"
 	"servmail/pkg/handlers"
+	"servmail/pkg/queue"
 	"servmail/pkg/storage"
 )
 
@@ -35,6 +36,7 @@ var (
 
 	templateStore storage.TemplateStore
 	defaultServer *MailServer
+	mailDiskQueue *queue.DiskQueue
 )
 
 type MailServer struct {
@@ -85,6 +87,13 @@ func initStore() {
 	client := ServShared.NewStoreClient()
 	templateStore = storage.NewServStoreTemplateStore(client)
 	loadTemplatesFromStore()
+
+	queuePath := os.Getenv("SERVMAIL_QUEUE_PATH")
+	if queuePath == "" {
+		queuePath = "servmail-queue.jsonl"
+	}
+	mailDiskQueue = queue.NewDiskQueue(queuePath)
+	log.Printf("[INFO] ServMail disk queue initialized: %s", queuePath)
 }
 
 func loadTemplatesFromStore() {
@@ -109,6 +118,7 @@ func getContext() *handlers.HandlerContext {
 		AttachmentsMu:   &attachmentsMu,
 		MockedEmails:    &mockedEmails,
 		MockedEmailsMu:  &mockedEmailsMu,
+		DiskQueue:       mailDiskQueue,
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vyuvaraj/ServShared"
+	"servmail/pkg/queue"
 	"servmail/pkg/storage"
 	mailtemplate "servmail/pkg/template"
 )
@@ -32,6 +33,7 @@ type HandlerContext struct {
 	MockedEmails    *[]storage.MockEmail
 	MockedEmailsMu  *sync.RWMutex
 	TemplateStore   storage.TemplateStore
+	DiskQueue       *queue.DiskQueue
 }
 
 type SendResponse struct {
@@ -117,7 +119,21 @@ func (ctx *HandlerContext) HandleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Deliver via channel with retries
+	// 2. Persist to disk queue before attempting delivery
+	msgID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	if ctx.DiskQueue != nil {
+		ctx.DiskQueue.Enqueue(&queue.QueuedEmail{
+			ID:       msgID,
+			Channel:  req.Channel,
+			Target:   req.Target,
+			Body:     bodyStr,
+			Context:  req.Context,
+			QueuedAt: time.Now(),
+			Status:   "pending",
+		})
+	}
+
+	// 3. Deliver via channel with retries
 	channelLower := strings.ToLower(req.Channel)
 	var deliveryErr error
 	maxAttempts := 3
@@ -162,9 +178,11 @@ func (ctx *HandlerContext) HandleSend(w http.ResponseWriter, r *http.Request) {
 		backoff *= 2
 	}
 
-	msgID := fmt.Sprintf("msg-%d", time.Now().UnixNano())
 
 	if deliveryErr != nil {
+		if ctx.DiskQueue != nil {
+			ctx.DiskQueue.MarkFailed(msgID, deliveryErr.Error())
+		}
 		dlqMsgID := fmt.Sprintf("mail-%d", time.Now().UnixNano())
 		log.Printf("[DLQ] Published message to dead letter queue: %s (reason: %v)", dlqMsgID, deliveryErr)
 		
@@ -196,6 +214,10 @@ func (ctx *HandlerContext) HandleSend(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   time.Now(),
 	}
 	ctx.TrackingMu.Unlock()
+
+	if ctx.DiskQueue != nil {
+		ctx.DiskQueue.MarkSent(msgID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
