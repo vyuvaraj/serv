@@ -1109,6 +1109,34 @@ func TestDesignerAndStudioEndpoints(t *testing.T) {
 	}
 }
 
+func TestTraceWaterfall(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/traces/waterfall?traceId=tr-test-555", nil)
+	w := httptest.NewRecorder()
+	handleTraceWaterfall(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp WaterfallResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.TraceID != "tr-test-555" {
+		t.Errorf("expected traceId 'tr-test-555', got %q", resp.TraceID)
+	}
+
+	if !strings.Contains(resp.ASCII, "tr-test-555") {
+		t.Errorf("expected ASCII waterfall to contain traceId, got %q", resp.ASCII)
+	}
+
+	if !strings.Contains(resp.ASCII, "GET /api/v1/checkout") {
+		t.Errorf("expected ASCII waterfall to print checkout span name, got %q", resp.ASCII)
+	}
+}
+
+
 
 
 

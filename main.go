@@ -373,6 +373,7 @@ func main() {
 	mux.HandleFunc("/api/db/migrations", authorizeConsole(handleMigrations))
 	mux.HandleFunc("/api/topology", authorizeConsole(handleTopology))
 	mux.HandleFunc("/api/traces/replay", authorizeConsole(handleTraceReplay))
+	mux.HandleFunc("/api/v1/traces/waterfall", handleTraceWaterfall)
 	mux.HandleFunc("/api/alerts", authorizeConsole(handleAlerts))
 	mux.HandleFunc("/api/alerts/ack", authorizeConsole(handleAlertsAck))
 	mux.HandleFunc("/api/logs", authorizeConsole(handleGetLogs))
@@ -2119,6 +2120,101 @@ func handleTraceReplay(w http.ResponseWriter, r *http.Request) {
 		StatusCode: gateResp.StatusCode,
 		Body:       string(gateBodyBytes),
 	})
+}
+
+type WaterfallSpan struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Duration int64           `json:"duration_ms"`
+	Offset   int64           `json:"offset_ms"`
+	Children []WaterfallSpan `json:"children,omitempty"`
+}
+
+type WaterfallResponse struct {
+	TraceID string        `json:"traceId"`
+	Root    WaterfallSpan `json:"root"`
+	ASCII   string        `json:"ascii"`
+}
+
+func handleTraceWaterfall(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	traceID := r.URL.Query().Get("traceId")
+	if traceID == "" {
+		traceID = "tr-mock-123"
+	}
+
+	// Build a mock nested span waterfall
+	root := WaterfallSpan{
+		ID:       "span-root",
+		Name:     "GET /api/v1/checkout",
+		Duration: 120,
+		Offset:   0,
+		Children: []WaterfallSpan{
+			{
+				ID:       "span-auth",
+				Name:     "ServAuth /api/auth/keys/validate",
+				Duration: 15,
+				Offset:   5,
+			},
+			{
+				ID:       "span-db-read",
+				Name:     "ServDB SELECT * FROM products",
+				Duration: 45,
+				Offset:   25,
+			},
+			{
+				ID:       "span-queue-pub",
+				Name:     "ServQueue PUBLISH order.created",
+				Duration: 30,
+				Offset:   75,
+				Children: []WaterfallSpan{
+					{
+						ID:       "span-queue-network",
+						Name:     "TCP Handshake & TLS",
+						Duration: 10,
+						Offset:   77,
+					},
+				},
+			},
+		},
+	}
+
+	// Generate a beautiful visual ASCII waterfall representation
+	var ascii strings.Builder
+	ascii.WriteString(fmt.Sprintf("Trace Waterfall: %s\n", traceID))
+	ascii.WriteString("====================================================\n")
+
+	var printSpan func(s WaterfallSpan, depth int)
+	printSpan = func(s WaterfallSpan, depth int) {
+		indent := strings.Repeat("  ", depth)
+		// Represent duration timeline visually
+		barLength := int(s.Duration / 5)
+		if barLength < 1 {
+			barLength = 1
+		}
+		offsetSpaces := int(s.Offset / 5)
+		timelineBar := strings.Repeat(" ", offsetSpaces) + "[" + strings.Repeat("█", barLength) + "]"
+
+		ascii.WriteString(fmt.Sprintf("%-35s %3dms %s\n", indent+s.Name, s.Duration, timelineBar))
+		for _, child := range s.Children {
+			printSpan(child, depth+1)
+		}
+	}
+	printSpan(root, 0)
+
+	resp := WaterfallResponse{
+		TraceID: traceID,
+		Root:    root,
+		ASCII:   ascii.String(),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }
 
 type Alert struct {
