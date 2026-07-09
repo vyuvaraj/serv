@@ -25,6 +25,8 @@ import (
 
 	"servgate/pkg/otel"
 	"servgate/pkg/wasm"
+
+	"github.com/vyuvaraj/ServShared/pkg/policy"
 )
 
 // WeightedTarget represents a backend target with a traffic weight for canary/blue-green deployments.
@@ -98,6 +100,7 @@ type Route struct {
 	PromptABTest          *PromptABTest     `json:"prompt_ab_test,omitempty"`      // AI Prompt A/B Test Config
 	ResponseQualityScore  bool              `json:"response_quality_score,omitempty"` // AI Response Quality Scoring
 	SemanticRateLimit     bool              `json:"semantic_rate_limit,omitempty"`   // AI Semantic Rate Limiting
+	SemanticTokenLimitPerMin int            `json:"semantic_token_limit_per_min,omitempty"` // AI.11: Max tokens per minute for LLM route
 	AIWAFEnabled          bool              `json:"ai_waf_enabled,omitempty"`        // AI Self-Defending WAF (Enterprise)
 }
 
@@ -235,6 +238,10 @@ type GatewayHandler struct {
 	// OPS.12: Automated Canary Deployment Engine
 	canaryStats   map[string]*canaryStatsRecord // key: canary target URL
 	canaryStatsMu sync.Mutex
+
+	// SEC.17: Dynamic Policy Engine (ServPolicy)
+	policySchema   *policy.PolicySchema
+	policySchemaMu sync.RWMutex
 
 	// OPS.14: Enterprise Control Plane
 	tenantPolicies   map[string]TenantPolicy // key: TenantID
@@ -649,6 +656,29 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if r.URL.Path == "/api/v1/admin/policy/reload" {
+		if h.authToken != "" && r.Header.Get("Authorization") != "Bearer "+h.authToken {
+			WriteJSONError(w, r, "Unauthorized", "ERR_UNAUTHORIZED", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodPost {
+			WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+			return
+		}
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err == nil && len(bodyBytes) > 0 {
+			schema, parseErr := policy.ParsePolicySchema(bodyBytes)
+			if parseErr == nil {
+				h.UpdatePolicySchema(schema)
+			}
+		}
+		h.IncrementPolicyVersion()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "message": "Policy schema updated"})
+		return
+	}
+
 	tenantID := r.Header.Get("X-Tenant-ID")
 	if tenantID != "" {
 		h.tenantPoliciesMu.RLock()
@@ -923,6 +953,27 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !checkIPAccess(clientIP, matchedRoute.IPAllowlist, matchedRoute.IPBlocklist) {
 		WriteJSONError(w, r, "Forbidden: IP access denied", "ERR_IP_ACCESS_DENIED", http.StatusForbidden)
 		return
+	}
+
+	// SEC.17 Dynamic Policy Engine Enforcement (ServPolicy)
+	h.policySchemaMu.RLock()
+	pSchema := h.policySchema
+	h.policySchemaMu.RUnlock()
+	if pSchema != nil {
+		roles, headers := extractUserRolesAndHeaders(r)
+		action, redactFields, customRateLimit, matched := policy.EvaluatePolicy(r.Method, r.URL.Path, headers, roles, pSchema)
+		if matched {
+			if action == "deny" {
+				WriteJSONError(w, r, "Forbidden: Access denied by policy rule", "ERR_POLICY_DENIED", http.StatusForbidden)
+				return
+			}
+			if customRateLimit > 0 {
+				matchedRoute.RateLimitRPM = customRateLimit
+			}
+			if len(redactFields) > 0 {
+				r = r.WithContext(context.WithValue(r.Context(), "policy_redact_fields", redactFields))
+			}
+		}
 	}
 
 	// Rate Limiting Check
@@ -1382,6 +1433,20 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Body.Close()
 
+		// Apply Dynamic Policy response redaction
+		if redactFieldsVal := resp.Request.Context().Value("policy_redact_fields"); redactFieldsVal != nil {
+			redactFields := redactFieldsVal.([]string)
+			var data map[string]interface{}
+			if json.Unmarshal(bodyBytes, &data) == nil {
+				for _, f := range redactFields {
+					if _, ok := data[f]; ok {
+						data[f] = "[REDACTED]"
+					}
+				}
+				bodyBytes, _ = json.Marshal(data)
+			}
+		}
+
 		// Apply AI Response extensions (delegated to build-tagged helper)
 		h.applyAIResponseExtensions(&matchedRoute, resp.Request, resp, bodyBytes)
 
@@ -1767,6 +1832,28 @@ func (h *GatewayHandler) IncrementPolicyVersion() {
 	h.policyVersionMu.Unlock()
 }
 
+func (h *GatewayHandler) UpdatePolicySchema(schema *policy.PolicySchema) {
+	h.policySchemaMu.Lock()
+	h.policySchema = schema
+	h.policySchemaMu.Unlock()
+}
+
+func (h *GatewayHandler) EnableCacheOnRoute(prefix string, ttlSeconds int) {
+	h.routesMu.Lock()
+	defer h.routesMu.Unlock()
+	for i, r := range h.routes {
+		if r.Prefix == prefix {
+			h.routes[i].CacheTTLSeconds = ttlSeconds
+			h.routes[i].CacheMethods = []string{"GET", "POST"}
+			if h.responseCaches[prefix] == nil {
+				h.responseCaches[prefix] = NewResponseCache(time.Duration(ttlSeconds) * time.Second)
+			}
+		}
+	}
+}
+
+
+
 func base64UrlDecode(s string) ([]byte, error) {
 	if l := len(s) % 4; l > 0 {
 		s += strings.Repeat("=", 4-l)
@@ -2062,6 +2149,35 @@ type canaryStatsRecord struct {
 	TotalCalls int64
 	ErrorCalls int64
 }
+
+func extractUserRolesAndHeaders(r *http.Request) ([]string, map[string]string) {
+	roles := []string{"anonymous"}
+	headers := make(map[string]string)
+	for k, v := range r.Header {
+		if len(v) > 0 {
+			headers[strings.ToLower(k)] = v[0]
+		}
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		parts := strings.Split(token, ".")
+		if len(parts) == 3 {
+			payloadBytes, err := base64UrlDecode(parts[1])
+			if err == nil {
+				var claims struct {
+					Roles []string `json:"roles"`
+				}
+				if json.Unmarshal(payloadBytes, &claims) == nil && len(claims.Roles) > 0 {
+					roles = claims.Roles
+				}
+			}
+		}
+	}
+	return roles, headers
+}
+
 
 
 

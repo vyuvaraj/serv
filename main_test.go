@@ -1805,4 +1805,101 @@ func TestEcosystemSchemaRegistryValidation(t *testing.T) {
 	}
 }
 
+func TestDynamicPolicyEngine(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"username":"john_doe","email":"john@example.com","secret":"hidden"}`))
+	}))
+	defer backend.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix: "/api",
+			Target: backend.URL,
+		},
+	}
+
+	h := proxy.NewGatewayHandler(routes, nil, "admin-token")
+	gwServer := httptest.NewServer(h)
+	defer gwServer.Close()
+
+	client := &http.Client{}
+
+	// 1. Initial request without policy -> success
+	req, _ := http.NewRequest("GET", gwServer.URL+"/api/data", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "hidden") {
+		t.Errorf("Expected body to contain unredacted data, got: %s", string(body))
+	}
+
+	// 2. Apply Dynamic Policy
+	policyJSON := `{
+		"version": 1,
+		"rules": [
+			{
+				"id": "deny-delete",
+				"action": "deny",
+				"methods": ["DELETE"],
+				"path": "/api/*"
+			},
+			{
+				"id": "redact-secret",
+				"action": "allow",
+				"methods": ["GET"],
+				"path": "/api/*",
+				"redact_fields": ["secret"]
+			}
+		]
+	}`
+
+	applyReq, _ := http.NewRequest("POST", gwServer.URL+"/api/v1/admin/policy/reload", strings.NewReader(policyJSON))
+	applyReq.Header.Set("Authorization", "Bearer admin-token")
+	applyResp, err := client.Do(applyReq)
+	if err != nil {
+		t.Fatalf("Failed to apply policy: %v", err)
+	}
+	applyResp.Body.Close()
+	if applyResp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected 200 from policy reload, got %d", applyResp.StatusCode)
+	}
+
+	// 3. GET /api/data -> Should redact "secret" field
+	req, _ = http.NewRequest("GET", gwServer.URL+"/api/data", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ = io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "hidden") {
+		t.Errorf("Expected secret field to be redacted, got: %s", string(body))
+	}
+	if !strings.Contains(string(body), "[REDACTED]") {
+		t.Errorf("Expected body to contain [REDACTED], got: %s", string(body))
+	}
+
+	// 4. DELETE /api/data -> Should be denied
+	req, _ = http.NewRequest("DELETE", gwServer.URL+"/api/data", nil)
+	req.Header.Set("Authorization", "Bearer admin-token")
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden, got %d", resp.StatusCode)
+	}
+}
+
+
 

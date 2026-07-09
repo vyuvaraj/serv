@@ -26,6 +26,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/ServShared/pkg/policy"
 )
 
 func main() {
@@ -455,10 +456,19 @@ func main() {
 			proxy.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 			return
 		}
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err == nil && len(bodyBytes) > 0 {
+			schema, parseErr := policy.ParsePolicySchema(bodyBytes)
+			if parseErr == nil {
+				handler.UpdatePolicySchema(schema)
+			}
+		}
+
 		handler.IncrementPolicyVersion()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "message": "Policy version incremented"})
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "message": "Policy schema updated"})
 	}
 
 	handlePolicyRevoke := func(w http.ResponseWriter, r *http.Request) {
