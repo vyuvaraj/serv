@@ -58,6 +58,9 @@ func Analyze(program *Program) []Diagnostic {
 	// LANG.3: Compiler plugin system
 	diags = append(diags, LoadAndRunPlugins(program, ".")...)
 
+	// Topic schema validation
+	diags = append(diags, analyzeTopicSchemas(program)...)
+
 	for _, stmt := range program.Statements {
 		diags = append(diags, analyzeStatement(stmt, program)...)
 	}
