@@ -1737,4 +1737,72 @@ func TestTenantControlPlanePolicies(t *testing.T) {
 	}
 }
 
+func TestEcosystemSchemaRegistryValidation(t *testing.T) {
+	registryMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/schemas/validate" {
+			var req struct {
+				Schema  string `json:"schema"`
+				Payload string `json:"payload"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Schema == "user" {
+				if strings.Contains(req.Payload, `"username"`) {
+					w.Write([]byte(`{"valid":true}`))
+				} else {
+					w.Write([]byte(`{"valid":false,"errors":["Missing required property: username"]}`))
+				}
+			}
+		}
+	}))
+	defer registryMock.Close()
+
+	os.Setenv("SERV_REGISTRY_URL", registryMock.URL)
+	defer os.Unsetenv("SERV_REGISTRY_URL")
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("backend success"))
+	}))
+	defer backend.Close()
+
+	routes := []proxy.Route{
+		{
+			Prefix:     "/users",
+			SchemaName: "user",
+			Target:     backend.URL,
+		},
+	}
+
+	handler := proxy.NewGatewayHandler(routes, nil, "")
+	gwServer := httptest.NewServer(handler)
+	defer gwServer.Close()
+
+	client := &http.Client{}
+
+	validPayload := `{"username":"alice","age":30}`
+	respValid, err := client.Post(gwServer.URL+"/users/create", "application/json", strings.NewReader(validPayload))
+	if err != nil {
+		t.Fatalf("Failed to post: %v", err)
+	}
+	defer respValid.Body.Close()
+	if respValid.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", respValid.StatusCode)
+	}
+
+	invalidPayload := `{"age":30}`
+	respInvalid, err := client.Post(gwServer.URL+"/users/create", "application/json", strings.NewReader(invalidPayload))
+	if err != nil {
+		t.Fatalf("Failed to post: %v", err)
+	}
+	defer respInvalid.Body.Close()
+	if respInvalid.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected status 400 Bad Request, got %d", respInvalid.StatusCode)
+	}
+	body, _ := io.ReadAll(respInvalid.Body)
+	if !strings.Contains(string(body), "Missing required property: username") {
+		t.Errorf("Expected error message to mention missing username, got: %s", string(body))
+	}
+}
+
 

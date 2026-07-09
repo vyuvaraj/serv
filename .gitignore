@@ -5,3 +5,4 @@ dist/
 vendor/
 *_ee.go
 *_ee_test.go
+.wazero-cache-servgate/

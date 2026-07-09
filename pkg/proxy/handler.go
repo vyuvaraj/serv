@@ -56,6 +56,7 @@ type WASMSplitConfig struct {
 
 type Route struct {
 	Prefix             string            `json:"prefix"`
+	SchemaName         string            `json:"schema,omitempty"`
 	Target             string            `json:"target"`
 	Targets            []string          `json:"targets,omitempty"`             // Multiple backend targets
 	TargetsWeighted    []WeightedTarget  `json:"targets_weighted,omitempty"`    // Weighted canary/blue-green targets
@@ -828,6 +829,42 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Inject tenant into request context
 		r = r.WithContext(context.WithValue(r.Context(), "tenant", keyInfo.Tenant))
+	}
+
+	// API.8: Schema Registry validation middleware
+	if matchedRoute.SchemaName != "" && (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err == nil {
+			r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			registryURL := os.Getenv("SERV_REGISTRY_URL")
+			if registryURL == "" {
+				registryURL = "http://localhost:8088"
+			}
+			url := strings.TrimSuffix(registryURL, "/") + "/api/v1/schemas/validate"
+
+			reqPayload, _ := json.Marshal(map[string]string{
+				"schema":  matchedRoute.SchemaName,
+				"payload": string(bodyBytes),
+			})
+
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Post(url, "application/json", bytes.NewReader(reqPayload))
+			if err == nil {
+				defer resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					var valRes struct {
+						Valid  bool     `json:"valid"`
+						Errors []string `json:"errors"`
+					}
+					if json.NewDecoder(resp.Body).Decode(&valRes) == nil && !valRes.Valid {
+						WriteJSONError(w, r, "Request schema validation failed: "+strings.Join(valRes.Errors, ", "), "ERR_SCHEMA_VALIDATION_FAILED", http.StatusBadRequest)
+						return
+					}
+				}
+			}
+		}
 	}
 
 	// MCP (Model Context Protocol) handler
