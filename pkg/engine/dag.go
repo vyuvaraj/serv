@@ -51,6 +51,24 @@ func HasCycle(def storage.WorkflowDef) bool {
 	return false
 }
 
+// recordReplaySnapshot captures the current task state as a time-travel replay step.
+func recordReplaySnapshot(inst *storage.WorkflowInstance, taskName, status, msg string) {
+	// Deep copy task states for snapshot
+	snap := make(map[string]*storage.TaskStatus, len(inst.TaskStates))
+	for k, v := range inst.TaskStates {
+		copy := *v
+		snap[k] = &copy
+	}
+	inst.ReplayLog = append(inst.ReplayLog, storage.ReplaySnapshot{
+		StepIndex:  len(inst.ReplayLog),
+		TaskName:   taskName,
+		Status:     status,
+		Timestamp:  time.Now(),
+		TaskStates: snap,
+		Message:    msg,
+	})
+}
+
 func RunWorkflow(
 	inst *storage.WorkflowInstance,
 	def storage.WorkflowDef,
@@ -115,6 +133,7 @@ func RunWorkflow(
 			state.Status = "running"
 			state.StartedAt = time.Now()
 			inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s started.", task.Name))
+			recordReplaySnapshot(inst, task.Name, "started", fmt.Sprintf("Task %s started execution", task.Name))
 			inst.Mu.Unlock()
 			SaveCheckpoint(inst, store, instances, instancesMu)
 
@@ -166,6 +185,7 @@ func RunWorkflow(
 				inst.Status = "failed"
 				inst.FinishedAt = time.Now()
 				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s failed: %v. Initiating Saga compensation...", task.Name, err))
+				recordReplaySnapshot(inst, task.Name, "failed", fmt.Sprintf("Task %s failed: %v", task.Name, err))
 				inst.Mu.Unlock()
 				SaveCheckpoint(inst, store, instances, instancesMu)
 
@@ -175,6 +195,7 @@ func RunWorkflow(
 			} else {
 				state.Status = "completed"
 				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s completed.", task.Name))
+				recordReplaySnapshot(inst, task.Name, "completed", fmt.Sprintf("Task %s completed successfully", task.Name))
 				completedCount++
 				progressMade = true
 			}

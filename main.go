@@ -76,6 +76,10 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	getContext().HandleHistory(w, r)
 }
 
+func handleTimeTravelReplay(w http.ResponseWriter, r *http.Request) {
+	getContext().HandleTimeTravelReplay(w, r)
+}
+
 func handleReplay(w http.ResponseWriter, r *http.Request) {
 	getContext().HandleReplay(w, r)
 }
@@ -119,6 +123,7 @@ func main() {
 	mux.HandleFunc("/api/workflows/resume", handleResume)
 	mux.HandleFunc("/api/workflows/approve", handleApprove)
 	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+	mux.HandleFunc("/api/instances/", handleTimeTravelReplay) // DX.13: time-travel replay — GET /api/instances/{id}/replay
 	mux.HandleFunc("/api/workflows/history", handleHistory)
 	mux.HandleFunc("/api/workflows/replay", handleReplay)
 	mux.HandleFunc("/api/workflows/validate", handleValidate)

@@ -519,3 +519,64 @@ func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ok"}`))
 }
+
+// HandleTimeTravelReplay returns the step-indexed execution snapshot log for a workflow instance.
+// This implements DX.13: Time-Travel Workflow Replay.
+// GET /api/instances/{id}/replay
+// Optional query param: ?step=N — return state at step N only.
+func (ctx *HandlerContext) HandleTimeTravelReplay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// path: api/instances/{id}/replay
+	var instID string
+	for i, p := range parts {
+		if p == "instances" && i+1 < len(parts) {
+			instID = parts[i+1]
+			break
+		}
+	}
+	if instID == "" {
+		http.Error(w, "instance ID required", http.StatusBadRequest)
+		return
+	}
+
+	ctx.Mu.RLock()
+	inst, exists := ctx.Instances[instID]
+	ctx.Mu.RUnlock()
+	if !exists {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	inst.Mu.RLock()
+	defer inst.Mu.RUnlock()
+
+	// Optional ?step=N — return single snapshot
+	stepParam := r.URL.Query().Get("step")
+	if stepParam != "" {
+		var stepIdx int
+		fmt.Sscanf(stepParam, "%d", &stepIdx)
+		if stepIdx < 0 || stepIdx >= len(inst.ReplayLog) {
+			http.Error(w, fmt.Sprintf("step %d out of range (total: %d)", stepIdx, len(inst.ReplayLog)), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(inst.ReplayLog[stepIdx])
+		return
+	}
+
+	// Return full replay log with metadata
+	response := map[string]interface{}{
+		"instance_id":  instID,
+		"workflow_id":  inst.WorkflowID,
+		"final_status": inst.Status,
+		"total_steps":  len(inst.ReplayLog),
+		"replay_log":   inst.ReplayLog,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}

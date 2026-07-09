@@ -32,6 +32,16 @@ type TaskStatus struct {
 	Error      string    `json:"error,omitempty"`
 }
 
+// ReplaySnapshot captures the workflow state at a single execution step for time-travel replay.
+type ReplaySnapshot struct {
+	StepIndex  int                    `json:"step_index"`
+	TaskName   string                 `json:"task_name"`
+	Status     string                 `json:"status"` // started, completed, failed
+	Timestamp  time.Time              `json:"timestamp"`
+	TaskStates map[string]*TaskStatus `json:"task_states"` // snapshot of all states at this moment
+	Message    string                 `json:"message,omitempty"`
+}
+
 type WorkflowInstance struct {
 	ID          string                `json:"id"`
 	WorkflowID  string                `json:"workflow_id"`
@@ -40,6 +50,7 @@ type WorkflowInstance struct {
 	StartedAt   time.Time             `json:"started_at"`
 	FinishedAt  time.Time             `json:"finished_at,omitempty"`
 	Logs        []string              `json:"logs"`
+	ReplayLog   []ReplaySnapshot      `json:"replay_log,omitempty"` // DX.13: time-travel snapshots
 	Mu          sync.RWMutex          `json:"-"`
 }
 

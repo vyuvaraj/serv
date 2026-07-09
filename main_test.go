@@ -755,3 +755,107 @@ func TestEventDrivenSagaCompensation(t *testing.T) {
 
 	_ = os.Remove(inst.ID + ".state")
 }
+
+func TestTimeTravelWorkflowReplay(t *testing.T) {
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+	mux.HandleFunc("/api/instances/", handleTimeTravelReplay)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Define a 3-task sequential workflow
+	defPayload := storage.WorkflowDef{
+		ID: "replay-test-flow",
+		Tasks: []storage.Task{
+			{Name: "StepA", DependsOn: nil, Action: "success"},
+			{Name: "StepB", DependsOn: []string{"StepA"}, Action: "success"},
+			{Name: "StepC", DependsOn: []string{"StepB"}, Action: "success"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, err := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to define workflow: %v", err)
+	}
+	resp.Body.Close()
+
+	// 2. Execute workflow
+	execPayload := map[string]string{"workflow_id": "replay-test-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, err := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	if err != nil {
+		t.Fatalf("failed to execute workflow: %v", err)
+	}
+	var inst storage.WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// 3. Wait for completion
+	var finalInst storage.WorkflowInstance
+	for i := 0; i < 30; i++ {
+		getResp, err := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+		if err == nil {
+			json.NewDecoder(getResp.Body).Decode(&finalInst)
+			getResp.Body.Close()
+			if finalInst.Status == "completed" {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if finalInst.Status != "completed" {
+		t.Fatalf("expected workflow to complete, got %q. Logs: %v", finalInst.Status, finalInst.Logs)
+	}
+
+	// 4. Fetch the full time-travel replay log
+	replayResp, err := http.Get(testServer.URL + "/api/instances/" + inst.ID + "/replay")
+	if err != nil {
+		t.Fatalf("failed to fetch replay log: %v", err)
+	}
+	defer replayResp.Body.Close()
+	if replayResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from replay endpoint, got %d", replayResp.StatusCode)
+	}
+
+	var replayResult map[string]interface{}
+	json.NewDecoder(replayResp.Body).Decode(&replayResult)
+
+	totalSteps := int(replayResult["total_steps"].(float64))
+	// 3 tasks × 2 events (started + completed) = 6 snapshots minimum
+	if totalSteps < 6 {
+		t.Errorf("expected at least 6 replay steps for 3 tasks, got %d", totalSteps)
+	}
+
+	// 5. Fetch step 0 individually
+	step0Resp, err := http.Get(testServer.URL + "/api/instances/" + inst.ID + "/replay?step=0")
+	if err != nil {
+		t.Fatalf("failed to fetch step 0: %v", err)
+	}
+	defer step0Resp.Body.Close()
+	if step0Resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 fetching step 0, got %d", step0Resp.StatusCode)
+	}
+
+	var snap storage.ReplaySnapshot
+	json.NewDecoder(step0Resp.Body).Decode(&snap)
+	if snap.StepIndex != 0 {
+		t.Errorf("expected step_index=0, got %d", snap.StepIndex)
+	}
+	if snap.Status == "" {
+		t.Error("expected replay snapshot to have a status")
+	}
+
+	// 6. Out-of-range step returns 400
+	badResp, _ := http.Get(fmt.Sprintf("%s/api/instances/%s/replay?step=%d", testServer.URL, inst.ID, totalSteps+10))
+	if badResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for out-of-range step, got %d", badResp.StatusCode)
+	}
+	badResp.Body.Close()
+
+	_ = os.Remove(inst.ID + ".state")
+}
+
