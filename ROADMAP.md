@@ -67,14 +67,14 @@
 - [ ] **Persistent Tunnels**: Keep tunnels alive across client restarts with session resumption.
 - [ ] **Custom Domain Mapping**: Map production domains to local tunnels for realistic testing.
 - [ ] **Request Recording & Replay**: Record all requests through tunnel, replay them later for debugging.
-- [ ] **Bandwidth Throttling**: Simulate slow networks (3G, satellite) for mobile testing.
+- [x] **Bandwidth Throttling**: Simulate slow networks (3G, satellite) for mobile testing. [July 9, 2026]
 - [ ] **Tunnel Metrics in ServConsole**: Live throughput, latency, and connection count dashboard.
 - [ ] **TCP Tunnel Support**: Tunnel raw TCP (databases, Redis, gRPC) — not just HTTP.
 - [ ] **Webhook Relay Mode**: Receive webhooks on public URL, replay to multiple local services.
 
 ## Phase 5: Architectural Depth & Developer Experience (Pending)
 - [ ] **`serv tunnel inspect` CLI** — Real-time view of active tunnel connections, throughput, and recent request log from the terminal (DevOps)
-- [ ] **Request Diff Mode** — Show a coloured diff between the proxied request and original, highlighting header mutations, body modifications or injected WASM transforms (DX)
-- [ ] **Tunnel Config-as-Code** — Declare tunnel rules in `.serv/tunnel.yaml` (name, auth, subdomain, filters); committed to git for reproducible team setups (DevOps / DX)
+- [x] **Request Diff Mode** — Show a coloured diff between the proxied request and original, highlighting header mutations, body modifications or injected WASM transforms (DX) [July 9, 2026]
+- [x] **Tunnel Config-as-Code** — Declare tunnel rules in `.serv/tunnel.yaml` (name, auth, subdomain, filters); committed to git for reproducible team setups (DevOps / DX) [July 9, 2026]
 
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.

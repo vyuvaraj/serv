@@ -3,6 +3,7 @@
 package inspector
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -177,3 +178,75 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
+
+// HandleDiff serves GET /api/inspect/{id}/diff?other={otherID}
+func (ins *Inspector) HandleDiff(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	entryA, okA := ins.Get(id)
+	if !okA {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "first entry not found"})
+		return
+	}
+
+	otherID := r.URL.Query().Get("other")
+	if otherID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "other parameter is required"})
+		return
+	}
+
+	entryB, okB := ins.Get(otherID)
+	if !okB {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "second entry not found"})
+		return
+	}
+
+	// Diff headers
+	addedHeaders := []string{}
+	removedHeaders := []string{}
+	modifiedHeaders := make(map[string]map[string]string)
+
+	for k, vA := range entryA.RequestHeaders {
+		if vB, ok := entryB.RequestHeaders[k]; ok {
+			if vA != vB {
+				modifiedHeaders[k] = map[string]string{"from": vA, "to": vB}
+			}
+		} else {
+			removedHeaders = append(removedHeaders, k)
+		}
+	}
+	for k := range entryB.RequestHeaders {
+		if _, ok := entryA.RequestHeaders[k]; !ok {
+			addedHeaders = append(addedHeaders, k)
+		}
+	}
+
+	// Diff bodies
+	bodyABytes, _ := base64.StdEncoding.DecodeString(entryA.RequestBody)
+	bodyBBytes, _ := base64.StdEncoding.DecodeString(entryB.RequestBody)
+	bodyA := string(bodyABytes)
+	bodyB := string(bodyBBytes)
+
+	bodyDiff := ""
+	if bodyA != bodyB {
+		bodyDiff = fmt.Sprintf("Body sizes differ: %d vs %d bytes", len(bodyA), len(bodyB))
+	}
+
+	diffResult := map[string]interface{}{
+		"headers": map[string]interface{}{
+			"added":    addedHeaders,
+			"removed":  removedHeaders,
+			"modified": modifiedHeaders,
+		},
+		"body": map[string]interface{}{
+			"diff":     bodyDiff,
+			"len_diff": len(bodyB) - len(bodyA),
+		},
+	}
+
+	writeJSON(w, http.StatusOK, diffResult)
+}
+

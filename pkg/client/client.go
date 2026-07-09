@@ -44,6 +44,7 @@ type Client struct {
 	shareAuth    string               // credentials for basic auth sharing (user:pass)
 	tcpPort      int                  // requested TCP relay port
 	tcpConns     map[string]net.Conn  // active downstream TCP connections (session -> net.Conn)
+	throttleBytesPerSec int64         // bandwidth limit in bytes/sec
 }
 
 // NewClient creates a new tunnel client.
@@ -75,6 +76,50 @@ func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort,
 func (c *Client) WithTCPPort(port int) *Client {
 	c.tcpPort = port
 	return c
+}
+
+// WithThrottle configures the bandwidth limit for the client.
+func (c *Client) WithThrottle(rate string) *Client {
+	c.throttleBytesPerSec = parseThrottle(rate)
+	return c
+}
+
+func parseThrottle(rate string) int64 {
+	rate = strings.TrimSpace(strings.ToLower(rate))
+	if rate == "" {
+		return 0
+	}
+	multiplier := int64(1)
+	if strings.HasSuffix(rate, "k") {
+		multiplier = 1024
+		rate = strings.TrimSuffix(rate, "k")
+	} else if strings.HasSuffix(rate, "m") {
+		multiplier = 1024 * 1024
+		rate = strings.TrimSuffix(rate, "m")
+	}
+	var val float64
+	if _, err := fmt.Sscan(rate, &val); err == nil {
+		return int64(val * float64(multiplier))
+	}
+	return 0
+}
+
+type ThrottledReader struct {
+	R           io.Reader
+	BytesPerSec int64
+}
+
+func (tr *ThrottledReader) Read(p []byte) (int, error) {
+	start := time.Now()
+	n, err := tr.R.Read(p)
+	if n > 0 && tr.BytesPerSec > 0 {
+		expectedDur := time.Duration(int64(n)) * time.Second / time.Duration(tr.BytesPerSec)
+		actualDur := time.Since(start)
+		if expectedDur > actualDur {
+			time.Sleep(expectedDur - actualDur)
+		}
+	}
+	return n, err
 }
 
 // Run connects to the relay and starts proxying. Blocks until interrupted.
@@ -321,6 +366,9 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 		bodyBytes, err := base64.StdEncoding.DecodeString(req.Body)
 		if err == nil {
 			bodyReader = bytes.NewReader(bodyBytes)
+			if c.throttleBytesPerSec > 0 {
+				bodyReader = &ThrottledReader{R: bodyReader, BytesPerSec: c.throttleBytesPerSec}
+			}
 		}
 	}
 
@@ -359,7 +407,11 @@ func (c *Client) handleRequest(conn *websocket.Conn, env tunnel.Envelope) {
 	defer resp.Body.Close()
 
 	// Read response body.
-	respBody, _ := io.ReadAll(resp.Body)
+	var respReader io.Reader = resp.Body
+	if c.throttleBytesPerSec > 0 {
+		respReader = &ThrottledReader{R: resp.Body, BytesPerSec: c.throttleBytesPerSec}
+	}
+	respBody, _ := io.ReadAll(respReader)
 	var respBodyB64 string
 	if len(respBody) > 0 {
 		respBodyB64 = base64.StdEncoding.EncodeToString(respBody)
@@ -475,6 +527,11 @@ func (c *Client) startInspectorServer() {
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/inspect/") {
 			id := strings.TrimPrefix(r.URL.Path, "/api/inspect/")
+			if strings.HasSuffix(id, "/diff") {
+				id = strings.TrimSuffix(id, "/diff")
+				c.inspector.HandleDiff(w, r, id)
+				return
+			}
 			c.inspector.HandleGet(w, r, id)
 			return
 		}

@@ -18,6 +18,8 @@ import (
 	"servtunnel/pkg/inspector"
 	"servtunnel/pkg/otel"
 	"servtunnel/pkg/server"
+
+	"gopkg.in/yaml.v3"
 )
 
 const version = "0.1.0"
@@ -93,15 +95,112 @@ func runServer() {
 	log.Println("ServTunnel: Shutdown complete")
 }
 
+type TunnelConfigItem struct {
+	Port         string `yaml:"port"`
+	Subdomain    string `yaml:"subdomain"`
+	CustomDomain string `yaml:"custom_domain"`
+	Token        string `yaml:"token"`
+	InspectPort  string `yaml:"inspect_port"`
+	ShareAuth    string `yaml:"share_auth"`
+	Throttle     string `yaml:"throttle"`
+}
+
+type TunnelConfigFile struct {
+	Relay   string             `yaml:"relay"`
+	Token   string             `yaml:"token"`
+	Tunnels []TunnelConfigItem `yaml:"tunnels"`
+}
+
+func tryLoadConfig() (*TunnelConfigFile, string) {
+	paths := []string{".serv/tunnel.yaml", "servtunnel.yaml", "tunnel.yaml"}
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			var cfg TunnelConfigFile
+			if err := yaml.Unmarshal(data, &cfg); err == nil {
+				return &cfg, p
+			}
+		}
+	}
+	return nil, ""
+}
+
 func runClient() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: servtunnel client <local-port> [options]\n")
-		fmt.Fprintf(os.Stderr, "\nOptions:\n")
-		fmt.Fprintf(os.Stderr, "  --relay <url>       Relay server WebSocket URL (default: ws://localhost:8443/ws/connect)\n")
-		fmt.Fprintf(os.Stderr, "  --subdomain <name>  Requested subdomain (default: auto-generated)\n")
-		fmt.Fprintf(os.Stderr, "  --token <token>     Authentication token\n")
-		fmt.Fprintf(os.Stderr, "  --inspect-port <p>  Local inspection web UI port (default: 4040, use 0 or empty to disable)\n")
-		os.Exit(1)
+	var cfgFile *TunnelConfigFile
+	var cfgPath string
+
+	if len(os.Args) >= 4 && os.Args[2] == "--config" {
+		path := os.Args[3]
+		if data, err := os.ReadFile(path); err == nil {
+			var cfg TunnelConfigFile
+			if err := yaml.Unmarshal(data, &cfg); err == nil {
+				cfgFile = &cfg
+				cfgPath = path
+			} else {
+				log.Fatalf("Failed to parse config file: %v", err)
+			}
+		} else {
+			log.Fatalf("Failed to read config file %s: %v", path, err)
+		}
+	} else if len(os.Args) < 3 {
+		cfgFile, cfgPath = tryLoadConfig()
+		if cfgFile == nil {
+			fmt.Fprintf(os.Stderr, "Usage: servtunnel client <local-port> [options]\n")
+			fmt.Fprintf(os.Stderr, "       servtunnel client --config <config-path>\n")
+			fmt.Fprintf(os.Stderr, "\nOptions:\n")
+			fmt.Fprintf(os.Stderr, "  --relay <url>       Relay server WebSocket URL (default: ws://localhost:8443/ws/connect)\n")
+			fmt.Fprintf(os.Stderr, "  --subdomain <name>  Requested subdomain (default: auto-generated)\n")
+			fmt.Fprintf(os.Stderr, "  --token <token>     Authentication token\n")
+			fmt.Fprintf(os.Stderr, "  --inspect-port <p>  Local inspection web UI port (default: 4040, use 0 or empty to disable)\n")
+			os.Exit(1)
+		}
+	} else {
+		// Also check default config if port is not a config switch
+		if !strings.HasPrefix(os.Args[2], "-") {
+			cfgFile, cfgPath = tryLoadConfig()
+		}
+	}
+
+	if cfgFile != nil {
+		log.Printf("Loaded tunnel config from %s", cfgPath)
+		relayURL := cfgFile.Relay
+		if relayURL == "" {
+			relayURL = getEnvOrDefault("SERVTUNNEL_RELAY", "ws://localhost:8443/ws/connect")
+		}
+		globalToken := cfgFile.Token
+		if globalToken == "" {
+			globalToken = getEnvOrDefault("SERVTUNNEL_TOKEN", "")
+		}
+
+		var wg sync.WaitGroup
+		for i, t := range cfgFile.Tunnels {
+			wg.Add(1)
+			currInspectPort := t.InspectPort
+			if currInspectPort == "" {
+				if i == 0 {
+					currInspectPort = "4040"
+				} else {
+					currInspectPort = "0"
+				}
+			}
+			tToken := t.Token
+			if tToken == "" {
+				tToken = globalToken
+			}
+
+			go func(tc TunnelConfigItem, insp string, tok string) {
+				defer wg.Done()
+				localAddr := "localhost:" + tc.Port
+				c := client.NewClient(localAddr, relayURL, tc.Subdomain, tc.CustomDomain, tok, insp, tc.ShareAuth)
+				if tc.Throttle != "" {
+					c.WithThrottle(tc.Throttle)
+				}
+				if err := c.Run(); err != nil {
+					fmt.Fprintf(os.Stderr, "Tunnel error on port %s (subdomain: %s): %v\n", tc.Port, tc.Subdomain, err)
+				}
+			}(t, currInspectPort, tToken)
+		}
+		wg.Wait()
+		return
 	}
 
 	localPort := os.Args[2]
