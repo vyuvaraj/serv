@@ -9,6 +9,12 @@ import (
 	"io"
 )
 
+// Enterprise KMS hooks (overridden in EE build)
+var (
+	EnterpriseKMSEncrypt = func(plaintext []byte) ([]byte, error) { return nil, nil }
+	EnterpriseKMSDecrypt = func(ciphertext []byte) ([]byte, error) { return nil, nil }
+)
+
 // deriveKey derives a 32-byte (AES-256) key from any passphrase using SHA-256.
 func deriveKey(passphrase string) []byte {
 	h := sha256.Sum256([]byte(passphrase))
@@ -18,6 +24,12 @@ func deriveKey(passphrase string) []byte {
 // encryptPayload encrypts plaintext using AES-256-GCM.
 // The returned bytes have the format: [12-byte nonce][ciphertext+tag].
 func encryptPayload(key []byte, plaintext []byte) ([]byte, error) {
+	if eeBytes, err := EnterpriseKMSEncrypt(plaintext); err != nil {
+		return nil, err
+	} else if eeBytes != nil {
+		return eeBytes, nil
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: create cipher: %w", err)
@@ -38,6 +50,12 @@ func encryptPayload(key []byte, plaintext []byte) ([]byte, error) {
 
 // decryptPayload decrypts AES-256-GCM ciphertext produced by encryptPayload.
 func decryptPayload(key []byte, ciphertext []byte) ([]byte, error) {
+	if eeBytes, err := EnterpriseKMSDecrypt(ciphertext); err != nil {
+		return nil, err
+	} else if eeBytes != nil {
+		return eeBytes, nil
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: create cipher: %w", err)
