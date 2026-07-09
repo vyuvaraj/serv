@@ -43,6 +43,10 @@ var (
 		"console-client-id": "console-secret-key-9876",
 	}
 
+	EnterpriseRegisterAuthSession = func(token string, username string, ip string, userAgent string) error { return nil }
+	EnterpriseVerifyAuthSession   = func(token string) bool { return true }
+	EnterpriseRevokeAuthSession   = func(token string) error { return nil }
+
 	// AI.32 stuffing detection variables
 	failedLoginsIP   = make(map[string][]time.Time)
 	failedLoginsIPMu sync.Mutex
@@ -538,6 +542,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionsMu.Unlock()
 	saveSessionsToStore()
+	_ = EnterpriseRegisterAuthSession(token, user.Username, r.RemoteAddr, r.UserAgent())
 	_ = ServShared.EmitAuditEvent("ServAuth", "USER_LOGIN", user.Username, map[string]interface{}{"ip": r.RemoteAddr, "tenant": tenantID})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -862,6 +867,7 @@ func handleSessionsRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	sessionsMu.Unlock()
 	saveSessionsToStore()
+	_ = EnterpriseRevokeAuthSession(req.Token)
 
 	if !exists {
 		http.Error(w, "store.Session not found", http.StatusNotFound)
@@ -1132,7 +1138,7 @@ func handleSessions(w http.ResponseWriter, r *http.Request) {
 	sessionsMu.RLock()
 	var list []*store.Session
 	for _, s := range sessions {
-		if !s.Revoked && !isSessionExpired(s) {
+		if !s.Revoked && !isSessionExpired(s) && EnterpriseVerifyAuthSession(s.Token) {
 			list = append(list, s)
 		}
 	}
