@@ -56,16 +56,16 @@
 ---
 
 ### 🔲 Phase 4: Scale
-- [ ] Multi-relay federation (distribute tunnels across regions)
+- [x] Multi-relay federation (distribute tunnels across regions) [July 9, 2026]
 - [x] Persistent tunnel names (reserved subdomains)
-- [ ] Usage analytics and billing integration
+- [x] Usage analytics and billing integration [July 9, 2026]
 - [ ] Enterprise features (SSO, audit logging, IP allowlists)
 
 
 ## Phase 4: Enterprise Tunneling (Next Level)
-- [ ] **Team Collaboration**: Share tunnel access with team members via token-based invite links.
-- [ ] **Persistent Tunnels**: Keep tunnels alive across client restarts with session resumption.
-- [ ] **Custom Domain Mapping**: Map production domains to local tunnels for realistic testing.
+- [x] **Team Collaboration**: Share tunnel access with team members via token-based invite links. [July 9, 2026]
+- [x] **Persistent Tunnels**: Keep tunnels alive across client restarts with session resumption. [July 9, 2026]
+- [x] **Custom Domain Mapping**: Map production domains to local tunnels for realistic testing. [July 9, 2026]
 - [x] **Request Recording & Replay**: Record all requests through tunnel, replay them later for debugging. [July 9, 2026]
 - [x] **Bandwidth Throttling**: Simulate slow networks (3G, satellite) for mobile testing. [July 9, 2026]
 - [ ] **Tunnel Metrics in ServConsole**: Live throughput, latency, and connection count dashboard.

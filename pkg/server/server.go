@@ -7,6 +7,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -98,6 +101,8 @@ type tunnelConn struct {
 	bytesWritten int64
 	quotaLimit   int64
 	sharingAuth  string
+	connections  int64
+	startTime    time.Time
 }
 
 // Server is the ServTunnel relay server.
@@ -116,6 +121,7 @@ type Server struct {
 	customTunnels map[string]*tunnelConn // customDomain → tunnelConn
 	tcpListeners  map[int]net.Listener   // port → net.Listener (for active TCP tunnels)
 	resumptionTokens map[string]string   // subdomain → resumptionToken
+	federationPeers  []string
 }
 
 // NewServer creates a new relay server.
@@ -143,6 +149,17 @@ func NewServer(addr, baseDomain string, insp *inspector.Inspector) *Server {
 		}
 	}
 
+	peersStr := os.Getenv("SERVTUNNEL_FEDERATION_PEERS")
+	var peers []string
+	if peersStr != "" {
+		for _, p := range strings.Split(peersStr, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				peers = append(peers, strings.TrimSuffix(p, "/"))
+			}
+		}
+	}
+
 	return &Server{
 		addr:               addr,
 		baseDomain:         baseDomain,
@@ -155,6 +172,7 @@ func NewServer(addr, baseDomain string, insp *inspector.Inspector) *Server {
 		customTunnels:      make(map[string]*tunnelConn),
 		tcpListeners:       make(map[int]net.Listener),
 		resumptionTokens:   make(map[string]string),
+		federationPeers:    peers,
 	}
 }
 
@@ -399,6 +417,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		limiter:      NewRateLimiter(50, 100),
 		quotaLimit:   100 * 1024 * 1024, // 100 MB default quota
 		sharingAuth:  env.Control.SharingAuth,
+		startTime:    time.Now(),
 	}
 
 	tcpPort := env.Control.TCPPort
@@ -464,6 +483,26 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	})
 	tc.mu.Unlock()
 
+	// Periodic analytics reporting
+	analyticsURL := os.Getenv("SERVTUNNEL_ANALYTICS_URL")
+	var analyticsStop chan struct{}
+	if analyticsURL != "" {
+		analyticsStop = make(chan struct{})
+		go func(tc *tunnelConn, stopChan chan struct{}) {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					s.sendAnalyticsWebhook(analyticsURL, tc)
+				case <-stopChan:
+					s.sendAnalyticsWebhook(analyticsURL, tc)
+					return
+				}
+			}
+		}(tc, analyticsStop)
+	}
+
 	// Read loop: process responses and pings from the client.
 	s.readLoop(tc)
 
@@ -483,6 +522,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Tunnel disconnected: %s (custom: %s)", subdomain, customDomain)
 	} else {
 		log.Printf("Tunnel cleanup bypassed for session resumed subdomain: %s", subdomain)
+	}
+	if analyticsStop != nil {
+		close(analyticsStop)
 	}
 	s.mu.Unlock()
 	conn.Close()
@@ -552,6 +594,25 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		s.mu.RUnlock()
 	}
 
+	if !exists && len(s.federationPeers) > 0 {
+		for _, peer := range s.federationPeers {
+			checkURL := fmt.Sprintf("%s/api/tunnels/%s/exists", peer, subdomain)
+			reqCheck, err := http.NewRequestWithContext(r.Context(), "HEAD", checkURL, nil)
+			if err != nil {
+				continue
+			}
+			client := &http.Client{Timeout: 1 * time.Second}
+			respCheck, err := client.Do(reqCheck)
+			if err == nil {
+				respCheck.Body.Close()
+				if respCheck.StatusCode == http.StatusOK {
+					s.proxyToPeer(w, r, peer)
+					return
+				}
+			}
+		}
+	}
+
 	span := otel.StartSpan("tunnel.proxy", r.Header.Get("traceparent"))
 
 	if !exists {
@@ -559,6 +620,8 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf(`{"error":"tunnel %q not found"}`, subdomain), http.StatusBadGateway)
 		return
 	}
+
+	atomic.AddInt64(&tc.connections, 1)
 
 	// Check bandwidth limit
 	if atomic.LoadInt64(&tc.bytesRead)+atomic.LoadInt64(&tc.bytesWritten) > tc.quotaLimit {
@@ -988,14 +1051,31 @@ func (s *Server) handleTCPConnection(tc *tunnelConn, clientConn net.Conn) {
 func (s *Server) handleTunnelsSubroutes(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/tunnels/")
 	parts := strings.Split(path, "/")
-	if len(parts) >= 2 && parts[1] == "invite" {
-		s.handleGenerateInvite(w, r, parts[0])
-		return
+	if len(parts) >= 2 {
+		subdomain := parts[0]
+		action := parts[1]
+		if action == "invite" {
+			s.handleGenerateInvite(w, r, subdomain)
+			return
+		}
+		if action == "exists" {
+			s.handleCheckExists(w, r, subdomain)
+			return
+		}
+		if action == "analytics" {
+			s.handleGetAnalytics(w, r, subdomain)
+			return
+		}
 	}
 	http.NotFound(w, r)
 }
 
 func (s *Server) handleGenerateInvite(w http.ResponseWriter, r *http.Request, subdomain string) {
+	if err := s.authenticate(r); err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	s.mu.RLock()
 	_, exists := s.tunnels[subdomain]
 	s.mu.RUnlock()
@@ -1026,4 +1106,69 @@ func (s *Server) handleGenerateInvite(w http.ResponseWriter, r *http.Request, su
 		"invite_token": inviteToken,
 		"invite_url":   inviteURL,
 	})
+}
+
+func (s *Server) handleCheckExists(w http.ResponseWriter, r *http.Request, subdomain string) {
+	s.mu.RLock()
+	_, exists := s.tunnels[subdomain]
+	s.mu.RUnlock()
+	if exists {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func (s *Server) handleGetAnalytics(w http.ResponseWriter, r *http.Request, subdomain string) {
+	s.mu.RLock()
+	tc, exists := s.tunnels[subdomain]
+	s.mu.RUnlock()
+	if !exists {
+		http.Error(w, `{"error":"tunnel not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"subdomain":     subdomain,
+		"bytes_read":    atomic.LoadInt64(&tc.bytesRead),
+		"bytes_written": atomic.LoadInt64(&tc.bytesWritten),
+		"connections":   atomic.LoadInt64(&tc.connections),
+		"uptime_sec":    int64(time.Since(tc.startTime).Seconds()),
+	})
+}
+
+func (s *Server) sendAnalyticsWebhook(targetURL string, tc *tunnelConn) {
+	payload := map[string]interface{}{
+		"subdomain":     tc.subdomain,
+		"bytes_read":    atomic.LoadInt64(&tc.bytesRead),
+		"bytes_written": atomic.LoadInt64(&tc.bytesWritten),
+		"connections":   atomic.LoadInt64(&tc.connections),
+		"uptime_sec":    int64(time.Since(tc.startTime).Seconds()),
+		"timestamp":     time.Now().Format(time.RFC3339),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+func (s *Server) proxyToPeer(w http.ResponseWriter, r *http.Request, peerURL string) {
+	target, err := url.Parse(peerURL)
+	if err != nil {
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		return
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ServeHTTP(w, r)
 }

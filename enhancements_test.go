@@ -409,3 +409,117 @@ func TestPersistentTunnelsInvitesAndCustomDomain(t *testing.T) {
 		t.Errorf("Expected response-via-custom-domain, got %s", domainBody)
 	}
 }
+
+func TestFederationAndAnalytics(t *testing.T) {
+	// 1. Setup peer relay
+	lnPeer, _ := net.Listen("tcp", "127.0.0.1:0")
+	peerAddr := lnPeer.Addr().String()
+	lnPeer.Close()
+	peerPort := strings.Split(peerAddr, ":")[1]
+
+	peerSrv := server.NewServer(":"+peerPort, "localhost", inspector.New(10))
+	go func() {
+		_ = peerSrv.Start()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	defer peerSrv.Shutdown(context.Background())
+
+	// 2. Setup local relay with federation peer pointing to peerSrv
+	lnLocal, _ := net.Listen("tcp", "127.0.0.1:0")
+	localAddr := lnLocal.Addr().String()
+	lnLocal.Close()
+	localPort := strings.Split(localAddr, ":")[1]
+
+	os.Setenv("SERVTUNNEL_FEDERATION_PEERS", "http://127.0.0.1:"+peerPort)
+	os.Setenv("SERVTUNNEL_TOKEN", "my-test-token")
+	defer os.Unsetenv("SERVTUNNEL_FEDERATION_PEERS")
+	defer os.Unsetenv("SERVTUNNEL_TOKEN")
+
+	localSrv := server.NewServer(":"+localPort, "localhost", inspector.New(10))
+	go func() {
+		_ = localSrv.Start()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	defer localSrv.Shutdown(context.Background())
+
+	// 3. Register tunnel client on peerSrv
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%s/ws/connect?token=my-test-token", peerPort)
+	dialer := &websocket.Dialer{HandshakeTimeout: 5 * time.Second}
+	ws, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect to peer ws: %v", err)
+	}
+	defer ws.Close()
+
+	err = ws.WriteJSON(tunnel.Envelope{
+		Type: tunnel.TypeRegister,
+		Control: &tunnel.ControlMessage{
+			Subdomain: "fedsub",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Failed to register on peer: %v", err)
+	}
+
+	var respReg tunnel.Envelope
+	if err := ws.ReadJSON(&respReg); err != nil || respReg.Type != tunnel.TypeRegistered {
+		t.Fatalf("Failed to confirm register on peer: %v", err)
+	}
+
+	// 4. Send request to localSrv (subdomain: fedsub).
+	// Since fedsub is on peerSrv, localSrv should query peerSrv exists endpoint,
+	// find it, and proxy the request to peerSrv!
+	reqFed, _ := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:%s/", localPort), nil)
+	reqFed.Host = "fedsub.localhost"
+
+	go func() {
+		var reqEnv tunnel.Envelope
+		if err := ws.ReadJSON(&reqEnv); err == nil && reqEnv.Type == tunnel.TypeRequest {
+			_ = ws.WriteJSON(tunnel.Envelope{
+				Type:      tunnel.TypeResponse,
+				RequestID: reqEnv.RequestID,
+				Response: &tunnel.TunnelResponse{
+					StatusCode: http.StatusOK,
+					Body:       base64.StdEncoding.EncodeToString([]byte("response-via-federation")),
+				},
+			})
+		}
+	}()
+
+	respFed, err := http.DefaultClient.Do(reqFed)
+	if err != nil {
+		t.Fatalf("Failed to request via federation: %v", err)
+	}
+	defer respFed.Body.Close()
+
+	if respFed.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 via federation proxy, got %d", respFed.StatusCode)
+	}
+
+	fedBody, _ := io.ReadAll(respFed.Body)
+	if string(fedBody) != "response-via-federation" {
+		t.Errorf("Expected 'response-via-federation', got '%s'", string(fedBody))
+	}
+
+	// 5. Test Live Analytics endpoint on peerSrv
+	analyticsURL := fmt.Sprintf("http://127.0.0.1:%s/api/tunnels/fedsub/analytics", peerPort)
+	reqAn, _ := http.NewRequest("GET", analyticsURL, nil)
+	reqAn.Header.Set("Authorization", "Bearer my-test-token")
+	respAn, err := http.DefaultClient.Do(reqAn)
+	if err != nil || respAn.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to fetch analytics: %v, status: %d", err, respAn.StatusCode)
+	}
+	defer respAn.Body.Close()
+
+	var an map[string]interface{}
+	json.NewDecoder(respAn.Body).Decode(&an)
+	if an["subdomain"] != "fedsub" {
+		t.Errorf("Expected subdomain 'fedsub', got %v", an["subdomain"])
+	}
+
+	// Connections count should be 1
+	connectionsNum, _ := an["connections"].(float64)
+	if int(connectionsNum) != 1 {
+		t.Errorf("Expected 1 connection tracked, got %v", connectionsNum)
+	}
+}
