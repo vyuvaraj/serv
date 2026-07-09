@@ -18,6 +18,25 @@ import (
 	"github.com/vyuvaraj/ServShared"
 )
 
+// SyslogEmitFunc is overridable for testing or custom syslog transports.
+var SyslogEmitFunc = func(entry map[string]interface{}) {
+	logPath := os.Getenv("SERVCRON_EXEC_LOG_PATH")
+	if logPath == "" {
+		return // syslog integration not configured
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Printf("[SERVCRON SYSLOG] failed to open log file %s: %v", logPath, err)
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(data, '\n'))
+}
+
 type Job struct {
 	ID           string    `json:"id"`
 	Interval     string    `json:"interval,omitempty"`  // duration string e.g. "10s", "1m"
@@ -390,6 +409,22 @@ func (s *Scheduler) executeJob(job *Job) {
 	s.mu.Unlock()
 
 	ServShared.EndSpan(&span, err, attrs)
+
+	// Emit structured syslog-style execution record
+	outcome := "success"
+	if err != nil || statusCode < 200 || statusCode >= 300 {
+		outcome = "failed"
+	}
+	SyslogEmitFunc(map[string]interface{}{
+		"timestamp":   startTime.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		"job_id":      job.ID,
+		"target_url":  job.TargetURL,
+		"duration_ms": duration,
+		"status_code": statusCode,
+		"outcome":     outcome,
+		"error":       errStr,
+	})
+
 	go s.saveAuditLogToS3(job.ID, startTime, duration, statusCode, errStr, respBody)
 
 	if job.NextTopic != "" && err == nil && statusCode >= 200 && statusCode < 300 {
