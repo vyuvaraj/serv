@@ -1416,12 +1416,16 @@ func (e *EventStoreStmt) statementNode()       {}
 func (e *EventStoreStmt) TokenLiteral() string { return e.Token.Literal }
 func (e *EventStoreStmt) String() string {
 	var out bytes.Buffer
-	out.WriteString("event_store \"" + e.Name + "\" {\n")
+	out.WriteString("event_store \"")
+	out.WriteString(e.Name)
+	out.WriteString("\" {\n")
 	for _, c := range e.Commands {
-		out.WriteString("\t" + c.String())
+		out.WriteString("\t")
+		out.WriteString(c.String())
 	}
 	for _, h := range e.Handlers {
-		out.WriteString("\t" + h.String())
+		out.WriteString("\t")
+		out.WriteString(h.String())
 	}
 	out.WriteString("}\n")
 	return out.String()
