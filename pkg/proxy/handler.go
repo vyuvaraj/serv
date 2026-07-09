@@ -98,6 +98,7 @@ type Route struct {
 	PromptABTest          *PromptABTest     `json:"prompt_ab_test,omitempty"`      // AI Prompt A/B Test Config
 	ResponseQualityScore  bool              `json:"response_quality_score,omitempty"` // AI Response Quality Scoring
 	SemanticRateLimit     bool              `json:"semantic_rate_limit,omitempty"`   // AI Semantic Rate Limiting
+	AIWAFEnabled          bool              `json:"ai_waf_enabled,omitempty"`        // AI Self-Defending WAF (Enterprise)
 }
 
 type MetricsTracker struct {
@@ -1044,7 +1045,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Read request body to apply AI checks
 	var reqBody []byte
-	if matchedRoute.PromptGuard || matchedRoute.PiiRedact || matchedRoute.SemanticCache || matchedRoute.SemanticRateLimit || matchedRoute.PromptABTest != nil || matchedRoute.ResponseQualityScore {
+	if matchedRoute.PromptGuard || matchedRoute.PiiRedact || matchedRoute.SemanticCache || matchedRoute.SemanticRateLimit || matchedRoute.PromptABTest != nil || matchedRoute.ResponseQualityScore || matchedRoute.AIWAFEnabled {
 		reqBody, _ = io.ReadAll(r.Body)
 		r.Body.Close()
 
@@ -1063,6 +1064,16 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if IsPromptInjection(prompt) {
 				otel.EndSpan(span, fmt.Errorf("AI Prompt Guard: Injection attempt blocked"), map[string]interface{}{})
 				WriteJSONError(w, r, "AI Prompt Guard: Validation failed due to safety policy violation", "ERR_PROMPT_INJECTION_DETECTED", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// 1b. AI Self-Defending WAF (Enterprise semantic WAF)
+		if matchedRoute.AIWAFEnabled {
+			if blocked, reason := RunAIWAF(r, prompt, reqBody); blocked {
+				otel.EndSpan(span, fmt.Errorf("AI WAF: blocked — %s", reason), map[string]interface{}{})
+				w.Header().Set("X-WAF-Block-Reason", reason)
+				WriteJSONError(w, r, "Blocked by AI WAF: "+reason, "ERR_AI_WAF_BLOCKED", http.StatusForbidden)
 				return
 			}
 		}
