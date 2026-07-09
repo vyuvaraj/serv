@@ -37,6 +37,12 @@ import (
 	"encoding/hex"
 )
 
+var (
+	EnterpriseCheckIPAllowlist = func(r *http.Request, subdomain string) error { return nil }
+	EnterpriseVerifySSO        = func(r *http.Request, subdomain string) error { return nil }
+	EnterpriseAuditLog         = func(action string, subdomain string, details map[string]interface{}) {}
+)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  256 * 1024,
 	WriteBufferSize: 256 * 1024,
@@ -620,6 +626,20 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf(`{"error":"tunnel %q not found"}`, subdomain), http.StatusBadGateway)
 		return
 	}
+
+	if err := EnterpriseCheckIPAllowlist(r, subdomain); err != nil {
+		otel.EndSpan(span, err, nil)
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	if err := EnterpriseVerifySSO(r, subdomain); err != nil {
+		otel.EndSpan(span, err, nil)
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	EnterpriseAuditLog("request", subdomain, map[string]interface{}{"method": r.Method, "path": r.URL.Path, "ip": r.RemoteAddr})
 
 	atomic.AddInt64(&tc.connections, 1)
 
