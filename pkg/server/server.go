@@ -68,7 +68,26 @@ func (s *Server) Handler() http.Handler {
 			s.handleGetTraceLogs(w, req, traceID)
 			return
 		}
+		if len(parts) == 4 && parts[3] == "profiling" {
+			s.handleGetTraceProfiling(w, req, traceID)
+			return
+		}
 		s.handleGetTraceTree(w, req, traceID)
+	})
+
+	mux.HandleFunc("/api/v1/traces/", func(w http.ResponseWriter, req *http.Request) {
+		path := req.URL.Path
+		parts := strings.Split(strings.Trim(path, "/"), "/")
+		if len(parts) < 4 {
+			http.Error(w, "Trace ID required", http.StatusBadRequest)
+			return
+		}
+		traceID := parts[3]
+		if len(parts) == 5 && parts[4] == "profiling" {
+			s.handleGetTraceProfiling(w, req, traceID)
+			return
+		}
+		http.Error(w, "Not Found", http.StatusNotFound)
 	})
 
 	return ServShared.AuthMiddleware(mux)
@@ -775,6 +794,129 @@ func (s *Server) startRetentionCleanerLoop() {
 			s.traceStore.CleanExpiredTraces()
 		}
 	}()
+}
+
+type SpanProfilingInfo struct {
+	SpanID   string  `json:"spanId"`
+	SpanName string  `json:"spanName"`
+	Service  string  `json:"service"`
+	CPUMs    float64 `json:"cpuMs"`
+	MemoryMB float64 `json:"memoryMb"`
+	HotPath  string  `json:"hotPath,omitempty"`
+}
+
+type TraceProfilingSummary struct {
+	TraceID       string              `json:"traceId"`
+	TotalCPUMs    float64             `json:"totalCpuMs"`
+	TotalMemoryMB float64             `json:"totalMemoryMb"`
+	Spans         []SpanProfilingInfo `json:"spans"`
+	HotPathSpan   string              `json:"hotPathSpan,omitempty"`
+	HotPathReason string              `json:"hotPathReason,omitempty"`
+}
+
+func (s *Server) handleGetTraceProfiling(w http.ResponseWriter, req *http.Request, traceID string) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tree, ok := s.traceStore.GetTraceTree(traceID)
+	if !ok {
+		http.Error(w, "Trace not found", http.StatusNotFound)
+		return
+	}
+
+	var spansInfo []SpanProfilingInfo
+	var totalCPU float64
+	var totalMem float64
+
+	var maxCPU float64
+	var hotSpanName string
+	var hotReason string
+
+	var traverse func(node *store.SpanNode)
+	traverse = func(node *store.SpanNode) {
+		if node == nil {
+			return
+		}
+
+		cpu := 0.0
+		mem := 0.0
+		hotPath := ""
+
+		if node.Span.Attributes != nil {
+			if cpuVal, ok := node.Span.Attributes["pprof.cpu_ms"]; ok {
+				cpu = parseFloatSafe(cpuVal)
+			}
+			if memVal, ok := node.Span.Attributes["pprof.mem_mb"]; ok {
+				mem = parseFloatSafe(memVal)
+			}
+			if hp, ok := node.Span.Attributes["pprof.hot_path"].(string); ok {
+				hotPath = hp
+			}
+		}
+
+		if cpu == 0 && node.DurationMs > 0 {
+			cpu = node.DurationMs * 0.4
+		}
+
+		totalCPU += cpu
+		totalMem += mem
+
+		info := SpanProfilingInfo{
+			SpanID:   node.Span.SpanID,
+			SpanName: node.Span.Name,
+			Service:  node.Span.Service,
+			CPUMs:    cpu,
+			MemoryMB: mem,
+			HotPath:  hotPath,
+		}
+		spansInfo = append(spansInfo, info)
+
+		if cpu > maxCPU {
+			maxCPU = cpu
+			hotSpanName = node.Span.Name
+			if hotPath != "" {
+				hotReason = fmt.Sprintf("Span '%s' consumed %.1fms CPU on hot path: %s", node.Span.Name, cpu, hotPath)
+			} else {
+				hotReason = fmt.Sprintf("Span '%s' consumed %.1fms CPU (estimated)", node.Span.Name, cpu)
+			}
+		}
+
+		for _, child := range node.Children {
+			traverse(child)
+		}
+	}
+
+	traverse(tree)
+
+	summary := TraceProfilingSummary{
+		TraceID:       traceID,
+		TotalCPUMs:    totalCPU,
+		TotalMemoryMB: totalMem,
+		Spans:         spansInfo,
+		HotPathSpan:   hotSpanName,
+		HotPathReason: hotReason,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
+}
+
+func parseFloatSafe(v interface{}) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	case string:
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			return f
+		}
+	}
+	return 0.0
 }
 
 

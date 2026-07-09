@@ -63,17 +63,18 @@ type Anomaly struct {
 }
 
 type Store struct {
-	mu           sync.RWMutex
-	spans        map[string][]Span // key: traceId
-	limit        int
-	order        []string // FIFO queue of traceIds for eviction
-	OnEvict      func(traceID string, spans []Span)
-	samplingRate int
-	sampled      map[string]bool // key: traceId
+	mu                     sync.RWMutex
+	spans                  map[string][]Span // key: traceId
+	limit                  int
+	order                  []string // FIFO queue of traceIds for eviction
+	OnEvict                func(traceID string, spans []Span)
+	samplingRate           int
+	sampled                map[string]bool // key: traceId
 	
-	baseSamplingRate int
-	spanCount        int
-	errorCount       int
+	baseSamplingRate       int
+	spanCount              int
+	errorCount             int
+	adaptiveErrorThreshold float64
 
 	// Metrics fields
 	latencies  map[string][]float64   // key: service:spanName -> list of latencies in ms
@@ -89,16 +90,23 @@ func NewStore(limit int) *Store {
 			samplingRate = val
 		}
 	}
+	adaptiveErrorThreshold := 0.05
+	if env := os.Getenv("SERV_TRACE_ADAPTIVE_ERROR_THRESHOLD"); env != "" {
+		if val, err := strconv.ParseFloat(env, 64); err == nil {
+			adaptiveErrorThreshold = val
+		}
+	}
 	return &Store{
-		spans:            make(map[string][]Span),
-		limit:            limit,
-		samplingRate:     samplingRate,
-		baseSamplingRate: samplingRate,
-		sampled:          make(map[string]bool),
-		latencies:        make(map[string][]float64),
-		timestamps:       make(map[string][]time.Time),
-		traceLogs:        make(map[string][]LogLine),
-		anomalies:        make([]Anomaly, 0),
+		spans:                  make(map[string][]Span),
+		limit:                  limit,
+		samplingRate:           samplingRate,
+		baseSamplingRate:       samplingRate,
+		adaptiveErrorThreshold: adaptiveErrorThreshold,
+		sampled:                make(map[string]bool),
+		latencies:              make(map[string][]float64),
+		timestamps:             make(map[string][]time.Time),
+		traceLogs:              make(map[string][]LogLine),
+		anomalies:              make([]Anomaly, 0),
 	}
 }
 
@@ -119,7 +127,7 @@ func (s *Store) AddSpans(newSpans []Span) {
 
 	if s.spanCount > 10 {
 		errRate := float64(s.errorCount) / float64(s.spanCount)
-		if errRate > 0.05 {
+		if errRate > s.adaptiveErrorThreshold {
 			s.samplingRate = 100
 		} else {
 			s.samplingRate = s.baseSamplingRate
@@ -171,6 +179,38 @@ func (s *Store) AddSpans(newSpans []Span) {
 		}
 
 		if !duplicate {
+			// Propagate baggage attributes from parent if present
+			if span.ParentSpanID != "" {
+				var parentSpan *Span
+				for i := range s.spans[traceID] {
+					if s.spans[traceID][i].SpanID == span.ParentSpanID {
+						parentSpan = &s.spans[traceID][i]
+						break
+					}
+				}
+				if parentSpan == nil {
+					for i := range newSpans {
+						if newSpans[i].SpanID == span.ParentSpanID && newSpans[i].TraceID == traceID {
+							parentSpan = &newSpans[i]
+							break
+						}
+					}
+				}
+
+				if parentSpan != nil && parentSpan.Attributes != nil {
+					if span.Attributes == nil {
+						span.Attributes = make(map[string]interface{})
+					}
+					for k, v := range parentSpan.Attributes {
+						if strings.HasPrefix(k, "baggage.") {
+							if _, exists := span.Attributes[k]; !exists {
+								span.Attributes[k] = v
+							}
+						}
+					}
+				}
+			}
+
 			s.spans[traceID] = append(s.spans[traceID], span)
 			
 			// Tail-based sampling override: always keep traces with errors or slow query alerts!

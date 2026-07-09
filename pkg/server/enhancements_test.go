@@ -253,3 +253,189 @@ func TestPerServiceSamplingRate(t *testing.T) {
 		t.Errorf("expected trace-low to NOT be sampled, thus NOT calling OnEvict on eviction")
 	}
 }
+
+func TestAdaptiveSamplingThreshold(t *testing.T) {
+	os.Setenv("SERV_TRACE_ADAPTIVE_ERROR_THRESHOLD", "0.25")
+	defer os.Unsetenv("SERV_TRACE_ADAPTIVE_ERROR_THRESHOLD")
+
+	ts := store.NewStore(100)
+	now := time.Now().UnixNano()
+
+	// Ingest 11 spans (need spanCount > 10 for adaptive sampling)
+	// Let's ingest 9 OK spans and 2 Error spans (error rate: 2/11 = 18.1%)
+	// Since 18.1% is below threshold 25%, s.samplingRate should NOT jump to 100% (stays baseSamplingRate = 50)
+	var spans []store.Span
+	for i := 0; i < 9; i++ {
+		spans = append(spans, store.Span{
+			TraceID:   "trace-adaptive",
+			SpanID:    time.Now().Format("20060102150405.000000") + string(rune(i)),
+			Name:      "span-ok",
+			Service:   "test-service",
+			StartTime: now,
+			EndTime:   now + int64(10*time.Millisecond),
+			Status:    1,
+		})
+	}
+	for i := 0; i < 2; i++ {
+		spans = append(spans, store.Span{
+			TraceID:   "trace-adaptive",
+			SpanID:    time.Now().Format("20060102150405.000000") + "err" + string(rune(i)),
+			Name:      "span-err",
+			Service:   "test-service",
+			StartTime: now,
+			EndTime:   now + int64(10*time.Millisecond),
+			Status:    2,
+		})
+	}
+
+	ts.AddSpans(spans)
+
+	rate := ts.GetSamplingRateForTest()
+	if rate == 100 {
+		t.Errorf("expected sampling rate to stay base rate (50) since error rate 18.1%% is below threshold 25%%, got %d", rate)
+	}
+
+	// Now ingest 2 more error spans. Total errors: 4/13 = 30.7%.
+	// This is above threshold 25%, so s.samplingRate should jump to 100%!
+	var moreSpans []store.Span
+	for i := 0; i < 2; i++ {
+		moreSpans = append(moreSpans, store.Span{
+			TraceID:   "trace-adaptive",
+			SpanID:    time.Now().Format("20060102150405.000000") + "err2" + string(rune(i)),
+			Name:      "span-err-2",
+			Service:   "test-service",
+			StartTime: now,
+			EndTime:   now + int64(10*time.Millisecond),
+			Status:    2,
+		})
+	}
+	ts.AddSpans(moreSpans)
+
+	rate = ts.GetSamplingRateForTest()
+	if rate != 100 {
+		t.Errorf("expected sampling rate to jump to 100 since error rate 30.7%% exceeds threshold 25%%, got %d", rate)
+	}
+}
+
+func TestBaggagePropagation(t *testing.T) {
+	ts := store.NewStore(100)
+	now := time.Now().UnixNano()
+
+	// Ingest parent span with baggage attributes
+	ts.AddSpans([]store.Span{
+		{
+			TraceID:   "trace-baggage",
+			SpanID:    "parent-span",
+			Name:      "parent",
+			Service:   "service-parent",
+			StartTime: now,
+			EndTime:   now + int64(10*time.Millisecond),
+			Status:    1,
+			Attributes: map[string]interface{}{
+				"baggage.user_id": "user-123",
+				"baggage.region":  "us-west",
+				"other_attribute": "non-baggage",
+			},
+		},
+	})
+
+	// Ingest child span (should inherit baggage attributes)
+	ts.AddSpans([]store.Span{
+		{
+			TraceID:      "trace-baggage",
+			SpanID:       "child-span",
+			ParentSpanID: "parent-span",
+			Name:         "child",
+			Service:      "service-child",
+			StartTime:    now + int64(2*time.Millisecond),
+			EndTime:      now + int64(8*time.Millisecond),
+			Status:       1,
+		},
+	})
+
+	tree, ok := ts.GetTraceTree("trace-baggage")
+	if !ok || len(tree.Children) == 0 {
+		t.Fatalf("failed to retrieve child span")
+	}
+
+	child := tree.Children[0]
+	if child.Span.Attributes == nil {
+		t.Fatalf("child span has no attributes")
+	}
+
+	if uid, ok := child.Span.Attributes["baggage.user_id"]; !ok || uid != "user-123" {
+		t.Errorf("expected propagated baggage.user_id='user-123', got %v", uid)
+	}
+
+	if reg, ok := child.Span.Attributes["baggage.region"]; !ok || reg != "us-west" {
+		t.Errorf("expected propagated baggage.region='us-west', got %v", reg)
+	}
+
+	if _, ok := child.Span.Attributes["other_attribute"]; ok {
+		t.Errorf("expected non-baggage attribute to NOT propagate")
+	}
+}
+
+func TestProfilingSummary(t *testing.T) {
+	ts := store.NewStore(100)
+	srv := NewServer(ts)
+	now := time.Now().UnixNano()
+
+	ts.AddSpans([]store.Span{
+		{
+			TraceID:   "trace-prof",
+			SpanID:    "root-span",
+			Name:      "root",
+			Service:   "web",
+			StartTime: now,
+			EndTime:   now + int64(200*time.Millisecond),
+			Status:    1,
+			Attributes: map[string]interface{}{
+				"pprof.cpu_ms":   50.0,
+				"pprof.mem_mb":   10.5,
+				"pprof.hot_path": "auth.VerifyToken",
+			},
+		},
+		{
+			TraceID:      "trace-prof",
+			SpanID:       "child-span",
+			ParentSpanID: "root-span",
+			Name:         "child",
+			Service:      "db",
+			StartTime:    now + int64(10*time.Millisecond),
+			EndTime:      now + int64(190*time.Millisecond),
+			Status:       1,
+			Attributes: map[string]interface{}{
+				"pprof.cpu_ms":   120.0, // hot span!
+				"pprof.mem_mb":   2.1,
+				"pprof.hot_path": "db.ExecuteQuery",
+			},
+		},
+	})
+
+	req := httptest.NewRequest("GET", "/api/traces/trace-prof/profiling", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var summary TraceProfilingSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("failed to decode profiling response: %v", err)
+	}
+
+	if summary.TotalCPUMs != 170.0 {
+		t.Errorf("expected total CPU 170ms, got %f", summary.TotalCPUMs)
+	}
+
+	if summary.TotalMemoryMB != 12.6 {
+		t.Errorf("expected total memory 12.6MB, got %f", summary.TotalMemoryMB)
+	}
+
+	if summary.HotPathSpan != "child" {
+		t.Errorf("expected hot path span 'child', got %s", summary.HotPathSpan)
+	}
+}
+
