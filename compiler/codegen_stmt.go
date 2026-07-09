@@ -1565,7 +1565,7 @@ func (c *Codegen) genGraphQLStmt(s *GraphQLStmt) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("func init() {\n\t// Register native GraphQL route at %q\n\t_ = func() %s\n}\n\n", s.Path, bodyStr), nil
+	return fmt.Sprintf("func init() {\n\t// graphql handler registered at %q\n\t_ = func() %s\n}\n\n", s.Path, bodyStr), nil
 }
 
 func (c *Codegen) genMacroStmt(s *MacroStmt) (string, error) {
