@@ -17,13 +17,7 @@
     "color": "#1e1e2e",
     "theme": "dark"
   },
-  "activationEvents": [
-    "onLanguage:serv",
-    "onCommand:serv.run",
-    "onCommand:serv.build",
-    "onCommand:serv.test",
-    "onCommand:serv.watch"
-  ],
+  "activationEvents": [],
   "main": "./extension.js",
   "icon": "images/icon.png",
   "license": "Apache-2.0",
