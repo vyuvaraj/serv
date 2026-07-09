@@ -336,10 +336,13 @@ func main() {
 			runQueueTail()
 		case "list":
 			runQueueList()
+		case "dlq":
+			runQueueDLQ()
 		default:
 			fmt.Println("Usage:")
 			fmt.Println("  serv queue tail <topic> [--host <url>] [--limit <n>]")
 			fmt.Println("  serv queue list [--host <url>]")
+			fmt.Println("  serv queue dlq inspect <topic> [--host <url>] [--replay]")
 		}
 
 	case "mesh":
