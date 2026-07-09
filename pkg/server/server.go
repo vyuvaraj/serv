@@ -10,6 +10,10 @@ import (
 	"github.com/vyuvaraj/ServShared"
 )
 
+var (
+	EnterpriseVerifyRBAC = func(r *http.Request) bool { return true }
+)
+
 type Server struct {
 	scheduler *cron.Scheduler
 	elector   *cron.LeaderElector
@@ -118,6 +122,10 @@ func (s *Server) handleSmartSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
+	if !EnterpriseVerifyRBAC(r) {
+		WriteJSONError(w, r, "Forbidden: insufficient permissions", "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
 	var job cron.Job
 	if err := json.NewDecoder(r.Body).Decode(&job); err != nil {
 		WriteJSONError(w, r, "Invalid request body", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
@@ -135,6 +143,10 @@ func (s *Server) createJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteJob(w http.ResponseWriter, r *http.Request, id string) {
+	if !EnterpriseVerifyRBAC(r) {
+		WriteJSONError(w, r, "Forbidden: insufficient permissions", "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
 	if !s.scheduler.RemoveJob(id) {
 		WriteJSONError(w, r, "Job not found", "ERR_JOB_NOT_FOUND", http.StatusNotFound)
 		return
@@ -145,6 +157,10 @@ func (s *Server) deleteJob(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func (s *Server) triggerJob(w http.ResponseWriter, r *http.Request, id string) {
+	if !EnterpriseVerifyRBAC(r) {
+		WriteJSONError(w, r, "Forbidden: insufficient permissions", "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
 	if err := s.scheduler.TriggerJob(id); err != nil {
 		WriteJSONError(w, r, err.Error(), "ERR_TRIGGER_JOB_FAILED", http.StatusNotFound)
 		return
