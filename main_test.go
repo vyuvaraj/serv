@@ -20,6 +20,8 @@ import (
 	"servmesh/pkg/resilience"
 	"github.com/vyuvaraj/ServShared"
 	"github.com/golang-jwt/jwt/v5"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/resolver"
 )
 
 func TestServMeshLifecycle(t *testing.T) {
@@ -579,7 +581,10 @@ func TestGRPCMeshTransport(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("hello from grpc mesh!"))
 	})
-	httpServer := httptest.NewServer(mux)
+	httpServer, err := startSafeHTTPServer(mux)
+	if err != nil {
+		t.Fatalf("failed to start safe http server: %v", err)
+	}
 	defer httpServer.Close()
 
 	u, _ := url.Parse(httpServer.URL)
@@ -650,7 +655,10 @@ func TestZeroTrustNetworkPolicies(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("db write success"))
 	})
-	httpServer := httptest.NewServer(mux)
+	httpServer, err := startSafeHTTPServer(mux)
+	if err != nil {
+		t.Fatalf("failed to start safe http server: %v", err)
+	}
 	defer httpServer.Close()
 
 	u, _ := url.Parse(httpServer.URL)
@@ -1033,3 +1041,69 @@ func TestTopologyEndpoint(t *testing.T) {
 		t.Logf("alpha-svc: latency=%.1fms err=%.2f state=%s", e.AvgLatencyMs, e.ErrorRate, e.State)
 	}
 }
+
+func TestGRPCResolverAndInterceptor(t *testing.T) {
+	// 1. Start Control Plane Registry
+	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	// 2. Setup Mesh HTTP Client & Resolver builder
+	transport := client.NewMeshTransport(regServer.URL, 50*time.Millisecond)
+	builder := client.NewServResolverBuilder(transport)
+	resolver.Register(builder)
+
+	// Register a mock address
+	regURL := regServer.URL + "/api/register"
+	registerInstance(t, regURL, "grpc-service", "localhost:50051")
+
+	// Verify builder scheme
+	if builder.Scheme() != "serv" {
+		t.Errorf("expected scheme 'serv', got '%s'", builder.Scheme())
+	}
+
+	// Test Unary Interceptor
+	var interceptor grpc.UnaryClientInterceptor = transport.GRPCUnaryInterceptor()
+	if interceptor == nil {
+		t.Errorf("expected non-nil interceptor")
+	}
+}
+
+func startSafeHTTPServer(handler http.Handler) (*httptest.Server, error) {
+	for port := 15000; port < 25000; port++ {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		l, err := net.Listen("tcp", addr)
+		if err == nil {
+			server := httptest.NewUnstartedServer(handler)
+			server.Listener = l
+			server.Start()
+			return server, nil
+		}
+	}
+	return nil, fmt.Errorf("failed to find free port in safe range")
+}
+
+func TestSubcommandUp(t *testing.T) {
+	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
+
+	reg.Register(registry.Instance{
+		Service: "payment-service",
+		Address: "http://127.0.0.1:9099",
+	})
+
+	proxy := &devProxy{reg: reg}
+	proxyServer := httptest.NewServer(proxy)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest("GET", proxyServer.URL+"/payment-service/pay", nil)
+	client := &http.Client{Timeout: 100 * time.Millisecond}
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+
+

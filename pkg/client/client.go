@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/resolver"
 )
 
 type MeshTransport struct {
@@ -833,3 +834,104 @@ func (t *MeshTransport) reportMetrics(service, address string, latencyMs, errRat
 		resp.Body.Close()
 	}
 }
+
+type ServResolverBuilder struct {
+	transport *MeshTransport
+}
+
+func NewServResolverBuilder(transport *MeshTransport) *ServResolverBuilder {
+	return &ServResolverBuilder{transport: transport}
+}
+
+func (b *ServResolverBuilder) Scheme() string {
+	return "serv"
+}
+
+func (b *ServResolverBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {
+	endpoint := target.Endpoint()
+	if endpoint == "" {
+		endpoint = target.URL.Path
+		endpoint = strings.TrimPrefix(endpoint, "/")
+	}
+	r := &ServResolver{
+		target:    endpoint,
+		cc:        cc,
+		transport: b.transport,
+		stopChan:  make(chan struct{}),
+	}
+	r.start()
+	return r, nil
+}
+
+type ServResolver struct {
+	target    string
+	cc        resolver.ClientConn
+	transport *MeshTransport
+	stopChan  chan struct{}
+}
+
+func (r *ServResolver) start() {
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		r.resolve()
+		for {
+			select {
+			case <-ticker.C:
+				r.resolve()
+			case <-r.stopChan:
+				return
+			}
+		}
+	}()
+}
+
+func (r *ServResolver) resolve() {
+	ctx := context.Background()
+	instances, err := r.transport.resolve(ctx, r.target)
+	if err != nil {
+		r.cc.ReportError(err)
+		return
+	}
+	var addrs []resolver.Address
+	for _, inst := range instances {
+		addrStr := inst.Address
+		if u, err := url.Parse(addrStr); err == nil && u.Host != "" {
+			addrStr = u.Host
+		}
+		addrs = append(addrs, resolver.Address{Addr: addrStr})
+	}
+	r.cc.UpdateState(resolver.State{Addresses: addrs})
+}
+
+func (r *ServResolver) ResolveNow(o resolver.ResolveNowOptions) {
+	r.resolve()
+}
+
+func (r *ServResolver) Close() {
+	close(r.stopChan)
+}
+
+func (t *MeshTransport) GRPCUnaryInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		target := cc.Target()
+		breaker := t.getBreaker(target)
+		if err := breaker.Allow(); err != nil {
+			return fmt.Errorf("mesh: circuit breaker is open for target %s: %w", target, err)
+		}
+
+		startTime := time.Now()
+		err := invoker(ctx, method, req, reply, cc, opts...)
+		duration := time.Since(startTime)
+
+		if err != nil {
+			breaker.Failure()
+			t.reportMetrics(target, target, float64(duration.Milliseconds()), 1.0)
+		} else {
+			breaker.Success()
+			t.reportMetrics(target, target, float64(duration.Milliseconds()), 0.0)
+		}
+		return err
+	}
+}
+
