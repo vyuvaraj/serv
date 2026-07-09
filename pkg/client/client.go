@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/json"
 	"servtunnel/pkg/inspector"
 	"servtunnel/pkg/tunnel"
 
@@ -532,6 +533,11 @@ func (c *Client) startInspectorServer() {
 				c.inspector.HandleDiff(w, r, id)
 				return
 			}
+			if strings.HasSuffix(id, "/replay") {
+				id = strings.TrimSuffix(id, "/replay")
+				c.handleLocalReplay(w, r, id)
+				return
+			}
 			c.inspector.HandleGet(w, r, id)
 			return
 		}
@@ -600,5 +606,90 @@ func (c *Client) handleTCPTraffic(conn *websocket.Conn, env tunnel.Envelope) {
 	if err == nil && len(data) > 0 {
 		_, _ = localConn.Write(data)
 	}
+}
+
+func (c *Client) handleLocalReplay(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	entry, ok := c.inspector.Get(id)
+	if !ok {
+		http.Error(w, "Entry not found", http.StatusNotFound)
+		return
+	}
+
+	start := time.Now()
+	localURL := fmt.Sprintf("http://%s%s", c.localAddr, entry.Path)
+
+	var bodyReader io.Reader
+	if entry.RequestBody != "" {
+		bodyBytes, err := base64.StdEncoding.DecodeString(entry.RequestBody)
+		if err == nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+	}
+
+	httpReq, err := http.NewRequest(entry.Method, localURL, bodyReader)
+	if err != nil {
+		http.Error(w, "Failed to create request: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for k, v := range entry.RequestHeaders {
+		httpReq.Header.Set(k, v)
+	}
+	httpReq.Header.Set("X-ServTunnel-Replayed", "true")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		http.Error(w, "Local service error: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	var respBodyB64 string
+	if len(respBody) > 0 {
+		respBodyB64 = base64.StdEncoding.EncodeToString(respBody)
+	}
+
+	respHeaders := make(map[string]string)
+	for k, vals := range resp.Header {
+		respHeaders[k] = vals[0]
+	}
+
+	latency := time.Since(start)
+
+	newID := c.inspector.Record(inspector.Entry{
+		Timestamp:      start,
+		Method:         entry.Method,
+		Path:           entry.Path,
+		RequestHeaders: entry.RequestHeaders,
+		RequestBody:    entry.RequestBody,
+	})
+	c.inspector.Update(newID, resp.StatusCode, respHeaders, respBodyB64, latency.Milliseconds())
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "success",
+		"message":     "request replayed successfully",
+		"original_id": id,
+		"new_id":      newID,
+		"status_code": resp.StatusCode,
+		"latency_ms":  latency.Milliseconds(),
+	})
+}
+
+// GetInspector returns the unexported inspector instance.
+func (c *Client) GetInspector() *inspector.Inspector {
+	return c.inspector
+}
+
+// HandleLocalReplay allows calling handleLocalReplay from other packages (tests).
+func (c *Client) HandleLocalReplay(w http.ResponseWriter, r *http.Request, id string) {
+	c.handleLocalReplay(w, r, id)
 }
 

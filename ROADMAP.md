@@ -66,7 +66,7 @@
 - [ ] **Team Collaboration**: Share tunnel access with team members via token-based invite links.
 - [ ] **Persistent Tunnels**: Keep tunnels alive across client restarts with session resumption.
 - [ ] **Custom Domain Mapping**: Map production domains to local tunnels for realistic testing.
-- [ ] **Request Recording & Replay**: Record all requests through tunnel, replay them later for debugging.
+- [x] **Request Recording & Replay**: Record all requests through tunnel, replay them later for debugging. [July 9, 2026]
 - [x] **Bandwidth Throttling**: Simulate slow networks (3G, satellite) for mobile testing. [July 9, 2026]
 - [ ] **Tunnel Metrics in ServConsole**: Live throughput, latency, and connection count dashboard.
 - [ ] **TCP Tunnel Support**: Tunnel raw TCP (databases, Redis, gRPC) — not just HTTP.

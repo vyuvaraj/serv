@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +160,61 @@ tunnels:
 	}
 	if cfg.Tunnels[0].Port != "8080" || cfg.Tunnels[0].Subdomain != "custom-sub" || cfg.Tunnels[0].Throttle != "100k" {
 		t.Errorf("First tunnel parsed incorrectly: %+v", cfg.Tunnels[0])
+	}
+}
+
+func TestLocalReplay(t *testing.T) {
+	mockLocal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Local-Header", "hello")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("local-response"))
+	}))
+	defer mockLocal.Close()
+
+	localAddr := strings.TrimPrefix(mockLocal.URL, "http://")
+
+	c := client.NewClient(localAddr, "ws://localhost", "", "", "", "4040", "")
+	insp := c.GetInspector()
+
+	id := insp.Record(inspector.Entry{
+		Method: "POST",
+		Path:   "/test-path",
+		RequestHeaders: map[string]string{
+			"Content-Type": "application/json",
+		},
+		RequestBody: base64.StdEncoding.EncodeToString([]byte("request-body")),
+	})
+
+	req := httptest.NewRequest("POST", "/api/inspect/"+id+"/replay", nil)
+	w := httptest.NewRecorder()
+	
+	c.HandleLocalReplay(w, req, id)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected status 201, got %d", w.Code)
+	}
+
+	var res map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	if res["status"] != "success" {
+		t.Errorf("Expected success, got %v", res["status"])
+	}
+
+	newID := res["new_id"].(string)
+	newEntry, ok := insp.Get(newID)
+	if !ok {
+		t.Fatalf("Failed to retrieve new replayed entry from inspector")
+	}
+
+	if newEntry.StatusCode != 200 {
+		t.Errorf("Expected status 200 on replayed entry, got %d", newEntry.StatusCode)
+	}
+
+	decodedBody, _ := base64.StdEncoding.DecodeString(newEntry.ResponseBody)
+	if string(decodedBody) != "local-response" {
+		t.Errorf("Expected body 'local-response', got %s", decodedBody)
 	}
 }
