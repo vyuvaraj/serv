@@ -679,6 +679,11 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/api/v1/governance/check" {
+		h.handleGovernanceCheck(w, r)
+		return
+	}
+
 	tenantID := r.Header.Get("X-Tenant-ID")
 	if tenantID != "" {
 		h.tenantPoliciesMu.RLock()
@@ -2177,6 +2182,51 @@ func extractUserRolesAndHeaders(r *http.Request) ([]string, map[string]string) {
 	}
 	return roles, headers
 }
+
+func (h *GatewayHandler) handleGovernanceCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	h.routesMu.RLock()
+	routes := h.routes
+	h.routesMu.RUnlock()
+
+	score := 100
+	var warnings []string
+
+	if h.authToken == "" {
+		score -= 20
+		warnings = append(warnings, "Gateway authToken is disabled (no global auth token)")
+	}
+
+	for _, route := range routes {
+		if !route.RequireAPIKey {
+			score -= 10
+			warnings = append(warnings, fmt.Sprintf("Route prefix %s does not require API key", route.Prefix))
+		}
+		if route.MaxBodySize <= 0 {
+			score -= 5
+			warnings = append(warnings, fmt.Sprintf("Route prefix %s has default unlimited max body size", route.Prefix))
+		}
+	}
+
+	score, warnings = EvaluateEEGovernanceRules(h, score, warnings)
+
+	if score < 0 {
+		score = 0
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"compliance_score": score,
+		"warnings":        warnings,
+		"status":          "evaluated",
+	})
+}
+
 
 
 
