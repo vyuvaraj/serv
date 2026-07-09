@@ -186,6 +186,7 @@ func main() {
 	// Install/Fetch package tarball API
 	mux.HandleFunc("/packages/", handleGetPackage)
 	mux.HandleFunc("/api/v1/packages/", handleGetPackage)
+	mux.HandleFunc("/api/v1/packages/provenance/", handleGetProvenance)
 
 	// Search API
 	mux.HandleFunc("/api/packages/search", handleSearchPackages)
@@ -430,6 +431,35 @@ func handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 5.1 Upload build provenance if present
+	var provenanceData []byte
+	if provBase64 := r.Header.Get("X-Provenance"); provBase64 != "" {
+		if provBytes, err := base64.StdEncoding.DecodeString(provBase64); err == nil {
+			provenanceData = provBytes
+		}
+	} else if provHeader := r.Header.Get("provenance"); provHeader != "" {
+		provenanceData = []byte(provHeader)
+	} else if provCommit := r.Header.Get("X-Provenance-Commit"); provCommit != "" {
+		provMap := map[string]string{
+			"commit":     provCommit,
+			"ci_run_id":  r.Header.Get("X-Provenance-CI-Run"),
+			"builder":    r.Header.Get("X-Provenance-Builder"),
+			"created_at": time.Now().Format(time.RFC3339),
+		}
+		provenanceData, _ = json.Marshal(provMap)
+	}
+
+	if len(provenanceData) > 0 {
+		provKey := fmt.Sprintf("%s/%s/provenance.json", name, version)
+		_, _ = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+			Bucket:      aws.String(bucketName),
+			Key:         aws.String(provKey),
+			Body:        bytes.NewReader(provenanceData),
+			ContentType: aws.String("application/json"),
+		})
+		log.Printf("Recorded build provenance attestation for %s @ %s", name, version)
+	}
+
 	// Proactively update local cache index
 	packageIndexMu.Lock()
 	versions := []string{}
@@ -567,6 +597,39 @@ func handleGetPackage(w http.ResponseWriter, r *http.Request) {
 		Key:    aws.String(s3Key),
 	})
 	if err != nil {
+		upstream := os.Getenv("SERV_UPSTREAM_REGISTRY")
+		if upstream != "" {
+			upstream = strings.TrimSuffix(upstream, "/")
+			upstreamURL := fmt.Sprintf("%s/packages/%s", upstream, path)
+			log.Printf("Local package not found, proxying to upstream: %s", upstreamURL)
+			
+			upReq, _ := http.NewRequestWithContext(r.Context(), "GET", upstreamURL, nil)
+			client := &http.Client{Timeout: 15 * time.Second}
+			upResp, err := client.Do(upReq)
+			if err == nil && upResp.StatusCode == http.StatusOK {
+				defer upResp.Body.Close()
+				data, readErr := io.ReadAll(upResp.Body)
+				if readErr == nil {
+					// Cache local S3
+					_, _ = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+						Bucket:      aws.String(bucketName),
+						Key:         aws.String(s3Key),
+						Body:        bytes.NewReader(data),
+						ContentType: aws.String("application/octet-stream"),
+					})
+					log.Printf("Successfully cached package %s from upstream to local S3", s3Key)
+					
+					w.Header().Set("Content-Type", "application/octet-stream")
+					w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+					w.Write(data)
+					return
+				}
+			}
+			if err == nil {
+				upResp.Body.Close()
+			}
+		}
+
 		log.Printf("Failed to get object from S3: %v", err)
 		WriteJSONError(w, r, "Package not found", "ERR_PACKAGE_NOT_FOUND", http.StatusNotFound)
 		return
@@ -1259,6 +1322,42 @@ func handleMarketplacePublish(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(`{"status":"published"}`))
+}
+
+func handleGetProvenance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/packages/provenance/")
+	parts := strings.Split(path, "/")
+	
+	var name, version string
+	if len(parts) == 3 && strings.HasPrefix(parts[0], "@") {
+		name = parts[0] + "/" + parts[1]
+		version = parts[2]
+	} else if len(parts) == 2 {
+		name = parts[0]
+		version = parts[1]
+	} else {
+		WriteJSONError(w, r, "Invalid package name or version path", "ERR_INVALID_PATH", http.StatusBadRequest)
+		return
+	}
+
+	provKey := fmt.Sprintf("%s/%s/provenance.json", name, version)
+	resp, err := s3Client.GetObject(r.Context(), &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(provKey),
+	})
+	if err != nil {
+		WriteJSONError(w, r, "Provenance attestation not found", "ERR_PROVENANCE_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	io.Copy(w, resp.Body)
 }
 
 
