@@ -118,6 +118,10 @@ func main() {
 	mux.HandleFunc("/api/packages/", handlePackagesAPI)
 	mux.HandleFunc("/api/v1/registry/", handlePackagesAPI)
 
+	// Schema Registry API
+	mux.HandleFunc("/api/v1/schemas/", handleSchemasAPI)
+	mux.HandleFunc("/api/v1/schemas/validate", handleSchemaValidationAPI)
+
 	// Web dashboard static files
 	mux.HandleFunc("/", handleWebDashboard)
 
@@ -940,6 +944,158 @@ func checkDeprecationsAndAddHeader(w http.ResponseWriter, ctx context.Context, n
 				w.Header().Set("X-Deprecation-Warning", vd.DeprecationMsg)
 			}
 		}
+	}
+}
+
+var (
+	schemasMu  sync.RWMutex
+	schemasMap = make(map[string]string)
+)
+
+func init() {
+	os.MkdirAll("schemas", 0755)
+	files, err := os.ReadDir("schemas")
+	if err == nil {
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
+				name := strings.TrimSuffix(f.Name(), ".json")
+				data, err := os.ReadFile(filepath.Join("schemas", f.Name()))
+				if err == nil {
+					schemasMap[name] = string(data)
+				}
+			}
+		}
+	}
+}
+
+func handleSchemasAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 5 {
+		WriteJSONError(w, r, "Invalid path", "ERR_INVALID_PATH", http.StatusBadRequest)
+		return
+	}
+	name := parts[4]
+	if name == "" {
+		WriteJSONError(w, r, "Schema name required", "ERR_NAME_REQUIRED", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPost, http.MethodPut:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			WriteJSONError(w, r, "Failed to read body", "ERR_BAD_REQUEST", http.StatusBadRequest)
+			return
+		}
+
+		var js map[string]interface{}
+		if err := json.Unmarshal(body, &js); err != nil {
+			WriteJSONError(w, r, "Invalid schema JSON", "ERR_INVALID_SCHEMA", http.StatusBadRequest)
+			return
+		}
+
+		schemasMu.Lock()
+		schemasMap[name] = string(body)
+		schemasMu.Unlock()
+
+		_ = os.WriteFile(filepath.Join("schemas", name+".json"), body, 0644)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success"}`))
+
+	case http.MethodGet:
+		schemasMu.RLock()
+		schema, exists := schemasMap[name]
+		schemasMu.RUnlock()
+
+		if !exists {
+			WriteJSONError(w, r, "Schema not found", "ERR_NOT_FOUND", http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(schema))
+
+	default:
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleSchemaValidationAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SchemaName string `json:"schema"`
+		Payload    string `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteJSONError(w, r, "Invalid request payload", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+
+	schemasMu.RLock()
+	schemaStr, exists := schemasMap[req.SchemaName]
+	schemasMu.RUnlock()
+
+	if !exists {
+		WriteJSONError(w, r, "Schema not found", "ERR_SCHEMA_NOT_FOUND", http.StatusNotFound)
+		return
+	}
+
+	var schemaObj, payloadObj map[string]interface{}
+	_ = json.Unmarshal([]byte(schemaStr), &schemaObj)
+
+	if err := json.Unmarshal([]byte(req.Payload), &payloadObj); err != nil {
+		w.Write([]byte(`{"valid":false,"errors":["Invalid payload JSON"]}`))
+		return
+	}
+
+	var validationErrors []string
+	if props, ok := schemaObj["properties"].(map[string]interface{}); ok {
+		for key, propVal := range props {
+			if propMap, ok := propVal.(map[string]interface{}); ok {
+				expectedType, _ := propMap["type"].(string)
+				val, exists := payloadObj[key]
+				if !exists {
+					if reqList, ok := schemaObj["required"].([]interface{}); ok {
+						for _, rKey := range reqList {
+							if rKey == key {
+								validationErrors = append(validationErrors, fmt.Sprintf("Missing required property: %s", key))
+							}
+						}
+					}
+					continue
+				}
+
+				switch expectedType {
+				case "string":
+					if _, ok := val.(string); !ok {
+						validationErrors = append(validationErrors, fmt.Sprintf("Property %s must be a string", key))
+					}
+				case "number", "integer":
+					if _, ok := val.(float64); !ok {
+						validationErrors = append(validationErrors, fmt.Sprintf("Property %s must be a number", key))
+					}
+				case "boolean":
+					if _, ok := val.(bool); !ok {
+						validationErrors = append(validationErrors, fmt.Sprintf("Property %s must be a boolean", key))
+					}
+				}
+			}
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		resp, _ := json.Marshal(map[string]interface{}{
+			"valid":  false,
+			"errors": validationErrors,
+		})
+		w.Write(resp)
+	} else {
+		w.Write([]byte(`{"valid":true}`))
 	}
 }
 

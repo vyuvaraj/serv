@@ -9,9 +9,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,5 +286,70 @@ func BenchmarkPackageIndexLookup(b *testing.B) {
 		packageIndexMu.RLock()
 		_, _ = packageIndex[name]
 		packageIndexMu.RUnlock()
+	}
+}
+
+func TestSchemaRegistryAPI(t *testing.T) {
+	_ = os.RemoveAll("schemas")
+	defer os.RemoveAll("schemas")
+
+	// 1. Register a schema
+	schema := `{
+		"type": "object",
+		"properties": {
+			"orderId": { "type": "string" },
+			"amount": { "type": "number" },
+			"active": { "type": "boolean" }
+		},
+		"required": ["orderId"]
+	}`
+
+	reqPut := httptest.NewRequest(http.MethodPut, "/api/v1/schemas/order", strings.NewReader(schema))
+	wPut := httptest.NewRecorder()
+	handleSchemasAPI(wPut, reqPut)
+
+	if wPut.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", wPut.Code)
+	}
+
+	// 2. Fetch schema
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/schemas/order", nil)
+	wGet := httptest.NewRecorder()
+	handleSchemasAPI(wGet, reqGet)
+
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", wGet.Code)
+	}
+	if !strings.Contains(wGet.Body.String(), "orderId") {
+		t.Errorf("Expected fetched schema to contain orderId, got: %s", wGet.Body.String())
+	}
+
+	// 3. Validate valid payload
+	validPayload := `{"schema":"order","payload":"{\"orderId\":\"abc-123\",\"amount\":49.95,\"active\":true}"}`
+	reqVal1 := httptest.NewRequest(http.MethodPost, "/api/v1/schemas/validate", strings.NewReader(validPayload))
+	wVal1 := httptest.NewRecorder()
+	handleSchemaValidationAPI(wVal1, reqVal1)
+
+	var res1 map[string]interface{}
+	json.NewDecoder(wVal1.Body).Decode(&res1)
+	if res1["valid"] != true {
+		t.Errorf("Expected valid payload to be true, got errors: %v", res1["errors"])
+	}
+
+	// 4. Validate invalid payload (missing required field, and wrong type)
+	invalidPayload := `{"schema":"order","payload":"{\"amount\":\"not-a-number\",\"active\":true}"}`
+	reqVal2 := httptest.NewRequest(http.MethodPost, "/api/v1/schemas/validate", strings.NewReader(invalidPayload))
+	wVal2 := httptest.NewRecorder()
+	handleSchemaValidationAPI(wVal2, reqVal2)
+
+	var res2 map[string]interface{}
+	json.NewDecoder(wVal2.Body).Decode(&res2)
+	if res2["valid"] == true {
+		t.Error("Expected invalid payload to fail validation, but it succeeded")
+	} else {
+		errs := res2["errors"].([]interface{})
+		if len(errs) != 2 {
+			t.Errorf("Expected 2 validation errors, got %d: %v", len(errs), errs)
+		}
 	}
 }
