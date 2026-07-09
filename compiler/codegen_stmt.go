@@ -1646,5 +1646,63 @@ func (c *Codegen) genRagStmt(s *RagStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\t// Register RAG pipeline from source %q\n\t_ = func() %s\n}\n\n", s.Source, bodyStr), nil
 }
 
+func (c *Codegen) genEmitStmt(s *EmitStmt) (string, error) {
+	payloadStr, err := c.genExpression(s.Payload)
+	if err != nil {
+		return "", err
+	}
+	streamName := "global"
+	if c.currEventStore != "" {
+		streamName = c.currEventStore
+	}
+	return fmt.Sprintf("runtime.EmitEvent(%q, %q, %s)\n", streamName, s.Event, payloadStr), nil
+}
+
+func (c *Codegen) genEventStoreStmt(s *EventStoreStmt) (string, error) {
+	c.imports["\"encoding/json\""] = true
+	var out bytes.Buffer
+
+	for _, cmd := range s.Commands {
+		out.WriteString("func init() {\n")
+		out.WriteString(fmt.Sprintf("\truntime.AddRoute(\"POST\", \"/api/event_store/%s/%s\", 0, \"\", func(req runtime.Request) interface{} {\n", s.Name, cmd.Name))
+		
+		out.WriteString("\t\tvar params map[string]interface{}\n")
+		out.WriteString("\t\tjson.Unmarshal([]byte(req.Body), &params)\n")
+		
+		for _, p := range cmd.Params {
+			out.WriteString(fmt.Sprintf("\t\t%s := params[%q]\n", p, p))
+		}
+
+		c.currEventStore = s.Name
+		bodyStr, err := c.genBlockStatement(cmd.Body)
+		c.currEventStore = ""
+		if err != nil {
+			return "", err
+		}
+		innerBody := strings.TrimSuffix(strings.TrimPrefix(bodyStr, "{"), "}")
+		out.WriteString(innerBody)
+
+		out.WriteString("\t\treturn map[string]string{\"status\": \"success\"}\n")
+		out.WriteString("\t})\n")
+		out.WriteString("}\n\n")
+	}
+
+	for _, h := range s.Handlers {
+		topicPattern := fmt.Sprintf("events.%s.%s", s.Name, h.Topic)
+		bodyStr, err := c.genBlockStatement(h.Body)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString("func init() {\n")
+		out.WriteString(fmt.Sprintf("\truntime.Subscribe(%q, func(%s string) {\n", topicPattern, h.Param))
+		innerBody := strings.TrimSuffix(strings.TrimPrefix(bodyStr, "{"), "}")
+		out.WriteString(innerBody)
+		out.WriteString("\t})\n")
+		out.WriteString("}\n\n")
+	}
+
+	return out.String(), nil
+}
+
 
 

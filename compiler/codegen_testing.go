@@ -40,6 +40,9 @@ func (c *Codegen) GenerateTests() string {
 	if c.imports[`"strings"`] {
 		out.WriteString("var _ = strings.Join\n")
 	}
+	if c.imports[`"encoding/json"`] {
+		out.WriteString("var _ = json.Marshal\n")
+	}
 
 	out.WriteString("\n")
 	for _, fn := range c.testFuncs {

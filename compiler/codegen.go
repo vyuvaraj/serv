@@ -33,6 +33,7 @@ type Codegen struct {
 	currentWs           *WsStmt
 	currentTool         *ToolStmt
 	currentMigration    *MigrationStmt
+	currEventStore      string
 	currentEvery        *EveryStmt
 	currentCron         *CronStmt
 	currentSubscribe    *SubscribeStmt
@@ -238,6 +239,9 @@ func (c *Codegen) Generate() (string, error) {
 	}
 	if c.imports[`"strings"`] {
 		out.WriteString("var _ = strings.Join // ensure strings is used\n\n")
+	}
+	if c.imports["\"encoding/json\""] {
+		out.WriteString("var _ = json.Marshal // ensure json is used\n\n")
 	}
 
 	// Pre-compiled regex variables
@@ -531,7 +535,11 @@ return c.genGateStmt(s)
 case *JobStmt:
 return c.genJobStmt(s)
 case *RagStmt:
-return c.genRagStmt(s)
+	return c.genRagStmt(s)
+case *EmitStmt:
+	return c.genEmitStmt(s)
+case *EventStoreStmt:
+	return c.genEventStoreStmt(s)
 case *ReturnStmt:
 return c.genReturnStmt(s)
 case *YieldStmt:

@@ -117,6 +117,23 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 		return analyzeBlock(s.Body, nil)
 	case *RagStmt:
 		return analyzeBlock(s.Body, nil)
+	case *EmitStmt:
+		return nil
+	case *CommandDecl:
+		return analyzeBlock(s.Body, nil)
+	case *EventStoreStmt:
+		var diags []Diagnostic
+		for _, c := range s.Commands {
+			if d := analyzeBlock(c.Body, nil); len(d) > 0 {
+				diags = append(diags, d...)
+			}
+		}
+		for _, h := range s.Handlers {
+			if d := analyzeBlock(h.Body, nil); len(d) > 0 {
+				diags = append(diags, d...)
+			}
+		}
+		return diags
 	}
 	return nil
 }

@@ -222,6 +222,35 @@ func analyzeStmtUnused(stmt Statement, scope *Scope, diags *[]Diagnostic) {
 	case *PublishStmt:
 		collectRefsInExpr(s.Topic, scope)
 		collectRefsInExpr(s.Value, scope)
+	case *EmitStmt:
+		collectRefsInExpr(s.Payload, scope)
+	case *EventStoreStmt:
+		for _, c := range s.Commands {
+			child := NewScope(scope)
+			for _, p := range c.Params {
+				child.Insert(&Symbol{
+					Name:  p,
+					Type:  "parameter",
+					Token: c.Token,
+					Used:  true,
+				})
+			}
+			for _, inner := range c.Body.Statements {
+				analyzeStmtUnused(inner, child, diags)
+			}
+		}
+		for _, h := range s.Handlers {
+			child := NewScope(scope)
+			child.Insert(&Symbol{
+				Name:  h.Param,
+				Type:  "parameter",
+				Token: h.Token,
+				Used:  true,
+			})
+			for _, inner := range h.Body.Statements {
+				analyzeStmtUnused(inner, child, diags)
+			}
+		}
 	case *SpawnStmt:
 		collectRefsInExpr(s.Call, scope)
 	case *ActorDecl:
@@ -478,6 +507,23 @@ func collectStmtIdentifiers(stmt Statement, refs map[string]bool) {
 	case *PublishStmt:
 		collectExprIdentifiers(s.Topic, refs)
 		collectExprIdentifiers(s.Value, refs)
+	case *EmitStmt:
+		collectExprIdentifiers(s.Payload, refs)
+	case *EventStoreStmt:
+		for _, c := range s.Commands {
+			if c.Body != nil {
+				for _, inner := range c.Body.Statements {
+					collectStmtIdentifiers(inner, refs)
+				}
+			}
+		}
+		for _, h := range s.Handlers {
+			if h.Body != nil {
+				for _, inner := range h.Body.Statements {
+					collectStmtIdentifiers(inner, refs)
+				}
+			}
+		}
 	case *SpawnStmt:
 		collectExprIdentifiers(s.Call, refs)
 	case *ActorDecl:

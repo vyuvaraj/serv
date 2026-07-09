@@ -80,6 +80,10 @@ const (
 	TOKEN_APP         TokenType = "APP"
 	TOKEN_AGENT       TokenType = "AGENT"
 	TOKEN_TABLE       TokenType = "TABLE"
+	TOKEN_EVENT_STORE TokenType = "EVENT_STORE"
+	TOKEN_COMMAND     TokenType = "COMMAND"
+	TOKEN_EMIT        TokenType = "EMIT"
+
 
 	// Operators & Delimiters
 	TOKEN_ASSIGN     TokenType = "="
@@ -639,6 +643,9 @@ var keywords = map[string]TokenType{
 	"gate":            TOKEN_GATE,
 	"job":             TOKEN_JOB,
 	"rag":             TOKEN_RAG,
+	"event_store":     TOKEN_EVENT_STORE,
+	"command":         TOKEN_COMMAND,
+	"emit":            TOKEN_EMIT,
 }
 
 func lookupIdent(ident string) TokenType {

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -578,4 +579,128 @@ func executeCallbackSafe(callback func(string), payload string) {
 	}()
 	MetricInc("broker_messages_received_total")
 	callback(payload)
+}
+
+func EmitEvent(streamName string, eventType string, payload interface{}) {
+	var payloadStr string
+	if s, ok := payload.(string); ok {
+		payloadStr = s
+	} else {
+		b, _ := json.Marshal(payload)
+		payloadStr = string(b)
+	}
+
+	queueAddr := os.Getenv("SERV_QUEUE_URL")
+	if queueAddr == "" {
+		queueAddr = "http://localhost:8082"
+	}
+	url := strings.TrimSuffix(queueAddr, "/") + "/api/v1/events/" + streamName
+
+	reqBody, _ := json.Marshal(map[string]string{
+		"type":    eventType,
+		"payload": payloadStr,
+	})
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		LogWarn("Failed to create emit event request:", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	apiToken := "secret-token"
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			AuthToken string `json:"auth_token"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.AuthToken != "" {
+			apiToken = manifest.AuthToken
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	Publish("events."+streamName+"."+eventType, payloadStr)
+}
+
+func SnapshotAggregate(streamName string, id string, state interface{}) {
+	var stateStr string
+	if s, ok := state.(string); ok {
+		stateStr = s
+	} else {
+		b, _ := json.Marshal(state)
+		stateStr = string(b)
+	}
+
+	storeAddr := os.Getenv("SERV_STORE_URL")
+	if storeAddr == "" {
+		storeAddr = "http://localhost:8081"
+	}
+	url := fmt.Sprintf("%s/api/v1/events/snapshots/%s/%s", strings.TrimSuffix(storeAddr, "/"), streamName, id)
+
+	req, err := http.NewRequest("PUT", url, strings.NewReader(stateStr))
+	if err != nil {
+		LogWarn("Failed to create snapshot request:", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	apiToken := "secret-token"
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			AuthToken string `json:"auth_token"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.AuthToken != "" {
+			apiToken = manifest.AuthToken
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
+func LoadAggregate(streamName string, id string) (string, int64) {
+	storeAddr := os.Getenv("SERV_STORE_URL")
+	if storeAddr == "" {
+		storeAddr = "http://localhost:8081"
+	}
+	url := fmt.Sprintf("%s/api/v1/events/snapshots/%s/%s", strings.TrimSuffix(storeAddr, "/"), streamName, id)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, _ := http.NewRequest("GET", url, nil)
+
+	apiToken := "secret-token"
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			AuthToken string `json:"auth_token"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil && manifest.AuthToken != "" {
+			apiToken = manifest.AuthToken
+		}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	resp, err := client.Do(req)
+	var state string
+	var lastSeq int64 = 0
+
+	if err == nil && resp.StatusCode == http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		state = string(b)
+		resp.Body.Close()
+		if seqStr := resp.Header.Get("X-Sequence-Number"); seqStr != "" {
+			fmt.Sscanf(seqStr, "%d", &lastSeq)
+		}
+	}
+
+	return state, lastSeq
 }

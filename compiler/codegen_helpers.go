@@ -291,6 +291,10 @@ func stmtToken(stmt Statement) Token {
 		return s.Token
 	case *RagStmt:
 		return s.Token
+	case *EmitStmt:
+		return s.Token
+	case *EventStoreStmt:
+		return s.Token
 	default:
 		return Token{}
 	}

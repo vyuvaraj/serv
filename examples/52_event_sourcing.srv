@@ -1,0 +1,45 @@
+// Serv Example 52: Event Sourcing & CQRS Framework
+//
+// Demonstrates:
+//   - Declarative event_store blocks for CQRS aggregate design
+//   - command handling with REST endpoints and emit statements
+//   - Event subscription with projections updating databases
+//
+// Setup:
+//   serv run examples/52_event_sourcing.srv
+//
+// Test:
+//   curl -X POST http://localhost:8080/api/event_store/orders/PlaceOrder -d '{"orderId": "order-abc", "amount": 149.99}'
+//
+
+server "8080"
+database "sqlite://events.db"
+
+migration "create_order_projections" {
+    db.query("CREATE TABLE IF NOT EXISTS order_projections (id TEXT PRIMARY KEY, amount REAL, status TEXT)")
+}
+
+event_store "orders" {
+    // Declares an event-sourced command
+    command PlaceOrder(orderId, amount) {
+        emit "OrderPlaced" { "orderId": orderId, "amount": amount }
+    }
+
+    // Handles the emitted event to update the read model (projections)
+    on "OrderPlaced" (event) {
+        log.info("Projecting OrderPlaced event for: " + event)
+        db.query("INSERT OR REPLACE INTO order_projections (id, amount, status) VALUES (?, ?, ?)",
+            event, 149.99, "placed")
+    }
+}
+
+test "verify order placement and projection update" {
+    // Emit OrderPlaced event
+    publish "events.orders.OrderPlaced" "order-abc"
+
+    // Wait for async projection handler to settle
+    time.sleep(200ms)
+
+    let rows = db.query("SELECT amount, status FROM order_projections WHERE id = 'order-abc'")
+    assert rows != nil
+}

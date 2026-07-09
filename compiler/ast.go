@@ -1370,5 +1370,62 @@ func (r *RagStmt) String() string {
 	return "rag \"" + r.Source + "\" " + r.Body.String() + "\n"
 }
 
+// EmitStmt represents: emit "OrderPlaced" { orderId: orderId, amount: amount }
+type EmitStmt struct {
+	Token   Token
+	Event   string
+	Payload Expression
+}
+
+func (e *EmitStmt) statementNode()       {}
+func (e *EmitStmt) TokenLiteral() string { return e.Token.Literal }
+func (e *EmitStmt) String() string {
+	return "emit \"" + e.Event + "\" " + e.Payload.String() + "\n"
+}
+
+// CommandDecl represents a command declaration inside an event store: command PlaceOrder(orderId, amount) { ... }
+type CommandDecl struct {
+	Token  Token
+	Name   string
+	Params []string
+	Body   *BlockStmt
+}
+
+func (c *CommandDecl) statementNode()       {}
+func (c *CommandDecl) TokenLiteral() string { return c.Token.Literal }
+func (c *CommandDecl) String() string {
+	paramsStr := ""
+	if len(c.Params) > 0 {
+		paramsStr = c.Params[0]
+		for _, p := range c.Params[1:] {
+			paramsStr += ", " + p
+		}
+	}
+	return "command " + c.Name + " (" + paramsStr + ") " + c.Body.String() + "\n"
+}
+
+// EventStoreStmt represents: event_store "orders" { ... }
+type EventStoreStmt struct {
+	Token    Token
+	Name     string
+	Commands []*CommandDecl
+	Handlers []*OnStmt
+}
+
+func (e *EventStoreStmt) statementNode()       {}
+func (e *EventStoreStmt) TokenLiteral() string { return e.Token.Literal }
+func (e *EventStoreStmt) String() string {
+	var out bytes.Buffer
+	out.WriteString("event_store \"" + e.Name + "\" {\n")
+	for _, c := range e.Commands {
+		out.WriteString("\t" + c.String())
+	}
+	for _, h := range e.Handlers {
+		out.WriteString("\t" + h.String())
+	}
+	out.WriteString("}\n")
+	return out.String()
+}
+
 
 

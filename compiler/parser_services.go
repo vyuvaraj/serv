@@ -957,5 +957,87 @@ func (p *Parser) parseRagStatement() Statement {
 	return stmt
 }
 
+// parseEventStoreStatement parses: event_store "orders" { ... }
+func (p *Parser) parseEventStoreStatement() Statement {
+	stmt := &EventStoreStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+	p.nextToken()
+
+	for p.curToken.Type != TOKEN_RBRACE && p.curToken.Type != TOKEN_EOF {
+		switch p.curToken.Type {
+		case TOKEN_COMMAND:
+			cmd := p.parseCommandDeclaration()
+			if cmd != nil {
+				stmt.Commands = append(stmt.Commands, cmd)
+			}
+			p.nextToken()
+		case TOKEN_ON:
+			on := p.parseOnStatement()
+			if onStmt, ok := on.(*OnStmt); ok {
+				stmt.Handlers = append(stmt.Handlers, onStmt)
+			}
+			p.nextToken()
+		default:
+			p.nextToken()
+		}
+	}
+	return stmt
+}
+
+func (p *Parser) parseCommandDeclaration() *CommandDecl {
+	cmd := &CommandDecl{Token: p.curToken}
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	cmd.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LPAREN) {
+		return nil
+	}
+
+	// Parse parameters
+	if p.peekToken.Type != TOKEN_RPAREN {
+		p.nextToken()
+		cmd.Params = append(cmd.Params, p.curToken.Literal)
+		for p.peekToken.Type == TOKEN_COMMA {
+			p.nextToken() // cur token is COMMA
+			p.nextToken() // cur token is parameter IDENT
+			cmd.Params = append(cmd.Params, p.curToken.Literal)
+		}
+	}
+
+	if !p.expectPeek(TOKEN_RPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+
+	cmd.Body = p.parseBlockStatement()
+	return cmd
+}
+
+func (p *Parser) parseEmitStatement() Statement {
+	stmt := &EmitStmt{Token: p.curToken}
+	if !p.expectPeek(TOKEN_STRING) {
+		return nil
+	}
+	stmt.Event = p.curToken.Literal
+
+	p.nextToken() // move past event string
+	stmt.Payload = p.parseExpression(LOWEST)
+
+	return stmt
+}
+
+
 
 
