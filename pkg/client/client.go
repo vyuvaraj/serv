@@ -45,6 +45,7 @@ type MeshTransport struct {
 	rulesExpiry map[string]time.Time
 	latencies   map[string]time.Duration
 	errorRates  map[string]float64
+	rateLimiters map[string]*RateLimiter // "caller/callee" -> token-bucket limiter
 	
 	cacheTTL    time.Duration
 	tlsConfig   *tls.Config
@@ -58,17 +59,18 @@ func NewMeshTransport(registryURL string, cacheTTL time.Duration) *MeshTransport
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	return &MeshTransport{
-		base:        transport,
-		registryURL: strings.TrimSuffix(registryURL, "/"),
-		cache:       make(map[string][]registry.Instance),
-		cacheExpiry: make(map[string]time.Time),
-		breakers:    make(map[string]*resilience.CircuitBreaker),
-		rrIndex:     make(map[string]int),
-		rules:       make(map[string]registry.RoutingRule),
-		rulesExpiry: make(map[string]time.Time),
-		latencies:   make(map[string]time.Duration),
-		errorRates:  make(map[string]float64),
-		cacheTTL:    cacheTTL,
+		base:         transport,
+		registryURL:  strings.TrimSuffix(registryURL, "/"),
+		cache:        make(map[string][]registry.Instance),
+		cacheExpiry:  make(map[string]time.Time),
+		breakers:     make(map[string]*resilience.CircuitBreaker),
+		rrIndex:      make(map[string]int),
+		rules:        make(map[string]registry.RoutingRule),
+		rulesExpiry:  make(map[string]time.Time),
+		latencies:    make(map[string]time.Duration),
+		errorRates:   make(map[string]float64),
+		rateLimiters: make(map[string]*RateLimiter),
+		cacheTTL:     cacheTTL,
 	}
 }
 
@@ -84,6 +86,35 @@ func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("mesh: no healthy endpoints found for service '%s'", serviceName)
+	}
+
+	// Rate limiting per service pair (caller -> callee)
+	callerID := req.Header.Get("X-Caller-Id")
+	if callerID == "" {
+		callerID = "unknown"
+	}
+	if limiter := t.getRateLimiter(callerID, serviceName); limiter != nil {
+		if !limiter.Allow() {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Body:       io.NopCloser(strings.NewReader("rate limit exceeded for pair " + callerID + "/" + serviceName)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}
+	}
+
+	// Version-based routing: filter targets to requested version
+	if version := req.Header.Get("X-Service-Version"); version != "" {
+		var versioned []registry.Instance
+		for _, inst := range targets {
+			if strings.EqualFold(inst.Version, version) {
+				versioned = append(versioned, inst)
+			}
+		}
+		if len(versioned) > 0 {
+			targets = versioned
+		}
 	}
 
 	// Fetch dynamic routing rules
@@ -717,4 +748,58 @@ func (t *MeshTransport) UpdateTargetMetricsForTest(target string, elapsed time.D
 		errVal = 1.0
 	}
 	t.errorRates[target] = errVal
+}
+
+// RateLimiter is a simple token-bucket rate limiter.
+type RateLimiter struct {
+	mu         sync.Mutex
+	tokens     float64
+	refillRate float64 // tokens per second
+	capacity   float64
+	lastRefill time.Time
+}
+
+func newRateLimiter(rps float64, burst int) *RateLimiter {
+	return &RateLimiter{
+		tokens:     float64(burst),
+		refillRate: rps,
+		capacity:   float64(burst),
+		lastRefill: time.Now(),
+	}
+}
+
+// Allow returns true if a token is available and consumes one, false otherwise.
+func (rl *RateLimiter) Allow() bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(rl.lastRefill).Seconds()
+	rl.tokens += elapsed * rl.refillRate
+	if rl.tokens > rl.capacity {
+		rl.tokens = rl.capacity
+	}
+	rl.lastRefill = now
+
+	if rl.tokens >= 1.0 {
+		rl.tokens--
+		return true
+	}
+	return false
+}
+
+// SetRateLimit configures a rate limit for a caller->callee service pair.
+// rps is tokens per second; burst is the maximum burst capacity.
+func (t *MeshTransport) SetRateLimit(caller, callee string, rps float64, burst int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	key := strings.ToLower(caller) + "/" + strings.ToLower(callee)
+	t.rateLimiters[key] = newRateLimiter(rps, burst)
+}
+
+func (t *MeshTransport) getRateLimiter(caller, callee string) *RateLimiter {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	key := strings.ToLower(caller) + "/" + strings.ToLower(callee)
+	return t.rateLimiters[key]
 }

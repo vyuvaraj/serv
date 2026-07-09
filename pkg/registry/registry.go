@@ -184,6 +184,30 @@ func (r *Registry) ResolveRegion(service, region string) []Instance {
 	return healthy
 }
 
+func (r *Registry) ResolveVersion(service, version string) []Instance {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	service = strings.ToLower(service)
+	list := r.instances[service]
+
+	var versioned []Instance
+	for _, inst := range list {
+		if strings.EqualFold(inst.Version, version) {
+			versioned = append(versioned, inst)
+		}
+	}
+
+	if len(versioned) > 0 {
+		return versioned
+	}
+
+	// Graceful degradation: fall back to full pool if no version match
+	healthy := make([]Instance, len(list))
+	copy(healthy, list)
+	return healthy
+}
+
 func (r *Registry) Evict() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -354,8 +378,11 @@ func (r *Registry) Handler() http.Handler {
 		}
 		serviceName := parts[2]
 		region := req.URL.Query().Get("region")
+		version := req.URL.Query().Get("version")
 		var instances []Instance
-		if region != "" {
+		if version != "" {
+			instances = r.ResolveVersion(serviceName, version)
+		} else if region != "" {
 			instances = r.ResolveRegion(serviceName, region)
 		} else {
 			instances = r.Resolve(serviceName)

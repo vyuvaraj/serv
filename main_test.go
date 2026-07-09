@@ -733,3 +733,151 @@ func TestHealthAwareLoadBalancing(t *testing.T) {
 		t.Errorf("Expected healthier target to get majority of traffic, got: %+v", selectedDegraded)
 	}
 }
+
+func TestServMeshRateLimitingPerPair(t *testing.T) {
+	// Start a control plane registry
+	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	// Setup a backend that counts requests
+	reqCount := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCount++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	// Register the backend
+	registerInstance(t, regServer.URL+"/api/register", "rate-svc", backend.URL)
+
+	// Create transport and set rate limit: 2 RPS, burst of 2 for caller-a -> rate-svc
+	transport := client.NewMeshTransport(regServer.URL, 50*time.Millisecond)
+	transport.SetRateLimit("caller-a", "rate-svc", 2.0, 2)
+
+	httpClient := &http.Client{Transport: transport}
+
+	// Fire 5 rapid requests (no time to refill)
+	successCount := 0
+	rateLimitedCount := 0
+	for i := 0; i < 5; i++ {
+		req, _ := http.NewRequest("GET", "serv://rate-svc/ping", nil)
+		req.Header.Set("X-Caller-Id", "caller-a")
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			successCount++
+		} else if resp.StatusCode == http.StatusTooManyRequests {
+			rateLimitedCount++
+		}
+	}
+
+	t.Logf("Rate limit test: %d successes, %d rate-limited", successCount, rateLimitedCount)
+	// With burst=2 and no time to refill, first 2 should succeed, remaining 3 should be 429
+	if successCount != 2 {
+		t.Errorf("expected 2 successes (burst), got %d", successCount)
+	}
+	if rateLimitedCount != 3 {
+		t.Errorf("expected 3 rate-limited responses, got %d", rateLimitedCount)
+	}
+
+	// Requests from a DIFFERENT caller should not be rate-limited
+	req, _ := http.NewRequest("GET", "serv://rate-svc/ping", nil)
+	req.Header.Set("X-Caller-Id", "caller-b")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected error from caller-b: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("caller-b should not be rate-limited, got %d", resp.StatusCode)
+	}
+}
+
+func TestServMeshVersionRouting(t *testing.T) {
+	// Start a control plane registry
+	reg := registry.NewRegistry(5 * time.Second)
+	defer reg.Close()
+	regServer := httptest.NewServer(reg.Handler())
+	defer regServer.Close()
+
+	// Two backends: v1 and v2
+	v1Count := 0
+	v1Backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v1Count++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("v1"))
+	}))
+	defer v1Backend.Close()
+
+	v2Count := 0
+	v2Backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v2Count++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("v2"))
+	}))
+	defer v2Backend.Close()
+
+	// Register both backends with version tags
+	regURL := regServer.URL + "/api/register"
+	body1, _ := json.Marshal(registry.Instance{
+		Service:   "versioned-svc",
+		Address:   v1Backend.URL,
+		HealthURL: v1Backend.URL + "/health",
+		Version:   "v1",
+	})
+	resp, _ := http.Post(regURL, "application/json", bytes.NewReader(body1))
+	resp.Body.Close()
+
+	body2, _ := json.Marshal(registry.Instance{
+		Service:   "versioned-svc",
+		Address:   v2Backend.URL,
+		HealthURL: v2Backend.URL + "/health",
+		Version:   "v2",
+	})
+	resp, _ = http.Post(regURL, "application/json", bytes.NewReader(body2))
+	resp.Body.Close()
+
+	transport := client.NewMeshTransport(regServer.URL, 50*time.Millisecond)
+	httpClient := &http.Client{Transport: transport}
+
+	// Send 4 requests pinned to v2
+	for i := 0; i < 4; i++ {
+		req, _ := http.NewRequest("GET", "serv://versioned-svc/data", nil)
+		req.Header.Set("X-Service-Version", "v2")
+		r, err := httpClient.Do(req)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		body, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		t.Logf("v2 pinned request %d got: %s", i, body)
+	}
+
+	if v2Count != 4 {
+		t.Errorf("expected all 4 requests to hit v2, got v1=%d v2=%d", v1Count, v2Count)
+	}
+	if v1Count != 0 {
+		t.Errorf("expected v1 to receive 0 requests, got %d", v1Count)
+	}
+
+	// Requests without version header should hit both
+	v1Count = 0
+	v2Count = 0
+	for i := 0; i < 4; i++ {
+		r, err := httpClient.Get("serv://versioned-svc/data")
+		if err != nil {
+			t.Fatalf("unversioned request %d failed: %v", i, err)
+		}
+		r.Body.Close()
+	}
+	t.Logf("Unversioned: v1=%d v2=%d", v1Count, v2Count)
+	if v1Count+v2Count != 4 {
+		t.Errorf("expected 4 total unversioned requests, got %d", v1Count+v2Count)
+	}
+}

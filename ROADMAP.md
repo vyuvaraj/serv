@@ -35,9 +35,9 @@ This roadmap outlines the planned development phases for the ServMesh library-le
 
 
 ## Phase 5: Advanced Traffic Management (Next Level)
-- [ ] **Rate Limiting per Service Pair**: Client-side rate limiting based on caller→callee identity (not just global).
+- [x] **Rate Limiting per Service Pair**: Client-side token-bucket rate limiting keyed on caller→callee identity; returns HTTP 429 when burst is exhausted. [July 9, 2026]
 - [x] **Fault Injection Testing**: Inject artificial latency, errors, or timeouts via registry config for chaos engineering. [June 30, 2026]
-- [ ] **Service Versioning & Header Routing**: Route requests to specific versions based on `X-Service-Version` header. Blue/green at service mesh level.
+- [x] **Service Versioning & Header Routing**: Route requests to specific versions via `X-Service-Version` header with graceful fallback. Blue/green at service mesh level. [July 9, 2026]
 - [ ] **Health-Aware Load Balancing**: Weight routing based on real-time latency/error-rate feedback from OTel spans.
 - [x] **Sidecar-less mTLS Rotation**: Automated cert rotation with zero-downtime using background goroutine (SEC.7)
 - [ ] **Service Dependency Graph API**: Expose real-time dependency topology data from heartbeat metadata for ServConsole.
