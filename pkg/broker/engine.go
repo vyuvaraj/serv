@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -478,8 +479,29 @@ func (e *BrokerEngine) routeToDLQ(ctx context.Context, sourceTopic string, paylo
 		})
 	}
 
-	envelope := fmt.Sprintf(`{"dlq":true,"source_topic":%q,"reason":%q,"payload":%q}`,
-		sourceTopic, reason, payload)
+	msgID := ""
+	if idVal, ok := ctx.Value("message-id").(string); ok {
+		msgID = idVal
+	}
+	if msgID == "" {
+		msgID = fmt.Sprintf("dlq-%d", time.Now().UnixNano())
+	}
+
+	retryCount := 1
+	if rcVal, ok := ctx.Value("retry-count").(int); ok {
+		retryCount = rcVal
+	}
+
+	envelopeMap := map[string]interface{}{
+		"dlq":          true,
+		"message_id":   msgID,
+		"source_topic": sourceTopic,
+		"reason":       reason,
+		"payload":      payload,
+		"retry_count":  retryCount,
+	}
+	envelopeBytes, _ := json.Marshal(envelopeMap)
+	envelope := string(envelopeBytes)
 
 	// Deliver directly to DLQ subscribers without running transforms
 	e.mu.RLock()

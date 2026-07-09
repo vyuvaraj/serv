@@ -130,8 +130,8 @@ ServQueue acts as the event backbone for proposed new components.
 ## Phase 12: Architectural Depth & DevOps (Pending)
 - [x] **Ecosystem Performance Suite** — Multi-tiered Go micro-benchmarks, k6 component load tests, and distributed end-to-end telemetry workloads (OPS.7)
 - [x] **WASM Module Pre-compilation Cache** — Pre-compile and persist Wazero module artifacts to disk; eliminates cold-start JIT cost on broker restart (PS.2)
-- [ ] **`servqueue tail` CLI** — Stream live messages from any topic to terminal with JSON pretty-print and optional regex filter — essential for developer debugging (DevOps)
-- [ ] **Dead Letter Queue Inspector** — `servqueue dlq inspect <topic>` lists DLQ messages with payload preview, retry count, and error cause; supports `--replay` flag (DX / DevOps)
+- [x] **`servqueue tail` CLI** — Stream live messages from any topic to terminal with JSON pretty-print and optional regex filter — essential for developer debugging (DevOps)
+- [x] **Dead Letter Queue Inspector** — `servqueue dlq inspect <topic>` lists DLQ messages with payload preview, retry count, and error cause; supports `--replay` flag (DX / DevOps)
 - [ ] **Topic Schema Linting** — `serv lint` validates topic publish/subscribe schemas against the schema registry before deploy, catching mismatches at build time (DX)
 
 

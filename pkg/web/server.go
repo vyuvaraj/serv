@@ -389,6 +389,74 @@ func (s *Server) handleRegisterTransform(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handleRegisterDLQ(w http.ResponseWriter, r *http.Request, topic string) {
+	if r.Method == http.MethodGet {
+		dlqTopic, ok := s.engine.GetDLQ(topic)
+		if !ok {
+			dlqTopic = topic
+		}
+
+		walEntries, err := s.engine.GetWALEntries()
+		if err != nil {
+			WriteJSONError(w, r, err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
+			return
+		}
+
+		type DLQMessage struct {
+			MessageID       string `json:"message_id"`
+			SourceTopic     string `json:"source_topic"`
+			OriginalPayload string `json:"original_payload"`
+			FailureReason   string `json:"failure_reason"`
+			Timestamp       int64  `json:"timestamp"`
+			RetryCount      int    `json:"retry_count"`
+		}
+
+		var messages []DLQMessage
+		for _, entry := range walEntries {
+			if entry.Topic == dlqTopic {
+				var originalPayload = entry.Payload
+				var sourceTopic = topic
+				var reason = "unknown transform failure"
+				var msgID = fmt.Sprintf("dlq-%d", entry.Timestamp)
+				var retryCount = 1
+
+				// Try to parse the envelope JSON
+				var envelope map[string]interface{}
+				if err := json.Unmarshal([]byte(entry.Payload), &envelope); err == nil {
+					if isDLQ, _ := envelope["dlq"].(bool); isDLQ {
+						if st, ok := envelope["source_topic"].(string); ok {
+							sourceTopic = st
+						}
+						if rsn, ok := envelope["reason"].(string); ok {
+							reason = rsn
+						}
+						if pld, ok := envelope["payload"].(string); ok {
+							originalPayload = pld
+						}
+						if id, ok := envelope["message_id"].(string); ok {
+							msgID = id
+						}
+						if rc, ok := envelope["retry_count"].(float64); ok {
+							retryCount = int(rc)
+						}
+					}
+				}
+
+				messages = append(messages, DLQMessage{
+					MessageID:       msgID,
+					SourceTopic:     sourceTopic,
+					OriginalPayload: originalPayload,
+					FailureReason:   reason,
+					Timestamp:       entry.Timestamp,
+					RetryCount:      retryCount,
+				})
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(messages)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return

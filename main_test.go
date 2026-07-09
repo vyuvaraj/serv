@@ -1242,6 +1242,75 @@ func TestEventSourcingEndpoints(t *testing.T) {
 	}
 }
 
+func TestDLQInspectorAndReplay(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	engine.SetDLQ(context.Background(), "orders", "orders.dlq")
+
+	srv := web.NewServer("127.0.0.1:8093", engine, "", "", "")
+	go func() {
+		_ = srv.Start()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	defer srv.Shutdown(context.Background())
+
+	ctx := context.WithValue(context.Background(), "message-id", "msg-failed-123")
+	ctx = context.WithValue(ctx, "retry-count", 2)
+	// engine.routeToDLQ needs package visibility but we are in main package (same as main_test.go)
+	// wait, routeToDLQ is in broker package and has lowercase visibility.
+	// Since main_test.go is in package main, and engine is broker.BrokerEngine, we can use SetDLQ and publish a failing WASM transform,
+	// or we can simply register a DLQ and publish directly to the DLQ topic!
+	// Yes! If we publish the envelope directly to orders.dlq, it is exactly the same!
+	envelope := `{"dlq":true,"message_id":"msg-failed-123","source_topic":"orders","reason":"wasm transform failed","payload":"{\"customer_id\": 99}","retry_count":2}`
+	_, err := engine.Publish(context.Background(), "orders.dlq", envelope)
+	if err != nil {
+		t.Fatalf("Failed to publish to DLQ topic: %v", err)
+	}
+
+	// Verify GET /api/v1/topics/orders/dlq returns the parsed DLQ message
+	resp, err := http.Get("http://127.0.0.1:8093/api/v1/topics/orders/dlq")
+	if err != nil {
+		t.Fatalf("Failed to get DLQ: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	var messages []struct {
+		MessageID       string `json:"message_id"`
+		SourceTopic     string `json:"source_topic"`
+		OriginalPayload string `json:"original_payload"`
+		FailureReason   string `json:"failure_reason"`
+		Timestamp       int64  `json:"timestamp"`
+		RetryCount      int    `json:"retry_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 DLQ message, got %d", len(messages))
+	}
+
+	msg := messages[0]
+	if msg.MessageID != "msg-failed-123" {
+		t.Errorf("Expected message_id msg-failed-123, got %q", msg.MessageID)
+	}
+	if msg.SourceTopic != "orders" {
+		t.Errorf("Expected source_topic orders, got %q", msg.SourceTopic)
+	}
+	if msg.FailureReason != "wasm transform failed" {
+		t.Errorf("Expected failure_reason 'wasm transform failed', got %q", msg.FailureReason)
+	}
+	if msg.RetryCount != 2 {
+		t.Errorf("Expected retry_count 2, got %d", msg.RetryCount)
+	}
+}
+
 
 
 
