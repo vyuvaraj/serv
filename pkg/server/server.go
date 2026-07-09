@@ -45,6 +45,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/logs", s.handleIngestLog)
 	mux.HandleFunc("/api/trace/anomaly/slow-spans", s.handleSlowSpans)
 	mux.HandleFunc("/api/trace/anomaly/slo-breach-predict", s.handleSloBreachPredict)
+	mux.HandleFunc("/api/v1/tuning/recommendations", s.handleTuningRecommendations)
 	
 	mux.HandleFunc("/api/traces/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == http.MethodDelete {
@@ -566,6 +567,81 @@ func (s *Server) runSelfHealingDiagnostics() {
 			}
 		}
 	}
+}
+
+func (s *Server) handleTuningRecommendations(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	traces := s.traceStore.ListTraces()
+	slowEndpointCounts := make(map[string]int)
+	slowQueryCounts := make(map[string]int)
+
+	for _, t := range traces {
+		if t.DurationMs > 200 { // focus on spans taking > 200ms
+			tree, exists := s.traceStore.GetTraceTree(t.TraceID)
+			if exists && tree != nil {
+				var traverse func(*store.SpanNode)
+				traverse = func(n *store.SpanNode) {
+					if n.DurationMs > 200 {
+						// Check if it's a database query
+						isDB := false
+						if n.Span.Attributes != nil {
+							if dbType, ok := n.Span.Attributes["db.system"]; ok && dbType != "" {
+								isDB = true
+							}
+						}
+						// If span name contains DB operations or isDB
+						nameLower := strings.ToLower(n.Span.Name)
+						if isDB || strings.Contains(nameLower, "select") || strings.Contains(nameLower, "query") {
+							slowQueryCounts[n.Span.Name]++
+						} else {
+							// Exclude general health checks or short ones
+							if !strings.Contains(nameLower, "health") {
+								slowEndpointCounts[n.Span.Name]++
+							}
+						}
+					}
+					for _, child := range n.Children {
+						traverse(child)
+					}
+				}
+				traverse(tree)
+			}
+		}
+	}
+
+	type Recommendation struct {
+		Target string `json:"target"`
+		Type   string `json:"type"` // "cache" or "index"
+		Reason string `json:"reason"`
+	}
+	var recommendations []Recommendation
+
+	for endpoint, count := range slowEndpointCounts {
+		if count >= 1 {
+			recommendations = append(recommendations, Recommendation{
+				Target: endpoint,
+				Type:   "cache",
+				Reason: fmt.Sprintf("Endpoint %s detected as latency bottleneck (%d slow executions). Cache recommended.", endpoint, count),
+			})
+		}
+	}
+
+	for query, count := range slowQueryCounts {
+		if count >= 1 {
+			recommendations = append(recommendations, Recommendation{
+				Target: query,
+				Type:   "index",
+				Reason: fmt.Sprintf("Slow database operation %s executed %d times. Creating database index recommended.", query, count),
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(recommendations)
 }
 
 func (s *Server) triggerRollback(service string) {
