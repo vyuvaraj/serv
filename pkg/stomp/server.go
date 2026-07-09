@@ -39,6 +39,11 @@ func NewServer(addr string, engine *broker.BrokerEngine, username, passcode, tls
 	}
 }
 
+// Enterprise hooks (overridden in EE build)
+var (
+	EnterpriseModifyTLSConfig = func(cfg *tls.Config) {}
+)
+
 func (s *Server) Start() error {
 	var listener net.Listener
 	var err error
@@ -49,6 +54,7 @@ func (s *Server) Start() error {
 			return fmt.Errorf("tls: failed to load certificates: %w", certErr)
 		}
 		cfg := &tls.Config{Certificates: []tls.Certificate{cert}}
+		EnterpriseModifyTLSConfig(cfg)
 		listener, err = tls.Listen("tcp", s.addr, cfg)
 	} else {
 		listener, err = net.Listen("tcp", s.addr)
