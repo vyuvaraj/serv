@@ -1128,7 +1128,7 @@ func (s *Server) handleGenerateInvite(w http.ResponseWriter, r *http.Request, su
 	})
 }
 
-func (s *Server) handleCheckExists(w http.ResponseWriter, r *http.Request, subdomain string) {
+func (s *Server) handleCheckExists(w http.ResponseWriter, _ *http.Request, subdomain string) {
 	s.mu.RLock()
 	_, exists := s.tunnels[subdomain]
 	s.mu.RUnlock()
@@ -1139,7 +1139,7 @@ func (s *Server) handleCheckExists(w http.ResponseWriter, r *http.Request, subdo
 	}
 }
 
-func (s *Server) handleGetAnalytics(w http.ResponseWriter, r *http.Request, subdomain string) {
+func (s *Server) handleGetAnalytics(w http.ResponseWriter, _ *http.Request, subdomain string) {
 	s.mu.RLock()
 	tc, exists := s.tunnels[subdomain]
 	s.mu.RUnlock()
