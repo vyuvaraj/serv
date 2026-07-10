@@ -87,6 +87,28 @@ func (q *DiskQueue) PendingEntries() []*QueuedEmail {
 	return out
 }
 
+// EnforceRetention cleans up non-pending entries that are older than ageLimit.
+func (q *DiskQueue) EnforceRetention(ageLimit time.Duration) {
+	q.mu.Lock()
+	defer  q.mu.Unlock()
+
+	now := time.Now()
+	var active []*QueuedEmail
+	removed := 0
+	for _, e := range q.entries {
+		if e.Status == "pending" || now.Sub(e.QueuedAt) <= ageLimit {
+			active = append(active, e)
+		} else {
+			removed++
+		}
+	}
+	if removed > 0 {
+		q.entries = active
+		q.flush()
+		log.Printf("[MAIL DISK QUEUE] Purged %d expired mail entries from queue due to retention settings", removed)
+	}
+}
+
 // Size returns the total number of entries in the queue.
 func (q *DiskQueue) Size() int {
 	q.mu.Lock()

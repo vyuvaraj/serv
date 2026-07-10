@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"os"
 	"github.com/vyuvaraj/ServShared"
+	"servmail/pkg/queue"
 	"servmail/pkg/storage"
 )
 
@@ -585,3 +587,50 @@ func TestServMailMockSMTPServer(t *testing.T) {
 	}
 	mockedEmailsMu.RUnlock()
 }
+
+func TestQueueRetention(t *testing.T) {
+	tmpQueueFile, err := os.CreateTemp("", "mail-queue-*.jsonl")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpQueueFile.Name())
+	tmpQueueFile.Close()
+
+	dq := queue.NewDiskQueue(tmpQueueFile.Name())
+
+	// 1. Enqueue active pending email
+	dq.Enqueue(&queue.QueuedEmail{
+		ID:       "id-pending",
+		Status:   "pending",
+		QueuedAt: time.Now(),
+	})
+
+	// 2. Enqueue sent email older than 30m limit (1 hour ago)
+	dq.Enqueue(&queue.QueuedEmail{
+		ID:       "id-expired-sent",
+		Status:   "sent",
+		QueuedAt: time.Now().Add(-1 * time.Hour),
+	})
+
+	// 3. Enqueue sent email younger than 30m limit (10s ago)
+	dq.Enqueue(&queue.QueuedEmail{
+		ID:       "id-active-sent",
+		Status:   "sent",
+		QueuedAt: time.Now().Add(-10 * time.Second),
+	})
+
+	// 4. Enforce 30 minute retention limit
+	dq.EnforceRetention(30 * time.Minute)
+
+	// Validate remaining size
+	if dq.Size() != 2 {
+		t.Errorf("expected 2 remaining entries, got %d", dq.Size())
+	}
+
+	// Load again from disk to verify persistence
+	dq2 := queue.NewDiskQueue(tmpQueueFile.Name())
+	if dq2.Size() != 2 {
+		t.Errorf("expected persisted queue size to be 2, got %d", dq2.Size())
+	}
+}
+

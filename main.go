@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"strconv"
 	"github.com/vyuvaraj/ServShared"
 	"servmail/pkg/delivery"
 	"servmail/pkg/handlers"
@@ -94,6 +95,21 @@ func initStore() {
 	}
 	mailDiskQueue = queue.NewDiskQueue(queuePath)
 	log.Printf("[INFO] ServMail disk queue initialized: %s", queuePath)
+
+	retentionDaysStr := os.Getenv("SERVMAIL_RETENTION_DAYS")
+	if retentionDaysStr != "" {
+		if days, err := strconv.Atoi(retentionDaysStr); err == nil && days > 0 {
+			go func() {
+				ticker := time.NewTicker(30 * time.Minute)
+				defer ticker.Stop()
+				retentionLimit := time.Duration(days) * 24 * time.Hour
+				mailDiskQueue.EnforceRetention(retentionLimit)
+				for range ticker.C {
+					mailDiskQueue.EnforceRetention(retentionLimit)
+				}
+			}()
+		}
+	}
 }
 
 func loadTemplatesFromStore() {
