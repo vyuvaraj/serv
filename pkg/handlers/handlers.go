@@ -401,7 +401,7 @@ func HandleToken(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`{"access_token":"%s","token_type":"Bearer","expires_in":3600}`, token)))
+	w.Write(fmt.Appendf(nil, `{"access_token":"%s","token_type":"Bearer","expires_in":3600}`, token))
 }
 
 func HandleResetRequest(w http.ResponseWriter, r *http.Request) {
@@ -1075,7 +1075,7 @@ func HandleRotateJWKS(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`{"status":"success","rotated_to":"%s"}`, kid)))
+	w.Write(fmt.Appendf(nil, `{"status":"success","rotated_to":"%s"}`, kid))
 }
 
 func HandleAdaptiveRiskScore(w http.ResponseWriter, r *http.Request) {
@@ -1106,7 +1106,7 @@ func HandleAdaptiveRiskScore(w http.ResponseWriter, r *http.Request) {
 
 	requireMFA := risk >= 0.5
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(fmt.Sprintf(`{"risk_score":%.2f,"require_mfa":%t}`, risk, requireMFA)))
+	_, _ = w.Write(fmt.Appendf(nil, `{"risk_score":%.2f,"require_mfa":%t}`, risk, requireMFA))
 }
 
 func HandleCredentialStuffing(w http.ResponseWriter, r *http.Request) {
