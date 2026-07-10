@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vyuvaraj/ServShared"
+
 	"servcache/pkg/cache"
 	"servcache/pkg/otel"
 	"servcache/pkg/server"
@@ -36,8 +38,15 @@ func main() {
 		return
 	}
 
+	standalone := ServShared.IsStandalone()
+
 	// Initialize OpenTelemetry
-	otel.Init()
+	if !standalone {
+		otel.Init()
+	} else {
+		log.Println("ServCache: Running in standalone mode. Tracing disabled.")
+		*backend = "memory"
+	}
 
 	log.Printf("Starting ServCache v%s...", version)
 	log.Printf("Backend engine: %s", *backend)
