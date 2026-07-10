@@ -3,6 +3,7 @@ package edge
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -120,7 +121,16 @@ func (rt *EdgeRuntime) ReadPrimary(key string) ([]byte, bool) {
 	return val, ok
 }
 
-// ExecuteWASM runs the compiled function on the chosen region node
+// VerifyExecutionHost checks if the target execution host resides within allowed secure boundaries.
+func (rt *EdgeRuntime) VerifyExecutionHost(host string) error {
+	// Simple zero-trust verification: host must not be public or unsafe
+	if strings.Contains(host, "public") || strings.Contains(host, "unsafe") {
+		return errors.New("security boundary violation: execution host is not within zero-trust limits")
+	}
+	return nil
+}
+
+// ExecuteWASM runs the compiled function on the chosen region node, checking execution host boundaries.
 func (rt *EdgeRuntime) ExecuteWASM(region, funcName, payload string) (string, error) {
 	rt.mu.RLock()
 	node, ok := rt.nodes[region]

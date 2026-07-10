@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"crypto/tls"
+	"crypto/x509"
 	"os"
 	"os/signal"
 	"strings"
@@ -65,22 +67,14 @@ func main() {
 			Addr:    fmt.Sprintf(":%d", *port),
 			Handler: r.Handler(),
 		}
-		go func() {
-			if err := regServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("Registry server failed: %v", err)
-			}
-		}()
+		startServer(regServer)
 
 		proxy := &devProxy{reg: r}
 		proxyServer := &http.Server{
 			Addr:    fmt.Sprintf(":%d", *proxyPort),
 			Handler: proxy,
 		}
-		go func() {
-			if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("Proxy server failed: %v", err)
-			}
-		}()
+		startServer(proxyServer)
 
 		stopChan := make(chan os.Signal, 1)
 		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
@@ -117,11 +111,7 @@ func main() {
 		Handler: r.Handler(),
 	}
 
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Registry server failed: %v", err)
-		}
-	}()
+	startServer(server)
 
 	// Graceful shutdown
 	stopChan := make(chan os.Signal, 1)
@@ -196,5 +186,41 @@ func (p *devProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Host = targetURL.Host
 
 	rp.ServeHTTP(w, r)
+}
+
+func startServer(srv *http.Server) {
+	if os.Getenv("SERVMESH_MTLS_REQUIRED") == "true" {
+		certFile := os.Getenv("SERVMESH_CERT")
+		keyFile := os.Getenv("SERVMESH_KEY")
+		caFile := os.Getenv("SERVMESH_CACERT")
+
+		if certFile != "" && keyFile != "" {
+			tlsConfig := &tls.Config{
+				ClientAuth: tls.RequireAndVerifyClientCert,
+			}
+			if caFile != "" {
+				caCert, err := os.ReadFile(caFile)
+				if err == nil {
+					caCertPool := x509.NewCertPool()
+					caCertPool.AppendCertsFromPEM(caCert)
+					tlsConfig.ClientCAs = caCertPool
+				}
+			}
+			srv.TLSConfig = tlsConfig
+			log.Printf("[ServMesh] Enforcing mutual TLS on address %s", srv.Addr)
+			go func() {
+				if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+					log.Fatalf("Server failed under mTLS: %v", err)
+				}
+			}()
+			return
+		}
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
 }
 

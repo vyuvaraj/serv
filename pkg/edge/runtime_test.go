@@ -54,3 +54,15 @@ func TestEdgeRuntimeRoutingAndSync(t *testing.T) {
 		t.Errorf("primary DB sync mismatch: val=%s", string(val))
 	}
 }
+
+func TestEdgeRuntimeExecutionHostBoundary(t *testing.T) {
+	rt := NewEdgeRuntime()
+
+	if err := rt.VerifyExecutionHost("secure-enclave-node"); err != nil {
+		t.Errorf("expected secure-enclave-node to be valid: %v", err)
+	}
+
+	if err := rt.VerifyExecutionHost("public-untrusted-node"); err == nil {
+		t.Error("expected public-untrusted-node to fail security boundary verification")
+	}
+}
