@@ -1,5 +1,9 @@
 # ServMail
 
+```bash
+docker run -p 8088:8088 ghcr.io/vyuvaraj/servmail:latest
+```
+
 ServMail is a transactional notification engine of the Servverse ecosystem.
 
 ## Features
