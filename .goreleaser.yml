@@ -48,3 +48,6 @@ changelog:
 # cross-platform release builds directly via upload-artifact steps.
 # goreleaser is used here purely for consistent binary naming, checksums,
 # and a clean GitHub Releases page.
+
+release:
+  replace_existing: true
