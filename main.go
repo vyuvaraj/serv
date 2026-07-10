@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/vyuvaraj/ServShared"
+
 	"servqueue/pkg/broker"
 	"servqueue/pkg/otel"
 	"servqueue/pkg/stomp"
@@ -16,8 +18,14 @@ import (
 )
 
 func main() {
+	standalone := ServShared.IsStandalone()
+
 	// Initialize OpenTelemetry
-	otel.Init()
+	if !standalone {
+		otel.Init()
+	} else {
+		log.Println("ServQueue: Running in standalone mode. Tracing disabled.")
+	}
 
 	engine := broker.NewBrokerEngine()
 
