@@ -50,3 +50,15 @@ This roadmap outlines the planned development phases for the ServDB database pro
 - [x] **Multi-region Query Routing** — Route reads to geo-local replicas based on request origin metadata
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 6: Code Health & Test Coverage (Pending — Phase 22)
+
+> **Issue:** No pkg/ structure (flat files). Only 10 test functions.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 6.1 | **Add pkg/ structure** | Medium | Create pkg/pool/, pkg/routing/, pkg/analytics/, pkg/migration/ with clean interfaces | [ ] |
+| 6.2 | **Expand test suite** | Medium | From 10 → 35+ test functions: pool exhaustion/recovery, read/write routing accuracy, slow query detection thresholds, migration conflict handling, cache invalidation | [ ] |
