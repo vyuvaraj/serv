@@ -47,3 +47,15 @@ This roadmap outlines the planned development phases for the ServRegistry packag
 | 5.6 | **Package license scanning** | Medium | Detect and surface package license metadata. Warn on incompatible licenses during `serv install` | [ ] |
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 6: Code Health & Test Coverage (Pending — Phase 22)
+
+> **Issue:** main.go is 1,363 lines. Test coverage: 11 functions in 2 files.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 6.1 | **Decompose main.go** | Medium | Target <100 lines. Extract: pkg/registry/ (storage), pkg/resolution/ (semver), pkg/web/ (dashboard), pkg/signing/ (crypto) | [ ] |
+| 6.2 | **Expand test coverage** | Medium | From 11 → 35+ test functions: semver range resolution, signature verification, dependency tree cycles | [ ] |
