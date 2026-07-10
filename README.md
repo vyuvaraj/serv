@@ -95,19 +95,28 @@ go test -v ./...
 
 ## Use Without Servverse (Standalone Quickstart)
 
-`ServCache` can be used as a standalone memory caching microservice with standard HTTP bindings:
-1. Run `ServCache` in standalone mode:
+`ServCache` can be used as a standalone HTTP memory caching microservice (Redis alternative for development):
+
+1. **Run ServCache** in standalone mode (uses in-memory engine by default):
    ```bash
-   ./servcache --port 8084 --engine memory
+   go run main.go --standalone --addr :8084
    ```
-2. Put a key:
+
+2. **Set a cache entry** (with a 5-minute TTL):
    ```bash
-   curl -X POST http://localhost:8084/api/cache/my-namespace/my-key \
+   curl -X POST http://localhost:8084/api/cache \
      -H "Content-Type: application/json" \
-     -d '{"value": "my-cached-payload", "ttl_seconds": 60}'
+     -d '{"key": "my-key", "value": "my-cached-payload", "ttl": "5m"}'
    ```
-3. Get a key:
+
+3. **Retrieve the cache entry**:
    ```bash
-   curl http://localhost:8084/api/cache/my-namespace/my-key
+   curl http://localhost:8084/api/cache/my-key
    ```
+
+4. **Delete the cache entry**:
+   ```bash
+   curl -X DELETE http://localhost:8084/api/cache/my-key
+   ```
+
 
