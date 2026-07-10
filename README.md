@@ -376,6 +376,21 @@ You may obtain a copy of the License at
 
 ---
 
+## Use Without Servverse (Standalone Quickstart)
+
+`ServStore` is fully standalone by default and functions as a standard, independent S3-compatible storage engine:
+1. Run `ServStore`:
+   ```bash
+   ./servstore --port 8081 --dir ./data
+   ```
+2. Interact with it using any standard S3 client (e.g. `aws-cli` or `minio-go` SDK) by specifying `http://localhost:8081` as the endpoint:
+   ```bash
+   aws s3 mb s3://my-bucket --endpoint-url http://localhost:8081
+   ```
+
+---
+
 <p align="center">
   Built with ❤️ in Go · <a href="https://github.com/vyuvaraj/ServStore">github.com/vyuvaraj/ServStore</a>
 </p>
+
