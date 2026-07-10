@@ -219,6 +219,9 @@ func getExistingColumns(db *sql.DB, tableName string) (map[string]bool, error) {
 		}
 		cols[strings.ToLower(name)] = true
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return cols, nil
 }
 
