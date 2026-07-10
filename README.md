@@ -90,3 +90,24 @@ Run integration and unit tests:
 ```bash
 go test -v ./...
 ```
+
+---
+
+## Use Without Servverse (Standalone Quickstart)
+
+`ServCache` can be used as a standalone memory caching microservice with standard HTTP bindings:
+1. Run `ServCache` in standalone mode:
+   ```bash
+   ./servcache --port 8084 --engine memory
+   ```
+2. Put a key:
+   ```bash
+   curl -X POST http://localhost:8084/api/cache/my-namespace/my-key \
+     -H "Content-Type: application/json" \
+     -d '{"value": "my-cached-payload", "ttl_seconds": 60}'
+   ```
+3. Get a key:
+   ```bash
+   curl http://localhost:8084/api/cache/my-namespace/my-key
+   ```
+
