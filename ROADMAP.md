@@ -192,3 +192,23 @@ UI panels for managing the proposed Servverse components (ServAuth, ServDB, Serv
 | 13.22 | **Automated incident playbooks** | Large | When a specific alert pattern is detected (e.g., ServDB pool exhaustion + high latency), auto-execute runbook steps: scale pool, route to replica, notify on-call. | [x] |
 
 > See [UNIFIED_ROADMAP.md](../../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 14: Real Decomposition & Quality (Pending — Phase 22)
+
+> **Issue:** main.go is 4,885 lines. Despite prior decomposition claims, the file has grown. This is the single biggest maintainability risk in the ecosystem.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 14.1 | **Extract pkg/proxy/** | Large | All reverse proxy setup, director configuration, CORS handling | [ ] |
+| 14.2 | **Extract pkg/ws/** | Medium | WebSocket event broadcaster, real-time push, subscriber management | [ ] |
+| 14.3 | **Extract pkg/tabs/** | Large | Each dashboard tab (Gateway, Storage, Queue, Auth, DB, etc.) as its own package | [ ] |
+| 14.4 | **Extract pkg/alerts/** | Medium | Alert monitoring loop, alert CRUD, notification dispatch | [ ] |
+| 14.5 | **Extract pkg/auth/** | Medium | OIDC flow, JWT validation, session management, login/callback/logout | [ ] |
+| 14.6 | **Extract pkg/provision/** | Small | Store/Queue provisioning handlers | [ ] |
+| 14.7 | **Extract pkg/topology/** | Medium | Service topology auto-discovery, live topology data | [ ] |
+| 14.8 | **Extract pkg/dashboards/** | Medium | Custom dashboard CRUD, widget rendering | [ ] |
+| 14.9 | **main.go target: <200 lines** | — | After extraction: server setup, route registration, startup/shutdown only | [ ] |
+| 14.10 | **Test coverage: 40+ functions** | Medium | Expand from 33 → 70+ test functions covering each extracted package | [ ] |
