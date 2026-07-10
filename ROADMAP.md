@@ -46,3 +46,15 @@ This roadmap outlines the planned development phases for the ServCache distribut
 - [ ] **LRU/LFU Eviction Strategy Choice** — Allow configuring eviction policy per namespace (LRU, LFU, or random). Currently only TTL-based (Performance)
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 6: Test Coverage & Reliability (Pending — Phase 22)
+
+> **Issue:** Only 8 test functions in 1 file. Critical service with minimal verification.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 6.1 | **Expand test suite** | Medium | From 8 → 40+ test functions: TTL expiry timing, concurrent access races, namespace isolation, Redis connection failure, memory pressure eviction | [ ] |
+| 6.2 | **Benchmark tests** | Small | BenchmarkGet, BenchmarkSet, BenchmarkConcurrentAccess — establish baseline for performance regression CI gate | [ ] |
