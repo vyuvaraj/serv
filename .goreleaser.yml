@@ -1,4 +1,4 @@
-﻿project_name: servconsole
+project_name: servconsole
 version: 2
 
 before:
@@ -78,4 +78,4 @@ scoops:
     license: "Apache-2.0"
 
 release:
-  replace_existing: true
+  mode: replace
