@@ -277,3 +277,187 @@ fn main() {
 		t.Errorf("Expected edits in both file1 and file2, got: %+v", edit.Changes)
 	}
 }
+
+func TestCompletion(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	server.documents[uri] = "let x = 10"
+
+	msg := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "textDocument/completion",
+		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv"},"position":{"line":0,"character":5}}`),
+	}
+
+	out := captureStdout(func() {
+		server.handleMessage(msg)
+	})
+
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("Expected no error, got: %v", resp.Error)
+	}
+
+	var list CompletionList
+	resBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("Failed to marshal result: %v", err)
+	}
+	if err := json.Unmarshal(resBytes, &list); err != nil {
+		t.Fatalf("Failed to parse completion list: %v. Body was: %s", err, string(resBytes))
+	}
+
+	foundKw := false
+	foundBuiltin := false
+	for _, item := range list.Items {
+		if item.Label == "fn" {
+			foundKw = true
+		}
+		if item.Label == "log.info" {
+			foundBuiltin = true
+		}
+	}
+	if !foundKw {
+		t.Errorf("Expected keywords (like 'fn') in completion list")
+	}
+	if !foundBuiltin {
+		t.Errorf("Expected builtins (like 'log.info') in completion list")
+	}
+}
+
+func TestHover(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	content := `fn my_helper() -> string {
+	return "test"
+}`
+	server.documents[uri] = content
+	server.symbols[uri] = []symbolInfo{
+		{Name: "my_helper", Kind: "fn", Line: 0, Col: 3, Params: []string{}, ParamTypes: []string{}, TypeInfo: "string"},
+	}
+
+	// 1. Test custom function hover
+	msg1 := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "textDocument/hover",
+		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv"},"position":{"line":0,"character":6}}`),
+	}
+
+	out1 := captureStdout(func() {
+		server.handleMessage(msg1)
+	})
+
+	resp1 := parseLSPResponse(t, out1)
+	var h1 Hover
+	res1Bytes, _ := json.Marshal(resp1.Result)
+	json.Unmarshal(res1Bytes, &h1)
+
+	if !strings.Contains(h1.Contents.Value, "fn my_helper() -> string") {
+		t.Errorf("Expected hover content to describe my_helper, got: %q", h1.Contents.Value)
+	}
+
+	// 2. Test built-in object hover (e.g. log)
+	server.documents[uri] = "log.info(\"hello\")"
+	msg2 := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "textDocument/hover",
+		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv"},"position":{"line":0,"character":1}}`),
+	}
+
+	out2 := captureStdout(func() {
+		server.handleMessage(msg2)
+	})
+
+	resp2 := parseLSPResponse(t, out2)
+	var h2 Hover
+	res2Bytes, _ := json.Marshal(resp2.Result)
+	json.Unmarshal(res2Bytes, &h2)
+
+	if !strings.Contains(h2.Contents.Value, "logger") {
+		t.Errorf("Expected hover to describe log built-in, got: %q", h2.Contents.Value)
+	}
+}
+
+func TestDefinition(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	content := `fn helper() {}
+fn main() {
+	helper()
+}`
+	server.documents[uri] = content
+	server.symbols[uri] = []symbolInfo{
+		{Name: "helper", Kind: "fn", Line: 0, Col: 3},
+		{Name: "main", Kind: "fn", Line: 1, Col: 3},
+	}
+
+	msg := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "textDocument/definition",
+		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv"},"position":{"line":2,"character":2}}`),
+	}
+
+	out := captureStdout(func() {
+		server.handleMessage(msg)
+	})
+
+	resp := parseLSPResponse(t, out)
+	var loc Location
+	resBytes, _ := json.Marshal(resp.Result)
+	if err := json.Unmarshal(resBytes, &loc); err != nil {
+		t.Fatalf("Failed to parse definition location: %v", err)
+	}
+
+	if loc.URI != uri || loc.Range.Start.Line != 0 || loc.Range.Start.Character != 3 {
+		t.Errorf("Expected definition to point to helper at 0:3, got URI=%q line=%d char=%d",
+			loc.URI, loc.Range.Start.Line, loc.Range.Start.Character)
+	}
+}
+
+func TestDiagnostics(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	// Code has unused variable check warning
+	content := `fn test() {
+	let unused_var = 1
+}`
+
+	out := captureStdout(func() {
+		server.analyzeAndPublishDiagnostics(uri, content)
+	})
+
+	// Format of response notification is a JSON-RPC notification
+	// Content-Length: <n>\r\n\r\n{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":...}
+	resp := parseLSPResponse(t, out)
+	if resp.Method != "textDocument/publishDiagnostics" {
+		t.Errorf("Expected method textDocument/publishDiagnostics, got %q", resp.Method)
+	}
+
+	var params struct {
+		URI         string       `json:"uri"`
+		Diagnostics []Diagnostic `json:"diagnostics"`
+	}
+	paramsBytes, _ := json.Marshal(resp.Params)
+	if err := json.Unmarshal(paramsBytes, &params); err != nil {
+		t.Fatalf("Failed to parse diagnostics params: %v", err)
+	}
+
+	if params.URI != uri {
+		t.Errorf("Expected diagnostics URI to match, got %q", params.URI)
+	}
+
+	foundWarning := false
+	for _, d := range params.Diagnostics {
+		if strings.Contains(d.Message, "declared but never used") {
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Errorf("Expected unused variable diagnostic warning, got: %+v", params.Diagnostics)
+	}
+}
+
