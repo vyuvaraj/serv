@@ -362,8 +362,23 @@ func TestServAuthKeysAndSessions(t *testing.T) {
 	}
 }
 
+type mockMfaEngine struct{}
+
+func (m *mockMfaEngine) Setup(username string) (string, string, error) {
+	mockSecret := "secret-totp-key-for-" + username
+	qrCodeURL := "https://api.qrserver.com/v1/create-qr-code/?data=otpauth://totp/Servverse:" + username
+	return mockSecret, qrCodeURL, nil
+}
+
+func (m *mockMfaEngine) Verify(secret string, code string) bool {
+	return mfa.VerifyTOTP(secret, code)
+}
+
 func TestServAuthTenancyAndMfa(t *testing.T) {
 	setupTest()
+	handlers.ActiveMfaEngine = &mockMfaEngine{}
+	defer func() { handlers.ActiveMfaEngine = nil }()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/register", handlers.HandleRegister)
 	mux.HandleFunc("/api/auth/login", handlers.HandleLogin)

@@ -22,7 +22,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"servauth/pkg/kms"
-	"servauth/pkg/mfa"
 	"servauth/pkg/oauth"
 	"servauth/pkg/sessions"
 	"servauth/pkg/store"
@@ -655,6 +654,11 @@ func HandleMfaSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if ActiveMfaEngine == nil {
+		http.Error(w, "MFA is an Enterprise Edition feature.", http.StatusNotImplemented)
+		return
+	}
+
 	var req struct {
 		Username string `json:"username"`
 	}
@@ -677,8 +681,14 @@ func HandleMfaSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mockSecret := "secret-totp-key-for-" + req.Username
-	user.MFASecret = mockSecret
+	secret, qrCodeURL, err := ActiveMfaEngine.Setup(req.Username)
+	if err != nil {
+		UsersMu.Unlock()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	user.MFASecret = secret
 	Users[userKey] = user
 	UsersMu.Unlock()
 	SaveUsersToStore()
@@ -688,16 +698,21 @@ func HandleMfaSetup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
-		"secret":      mockSecret,
+		"secret":      secret,
 		"issuer":      "Servverse",
 		"account":     req.Username,
-		"qr_mock_url": "https://api.qrserver.com/v1/create-qr-code/?data=otpauth://totp/Servverse:" + req.Username,
+		"qr_mock_url": qrCodeURL,
 	})
 }
 
 func HandleMfaVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if ActiveMfaEngine == nil {
+		http.Error(w, "MFA is an Enterprise Edition feature.", http.StatusNotImplemented)
 		return
 	}
 
@@ -724,8 +739,8 @@ func HandleMfaVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the real TOTP code
-	if mfa.VerifyTOTP(user.MFASecret, req.Code) {
+	// Verify the TOTP code via the active engine
+	if ActiveMfaEngine.Verify(user.MFASecret, req.Code) {
 		user.MFAEnabled = true
 		Users[userKey] = user
 		UsersMu.Unlock()
@@ -751,6 +766,16 @@ type SocialAuthProvider interface {
 
 // ActiveSocialProvider is the globally registered social OAuth provider hook.
 var ActiveSocialProvider SocialAuthProvider
+
+// MfaEngine defines dynamic hooks for MFA TOTP setup and verification.
+type MfaEngine interface {
+	Setup(username string) (secret string, qrCodeURL string, err error)
+	Verify(secret string, code string) bool
+}
+
+// ActiveMfaEngine is the globally registered MFA engine hook.
+var ActiveMfaEngine MfaEngine
+
 
 func HandleSocialLogin(w http.ResponseWriter, r *http.Request) {
 	provider := r.URL.Query().Get("provider")
