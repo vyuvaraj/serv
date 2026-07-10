@@ -55,3 +55,16 @@ This roadmap outlines the planned development phases for the ServAuth identity p
 - [ ] **Self-Service Account Portal** — User-facing UI for password change, MFA enrollment, session listing, and OAuth consent management
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 8: Code Health & Test Coverage (Pending — Phase 22)
+
+> **Issue:** main.go is 1,381 lines despite pkg/ existing. Test coverage: 11 functions in 1 file.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 8.1 | **Decompose main.go** | Medium | Target <100 lines. Move handler logic to pkg/handlers/, OAuth to pkg/oauth/, MFA to pkg/mfa/ | [ ] |
+| 8.2 | **Expand test coverage** | Medium | From 11 → 40+ test functions: expired tokens, concurrent sessions, MFA edge cases, social login flows | [ ] |
+| 8.3 | **Property-based fuzz tests** | Small | Fuzz token generation/verification, password hashing roundtrip, KMS encrypt/decrypt | [ ] |
