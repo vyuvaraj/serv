@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/tetratelabs/wazero v1.12.0
-	github.com/vyuvaraj/ServShared v0.1.1-0.20260709055203-a69c44124438
+	github.com/vyuvaraj/ServShared v1.0.1
 	golang.org/x/crypto v0.53.0
 )
 
