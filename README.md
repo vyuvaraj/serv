@@ -1,5 +1,9 @@
 # ServConsole
 
+```bash
+docker run -p 8083:8083 ghcr.io/vyuvaraj/servconsole:latest
+```
+
 `ServConsole` is a unified, high-performance management dashboard and observability console tailored for the **Servverse** ecosystem. It provides developer-centric visibility and live management of **ServGate** (API Gateway), **ServStore** (Distributed S3-compatible Storage), and **ServQueue** (WASM-enabled STOMP Message Broker).
 
 With a premium glassmorphic interface, `ServConsole` gives developers a single pane of glass to audit API routing, hot-swap inline WASM code, inspect consistent hash rings, and view distributed OpenTelemetry trace flows.
