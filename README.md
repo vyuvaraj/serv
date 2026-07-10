@@ -29,3 +29,51 @@ go run main.go --port 8090 --limit 1000
 - `GET /api/traces` - List trace summaries
 - `GET /api/traces/{traceId}` - Fetch trace waterfall tree
 - `DELETE /api/traces` - Clear all traces in memory
+
+---
+
+## Standalone OTLP Collector Usage
+
+ServTrace can be run as a lightweight, zero-dependency alternative to Jaeger or Zipkin for local development. Since it implements the open standard **OTLP/HTTP** protocol, you can route traces from any application using official OpenTelemetry SDKs directly to ServTrace.
+
+### 1. Configure OpenTelemetry SDKs
+
+Configure your application's OpenTelemetry tracer provider to export spans to the ServTrace receiver endpoint:
+
+#### Go
+```go
+import (
+	"context"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/trace"
+)
+
+exporter, err := otlptracehttp.New(ctx,
+	otlptracehttp.WithEndpoint("localhost:8090"), // Port ServTrace is running on
+	otlptracehttp.WithInsecure(),
+)
+```
+
+#### Python
+```python
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+exporter = OTLPSpanExporter(
+    endpoint="http://localhost:8090/v1/traces"
+)
+```
+
+#### Node.js / TypeScript
+```typescript
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+
+const exporter = new OTLPTraceExporter({
+  url: 'http://localhost:8090/v1/traces',
+});
+```
+
+### 2. Querying Traces
+Once your application exports traces, you can inspect them via the HTTP API:
+- Reassembled trace summaries: `curl http://localhost:8090/api/traces`
+- Full trace waterfall details: `curl http://localhost:8090/api/traces/<trace-id>`
+
