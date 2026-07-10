@@ -49,3 +49,14 @@ This roadmap outlines the planned development phases for the ServFlow workflow o
 | 7.8 | **Parallel step execution** | Small | Execute independent steps concurrently (fan-out) and join results before dependent steps | [ ] |
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 8: Test Coverage (Pending — Phase 22)
+
+> **Issue:** Only 11 test functions in 1 file.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 8.1 | **Expand test suite** | Medium | From 11 → 35+ test functions: DAG cycle detection, concurrent approval + timeout race, saga compensation ordering, checkpoint corruption recovery, sub-workflow invocation | [ ] |
