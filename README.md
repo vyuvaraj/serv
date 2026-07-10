@@ -22,3 +22,32 @@ To run the integration tests locally:
 ```bash
 go test -v ./...
 ```
+
+---
+
+## Use Without Servverse (Standalone Quickstart)
+
+`ServFlow` can run as an independent DAG workflow coordinator with local file checkpoints:
+1. Start `ServFlow` in standalone mode:
+   ```bash
+   ./servflow --port 8089 --standalone --checkpoint-dir ./state
+   ```
+2. Register a simple workflow:
+   ```bash
+   curl -X POST http://localhost:8089/api/workflows/define \
+     -H "Content-Type: application/json" \
+     -d '{
+       "id": "demo-flow",
+       "tasks": [
+         {"name": "TaskA", "action": "success"},
+         {"name": "TaskB", "depends_on": ["TaskA"], "action": "success"}
+       ]
+     }'
+   ```
+3. Execute the workflow:
+   ```bash
+   curl -X POST http://localhost:8089/api/workflows/execute \
+     -H "Content-Type: application/json" \
+     -d '{"workflow_id": "demo-flow"}'
+   ```
+
