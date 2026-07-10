@@ -1,5 +1,9 @@
 # ServTunnel
 
+```bash
+docker run -p 8092:8092 ghcr.io/vyuvaraj/servtunnel:latest
+```
+
 `ServTunnel` is a secure, instant tunneling service for exposing local Serv services to the internet during development. It is part of the **Serv-verse** ecosystem.
 
 One command creates a public URL that forwards requests to your local machine — ideal for webhook testing, OAuth callbacks, and sharing work-in-progress.
