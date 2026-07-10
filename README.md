@@ -1,5 +1,9 @@
 # ServRegistry
 
+```bash
+docker run -p 8090:8090 ghcr.io/vyuvaraj/servregistry:latest
+```
+
 ServRegistry is the lightweight, S3-backed community package hub and registry server for the Servverse ecosystem. It allows sharing, versioning, and resolving packages written for `serv-lang` microservices.
 
 ## Features
