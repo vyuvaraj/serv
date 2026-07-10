@@ -134,3 +134,6 @@ scoops:
     homepage: "https://github.com/vyuvaraj/ServStore"
     description: "Distributed object and block storage service from the ServVerse platform"
     license: "Apache-2.0"
+
+release:
+  replace_existing: true
