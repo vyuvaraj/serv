@@ -26,6 +26,7 @@ import (
 	"servgate/pkg/otel"
 	"servgate/pkg/wasm"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/vyuvaraj/ServShared/pkg/policy"
 )
 
@@ -218,6 +219,7 @@ type GatewayHandler struct {
 	limitersMu     sync.RWMutex
 	apiKeys          map[string]APIKey
 	apiKeysMu        sync.RWMutex
+	redisClient      *redis.Client
 	aiBilling        *AIBillingTracker
 	apiTokenUsage    map[string]int
 	apiCostUsage     map[string]float64
@@ -342,11 +344,23 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		}
 	}()
 
+	var rdb *redis.Client
+	if redisURL := os.Getenv("SERV_GATE_LIMITS_REDIS_URL"); redisURL != "" {
+		opt, err := redis.ParseURL(redisURL)
+		if err == nil {
+			rdb = redis.NewClient(opt)
+			log.Printf("[ServGate] Connected to Redis rate limiting backend at %s", redisURL)
+		} else {
+			log.Printf("[ServGate] Failed to parse Redis URL %s: %v", redisURL, err)
+		}
+	}
+
 	h := &GatewayHandler{
 		routes:          routes,
 		wasm:            wasm,
 		authToken:       authToken,
 		ratLimiters:     make(map[string]*rateLimiter),
+		redisClient:     rdb,
 		rrIndices:       make(map[string]int),
 		activeConns:     make(map[string]int),
 		semanticCaches:  semanticCaches,
@@ -595,6 +609,38 @@ func (h *GatewayHandler) isRateLimited(clientIP, routePrefix string, limit int) 
 	}
 
 	key := clientIP + ":" + routePrefix
+
+	if h.redisClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+
+		now := time.Now()
+		nowMs := now.UnixNano() / 1e6
+		cutoffMs := nowMs - 60000
+
+		redisKey := "servgate:ratelimit:" + key
+		member := fmt.Sprintf("%d-%d", nowMs, rand.Int63())
+
+		pipe := h.redisClient.TxPipeline()
+		pipe.ZRemRangeByScore(ctx, redisKey, "-inf", fmt.Sprintf("%d", cutoffMs))
+		zCard := pipe.ZCard(ctx, redisKey)
+		_, err := pipe.Exec(ctx)
+		if err != nil {
+			log.Printf("[ServGate] Redis rate limiter communication error: %v. Falling back to local rate limiting.", err)
+		} else {
+			count := zCard.Val()
+			if count >= int64(limit) {
+				return true // rate limited
+			}
+
+			pipe = h.redisClient.TxPipeline()
+			pipe.ZAdd(ctx, redisKey, redis.Z{Score: float64(nowMs), Member: member})
+			pipe.Expire(ctx, redisKey, 60*time.Second)
+			_, _ = pipe.Exec(ctx)
+			return false
+		}
+	}
+
 	h.limiterMu.Lock()
 	lim, exists := h.ratLimiters[key]
 	if !exists {
