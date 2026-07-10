@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -785,5 +786,47 @@ func TestServDBMultiRegionRouting(t *testing.T) {
 	if row04["pool"] != "primary" {
 		t.Errorf("expected non-select query to route to 'primary', got %v", row04["pool"])
 	}
+}
+
+func TestConnectionPoolDeadlockTimeout(t *testing.T) {
+	os.Setenv("SERVDB_CONN_TIMEOUT", "20ms")
+	defer os.Unsetenv("SERVDB_CONN_TIMEOUT")
+
+	// Pool of max 1 connection (which can adaptively scale to 2 under load)
+	pool := NewConnectionPool(1, "sqlite")
+	defer pool.Shutdown(context.Background())
+
+	conn1, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("first acquire failed: %v", err)
+	}
+
+	conn2, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("second acquire failed: %v", err)
+	}
+
+	// Try acquiring 3rd connection, should exhaust the pool (since max adaptive limit is 2)
+	_, err = pool.Acquire()
+	if err == nil {
+		t.Fatal("expected third acquire to fail due to pool exhaustion")
+	}
+
+	// Wait for the janitor to run and timeout the connection (timeout is 20ms, janitor runs every 100ms)
+	time.Sleep(150 * time.Millisecond)
+
+	// Try acquiring again, it should succeed because the janitor reclaimed the leaked connections
+	conn3, err := pool.Acquire()
+	if err != nil {
+		t.Fatalf("acquire after timeout failed: %v", err)
+	}
+	if conn3.ID != conn1.ID && conn3.ID != conn2.ID {
+		t.Errorf("expected reclaimed connection ID %d or %d, got %d", conn1.ID, conn2.ID, conn3.ID)
+	}
+
+	// Release connections to allow Shutdown to succeed cleanly
+	pool.Release(conn1)
+	pool.Release(conn2)
+	pool.Release(conn3)
 }
 

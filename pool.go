@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"time"
 )
@@ -16,8 +17,9 @@ type PoolStats struct {
 }
 
 type DbConn struct {
-	ID        int
-	CreatedAt time.Time
+	ID          int
+	CreatedAt   time.Time
+	CheckedOutAt time.Time
 }
 
 type PoolManager interface {
@@ -90,6 +92,21 @@ func (p *ConnectionPool) startPoolJanitor(interval time.Duration) {
 					p.maxConns = p.baseMaxConns
 				}
 			}
+
+			// 3. Reclaim deadlocked connection leases exceeding timeout
+			timeout := 5 * time.Second
+			if tStr := os.Getenv("SERVDB_CONN_TIMEOUT"); tStr != "" {
+				if d, err := time.ParseDuration(tStr); err == nil {
+					timeout = d
+				}
+			}
+			for id, conn := range p.activeConns {
+				if !conn.CheckedOutAt.IsZero() && now.Sub(conn.CheckedOutAt) > timeout {
+					conn.CheckedOutAt = time.Time{}
+					delete(p.activeConns, id)
+					p.idleConns = append(p.idleConns, conn)
+				}
+			}
 			p.mu.Unlock()
 		case <-p.shutdownChan:
 			return
@@ -117,6 +134,7 @@ func (p *ConnectionPool) Acquire() (*DbConn, error) {
 			continue
 		}
 
+		conn.CheckedOutAt = time.Now()
 		p.activeConns[conn.ID] = conn
 		return conn, nil
 	}
@@ -130,8 +148,9 @@ func (p *ConnectionPool) Acquire() (*DbConn, error) {
 	if len(p.activeConns) < p.maxConns {
 		p.nextConnID++
 		conn := &DbConn{
-			ID:        p.nextConnID,
-			CreatedAt: time.Now(),
+			ID:           p.nextConnID,
+			CreatedAt:    time.Now(),
+			CheckedOutAt: time.Now(),
 		}
 		p.activeConns[conn.ID] = conn
 		return conn, nil
@@ -143,6 +162,7 @@ func (p *ConnectionPool) Acquire() (*DbConn, error) {
 func (p *ConnectionPool) Release(conn *DbConn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	conn.CheckedOutAt = time.Time{}
 	delete(p.activeConns, conn.ID)
 	p.idleConns = append(p.idleConns, conn)
 }
