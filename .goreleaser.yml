@@ -1,4 +1,4 @@
-﻿project_name: servtrace
+project_name: servtrace
 version: 2
 
 before:
@@ -76,4 +76,4 @@ scoops:
     license: "Apache-2.0"
 
 release:
-  replace_existing: true
+  mode: replace
