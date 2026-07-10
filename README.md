@@ -60,3 +60,25 @@ Run integration tests:
 ```bash
 go test ./... -v
 ```
+
+---
+
+## Use Without Servverse (Standalone Quickstart)
+
+`ServGate` can run as an independent API Gateway/reverse proxy with zero other Servverse components:
+1. Create a `config.json` defining your route targets:
+   ```json
+   {
+     "routes": [
+       {
+         "prefix": "/service/users",
+         "target": "http://localhost:8081"
+       }
+     ]
+   }
+   ```
+2. Start `ServGate` in standalone mode:
+   ```bash
+   ./servgate --standalone --config config.json
+   ```
+
