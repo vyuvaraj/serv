@@ -75,3 +75,6 @@ scoops:
     homepage: "https://github.com/vyuvaraj/ServQueue"
     description: "Distributed message queue and event streaming service from the ServVerse platform"
     license: "Apache-2.0"
+
+release:
+  replace_existing: true
