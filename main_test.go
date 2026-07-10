@@ -432,8 +432,28 @@ func TestServAuthTenancyAndMfa(t *testing.T) {
 	respVerify.Body.Close()
 }
 
+type mockSocialProvider struct{}
+
+func (m *mockSocialProvider) Redirect(w http.ResponseWriter, r *http.Request, provider string) {
+	redirectURL := fmt.Sprintf("https://auth.provider.com/%s/authorize?client_id=mock-client&redirect_uri=mock-redirect&response_type=code", provider)
+	_ = ServShared.EmitAuditEvent("ServAuth", "SOCIAL_LOGIN_REDIRECT", "guest", map[string]interface{}{"provider": provider})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":       "redirect_simulated",
+		"redirect_url": redirectURL,
+	})
+}
+
+func (m *mockSocialProvider) Callback(w http.ResponseWriter, r *http.Request, provider, code string) (string, error) {
+	return fmt.Sprintf("social-%s-%s", provider, code[:4]), nil
+}
+
 func TestServAuthSocialLogin(t *testing.T) {
 	setupTest()
+	handlers.ActiveSocialProvider = &mockSocialProvider{}
+	defer func() { handlers.ActiveSocialProvider = nil }()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/social/login", handlers.HandleSocialLogin)
 	mux.HandleFunc("/api/auth/social/callback", handlers.HandleSocialCallback)

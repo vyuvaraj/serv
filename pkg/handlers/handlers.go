@@ -743,6 +743,15 @@ func HandleMfaVerify(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Invalid verification code", http.StatusUnauthorized)
 }
 
+// SocialAuthProvider defines dynamic hooks for third-party OAuth logins.
+type SocialAuthProvider interface {
+	Redirect(w http.ResponseWriter, r *http.Request, provider string)
+	Callback(w http.ResponseWriter, r *http.Request, provider, code string) (string, error)
+}
+
+// ActiveSocialProvider is the globally registered social OAuth provider hook.
+var ActiveSocialProvider SocialAuthProvider
+
 func HandleSocialLogin(w http.ResponseWriter, r *http.Request) {
 	provider := r.URL.Query().Get("provider")
 	if provider != "google" && provider != "github" {
@@ -750,14 +759,12 @@ func HandleSocialLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	redirectURL := fmt.Sprintf("https://auth.provider.com/%s/authorize?client_id=mock-client&redirect_uri=mock-redirect&response_type=code", provider)
-	_ = ServShared.EmitAuditEvent("ServAuth", "SOCIAL_LOGIN_REDIRECT", "guest", map[string]interface{}{"provider": provider})
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":       "redirect_simulated",
-		"redirect_url": redirectURL,
-	})
+	if ActiveSocialProvider == nil {
+		http.Error(w, "Social authentication is an Enterprise Edition feature.", http.StatusNotImplemented)
+		return
+	}
+
+	ActiveSocialProvider.Redirect(w, r, provider)
 }
 
 func HandleSocialCallback(w http.ResponseWriter, r *http.Request) {
@@ -780,7 +787,17 @@ func HandleSocialCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	username := fmt.Sprintf("social-%s-%s", req.Provider, req.Code[:4])
+	if ActiveSocialProvider == nil {
+		http.Error(w, "Social authentication is an Enterprise Edition feature.", http.StatusNotImplemented)
+		return
+	}
+
+	username, err := ActiveSocialProvider.Callback(w, r, req.Provider, req.Code)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	userKey := username
 
 	UsersMu.Lock()
@@ -808,7 +825,6 @@ func HandleSocialCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var token string
-	var err error
 	if os.Getenv("SERV_JWKS_URL") != "" || os.Getenv("SERV_JWT_SIGNING_METHOD") == "RS256" {
 		token, err = ServShared.GenerateUserTokenRS256(JWTRSAPrivateKey, JWTKeyID, username, []string{"user"}, tenantID, 24*time.Hour)
 	} else {
