@@ -2452,6 +2452,70 @@ func handleIngestLog(w http.ResponseWriter, r *http.Request) {
 		alertsMu.Unlock()
 	}
 
+	// AI Observability: Trigger automatic scaling when high load is detected
+	if strings.Contains(entry.Message, "[HIGH_LOAD]") {
+		cloudURL := os.Getenv("SERV_CLOUD_URL")
+		if cloudURL == "" {
+			cloudURL = "http://localhost:8085"
+		}
+		go func(serviceName string) {
+			url := fmt.Sprintf("%s/api/services/%s/scale", strings.TrimSuffix(cloudURL, "/"), serviceName)
+			payload := map[string]interface{}{"replicas": 3}
+			body, _ := json.Marshal(payload)
+			req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+			if err == nil {
+				req.Header.Set("Content-Type", "application/json")
+				if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
+					svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+					if svcToken != "" {
+						req.Header.Set("Authorization", "Bearer "+svcToken)
+					}
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err == nil {
+					resp.Body.Close()
+				}
+			}
+		}(entry.Service)
+
+		alertsMu.Lock()
+		addOrUpdateAlert(entry.Service, "scaling_trigger", "Auto-scaled service due to high load log signature: "+entry.Message, "info")
+		alertsMu.Unlock()
+	}
+
+	// AI Observability: Trigger query cache rule mutations when slow queries are detected
+	if strings.Contains(entry.Message, "[SLOW_QUERY_ALERT]") || strings.Contains(entry.Message, "[DB_LATENCY_ALERT]") {
+		go func(serviceName string) {
+			configMu.Lock()
+			defer configMu.Unlock()
+
+			var prov ConfigProvider
+			if os.Getenv("SERV_CONFIG_S3_BUCKET") != "" || os.Getenv("SERVVERSE_DISCOVERY") != "" {
+				prov = NewS3ConfigProvider()
+			} else {
+				prov = NewLocalFileProvider(*gateConfig)
+			}
+
+			cfg, err := prov.Load()
+			if err == nil && cfg != nil {
+				mutated := false
+				for i, route := range cfg.Routes {
+					if strings.Contains(route.Target, serviceName) || strings.TrimPrefix(route.Prefix, "/") == serviceName {
+						if !route.SemanticCache {
+							cfg.Routes[i].SemanticCache = true
+							mutated = true
+						}
+					}
+				}
+				if mutated {
+					_ = prov.Save(cfg)
+					addAuditLog("system-ai", "AI Observability Mutation: Enabled semantic cache for "+serviceName+" due to query latency logs", "AUTO_MUTATE", "/api/logs/ingest", http.StatusOK)
+					log.Printf("[AI Mutation] Enabled semantic cache for service: %s", serviceName)
+				}
+			}
+		}(entry.Service)
+	}
+
 	// Forward logs with TraceID to ServTrace logs endpoint
 	if entry.TraceID != "" {
 		go func(e LogEntry) {

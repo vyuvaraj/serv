@@ -1136,6 +1136,62 @@ func TestTraceWaterfall(t *testing.T) {
 	}
 }
 
+func TestAIObservabilityPipelines(t *testing.T) {
+	// Create temporary gate config to prevent real file system write failures
+	tmpConfig, err := os.CreateTemp("", "gate-config-*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp config: %v", err)
+	}
+	defer os.Remove(tmpConfig.Name())
+	tmpConfig.WriteString(`{"addr":":8080","routes":[]}`)
+	tmpConfig.Close()
+
+	originalGateConfig := *gateConfig
+	*gateConfig = tmpConfig.Name()
+	defer func() { *gateConfig = originalGateConfig }()
+
+	// 1. Test scaling trigger log entry
+	logPayload1 := `{"service":"OrderService","level":"error","message":"[HIGH_LOAD] CPU usage at 95%"}`
+	req1 := httptest.NewRequest("POST", "/api/logs/ingest", strings.NewReader(logPayload1))
+	w1 := httptest.NewRecorder()
+	handleIngestLog(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w1.Code)
+	}
+
+	// Wait briefly for async functions
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify that scaling trigger alert was added
+	alertsMu.Lock()
+	foundScaleAlert := false
+	for _, alert := range alerts {
+		if alert.Component == "OrderService" && alert.Type == "scaling_trigger" {
+			foundScaleAlert = true
+			break
+		}
+	}
+	alertsMu.Unlock()
+
+	if !foundScaleAlert {
+		t.Error("Expected automatic scaling_trigger alert to be registered for high load logs")
+	}
+
+	// 2. Test slow query cache mutation log entry
+	logPayload2 := `{"service":"BillingService","level":"warning","message":"[SLOW_QUERY_ALERT] SELECT * FROM transactions took 1200ms"}`
+	req2 := httptest.NewRequest("POST", "/api/logs/ingest", strings.NewReader(logPayload2))
+	w2 := httptest.NewRecorder()
+	handleIngestLog(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w2.Code)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+}
+
+
 
 
 
