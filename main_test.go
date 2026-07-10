@@ -859,3 +859,88 @@ func TestTimeTravelWorkflowReplay(t *testing.T) {
 	_ = os.Remove(inst.ID + ".state")
 }
 
+func TestSagaComplexRollbackFailures(t *testing.T) {
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define DAG: TaskA (succeeds, but compensation fails) -> TaskB (times out, triggers rollback)
+	defPayload := storage.WorkflowDef{
+		ID: "complex-saga-flow",
+		Tasks: []storage.Task{
+			{Name: "TaskA", DependsOn: nil, Action: "success", CompensateAction: "fail"},
+			{Name: "TaskB", DependsOn: []string{"TaskA"}, Action: "sleep-100", TimeoutMs: 20}, // will time out
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "complex-saga-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst storage.WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait for execution, timeout, and rollback attempt
+	time.Sleep(150 * time.Millisecond)
+
+	// Fetch final instance details
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst storage.WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	// Overall status should be failed
+	if finalInst.Status != "failed" {
+		t.Errorf("expected status 'failed', got %q", finalInst.Status)
+	}
+
+	// TaskB must have failed due to timeout
+	stateB, existsB := finalInst.TaskStates["TaskB"]
+	if !existsB {
+		t.Fatal("TaskB state should exist")
+	}
+	if stateB.Status != "failed" || !strings.Contains(stateB.Error, "timed out") {
+		t.Errorf("expected TaskB to fail with timeout, got status %q, error %q", stateB.Status, stateB.Error)
+	}
+
+	// TaskA compensation should have been attempted and failed
+	stateA, existsA := finalInst.TaskStates["TaskA"]
+	if !existsA {
+		t.Fatal("TaskA state should exist")
+	}
+	if stateA.Status != "failed" {
+		t.Errorf("expected TaskA status to be 'failed', got %q", stateA.Status)
+	}
+
+	// Check logs for timeout and compensation failure messages
+	foundTimeoutLog := false
+	foundCompFailLog := false
+	for _, l := range finalInst.Logs {
+		if strings.Contains(l, "timed out") {
+			foundTimeoutLog = true
+		}
+		if strings.Contains(l, "Compensation failed for task TaskA") {
+			foundCompFailLog = true
+		}
+	}
+
+	if !foundTimeoutLog {
+		t.Error("expected logs to contain task timeout message")
+	}
+	if !foundCompFailLog {
+		t.Error("expected logs to contain TaskA compensation failure message")
+	}
+
+	_ = os.Remove(inst.ID + ".state")
+}
+
+
