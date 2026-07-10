@@ -1,5 +1,9 @@
 # ServGate
 
+```bash
+docker run -p 8080:8080 ghcr.io/vyuvaraj/servgate:latest
+```
+
 `ServGate` is a high-performance, programmable API Gateway and reverse proxy tailored for the **Serv** ecosystem. Its primary differentiating feature is **WASM-Powered Middleware**: the ability to execute sandboxed WebAssembly (WASI) modules inline on incoming request or response cycles to inspect, validate, or mutate payloads before forwarding.
 
 ---
