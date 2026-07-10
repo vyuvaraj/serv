@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"servregistry/pkg/registry"
+	"servregistry/pkg/web"
 )
 
 func TestProvenanceAndUpstreamMirror(t *testing.T) {
@@ -60,15 +61,15 @@ func TestProvenanceAndUpstreamMirror(t *testing.T) {
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("admin", "admin123", "")),
 	)
 
-	s3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+	registry.S3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = true
 	})
 	defer func() {
-		s3Client = nil
-		aclStore = nil
+		registry.S3Client = nil
+		registry.AclStore = nil
 	}()
 
-	aclStore = NewACLStore("acls_test.json")
+	registry.AclStore = registry.NewACLStore("acls_test.json")
 	defer os.Remove("acls_test.json")
 
 	// 1. Test Provenance attestation via publish
@@ -88,7 +89,7 @@ func TestProvenanceAndUpstreamMirror(t *testing.T) {
 
 	reqGet := httptest.NewRequest("GET", "/api/v1/packages/provenance/testpkg/1.0.0", nil)
 	wGet := httptest.NewRecorder()
-	handleGetProvenance(wGet, reqGet)
+	web.HandleGetProvenance(wGet, reqGet)
 
 	if wGet.Code != http.StatusOK {
 		t.Errorf("Expected 200 OK, got %d", wGet.Code)
@@ -119,7 +120,7 @@ func TestProvenanceAndUpstreamMirror(t *testing.T) {
 	// We request "/packages/upstream-pkg/1.0.0/upstream-pkg-1.0.0.tar.gz".
 	reqPkg := httptest.NewRequest("GET", "/packages/upstream-pkg/1.0.0/upstream-pkg-1.0.0.tar.gz", nil)
 	wPkg := httptest.NewRecorder()
-	handleGetPackage(wPkg, reqPkg)
+	web.HandleGetPackage(wPkg, reqPkg)
 
 	if wPkg.Code != http.StatusOK {
 		t.Fatalf("Expected 200 OK from upstream proxy fetch, got %d", wPkg.Code)

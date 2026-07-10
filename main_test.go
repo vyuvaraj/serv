@@ -21,6 +21,8 @@ import (
 
 	"servregistry/pkg/registry"
 	"servregistry/pkg/resolution"
+	"servregistry/pkg/signing"
+	"servregistry/pkg/web"
 )
 
 func TestParseServToml(t *testing.T) {
@@ -92,7 +94,7 @@ func TestJWTValidation(t *testing.T) {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
 
-	username, ok := validateJWT(token, secret)
+	username, ok := signing.ValidateJWT(token, secret)
 	if !ok {
 		t.Fatalf("Expected token to be valid")
 	}
@@ -101,7 +103,7 @@ func TestJWTValidation(t *testing.T) {
 	}
 
 	// Test invalid secret
-	_, ok = validateJWT(token, []byte("wrong-secret"))
+	_, ok = signing.ValidateJWT(token, []byte("wrong-secret"))
 	if ok {
 		t.Errorf("Expected validation to fail for wrong secret")
 	}
@@ -227,7 +229,7 @@ version = "1.0.0"
 	// 1. Missing signature/pubkey headers
 	req := httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(data))
 	rr := httptest.NewRecorder()
-	handlePublish(rr, req)
+	web.HandlePublish(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request for missing headers, got %d", rr.Code)
 	}
@@ -237,7 +239,7 @@ version = "1.0.0"
 	req.Header.Set("X-Signature", "invalid-hex")
 	req.Header.Set("X-Public-Key", pubKeyHex)
 	rr = httptest.NewRecorder()
-	handlePublish(rr, req)
+	web.HandlePublish(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request for invalid signature hex, got %d", rr.Code)
 	}
@@ -247,7 +249,7 @@ version = "1.0.0"
 	req.Header.Set("X-Signature", hex.EncodeToString(make([]byte, 64)))
 	req.Header.Set("X-Public-Key", pubKeyHex)
 	rr = httptest.NewRecorder()
-	handlePublish(rr, req)
+	web.HandlePublish(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400 Bad Request for invalid signature, got %d", rr.Code)
 	}
@@ -265,28 +267,28 @@ version = "1.0.0"
 	req.Header.Set("X-Signature", sigHex)
 	req.Header.Set("X-Public-Key", pubKeyHex)
 	rr = httptest.NewRecorder()
-	handlePublish(rr, req)
+	web.HandlePublish(rr, req)
 }
 
 func BenchmarkPackageIndexLookup(b *testing.B) {
 	// Pre-populate the package index
-	packageIndexMu.Lock()
+	registry.PackageIndexMu.Lock()
 	for i := 0; i < 500; i++ {
 		name := fmt.Sprintf("pkg-%d", i)
-		packageIndex[name] = &registry.PackageIndexItem{
+		registry.PackageIndex[name] = &registry.PackageIndexItem{
 			Name:   name,
 			Latest: "1.0.0",
 			Versions: []string{"0.9.0", "1.0.0"},
 		}
 	}
-	packageIndexMu.Unlock()
+	registry.PackageIndexMu.Unlock()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		name := fmt.Sprintf("pkg-%d", i%500)
-		packageIndexMu.RLock()
-		_, _ = packageIndex[name]
-		packageIndexMu.RUnlock()
+		registry.PackageIndexMu.RLock()
+		_, _ = registry.PackageIndex[name]
+		registry.PackageIndexMu.RUnlock()
 	}
 }
 
@@ -307,7 +309,7 @@ func TestSchemaRegistryAPI(t *testing.T) {
 
 	reqPut := httptest.NewRequest(http.MethodPut, "/api/v1/schemas/order", strings.NewReader(schema))
 	wPut := httptest.NewRecorder()
-	handleSchemasAPI(wPut, reqPut)
+	web.HandleSchemasAPI(wPut, reqPut)
 
 	if wPut.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", wPut.Code)
@@ -316,7 +318,7 @@ func TestSchemaRegistryAPI(t *testing.T) {
 	// 2. Fetch schema
 	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/schemas/order", nil)
 	wGet := httptest.NewRecorder()
-	handleSchemasAPI(wGet, reqGet)
+	web.HandleSchemasAPI(wGet, reqGet)
 
 	if wGet.Code != http.StatusOK {
 		t.Fatalf("Expected status 200, got %d", wGet.Code)
@@ -329,7 +331,7 @@ func TestSchemaRegistryAPI(t *testing.T) {
 	validPayload := `{"schema":"order","payload":"{\"orderId\":\"abc-123\",\"amount\":49.95,\"active\":true}"}`
 	reqVal1 := httptest.NewRequest(http.MethodPost, "/api/v1/schemas/validate", strings.NewReader(validPayload))
 	wVal1 := httptest.NewRecorder()
-	handleSchemaValidationAPI(wVal1, reqVal1)
+	web.HandleSchemaValidationAPI(wVal1, reqVal1)
 
 	var res1 map[string]interface{}
 	json.NewDecoder(wVal1.Body).Decode(&res1)
@@ -341,7 +343,7 @@ func TestSchemaRegistryAPI(t *testing.T) {
 	invalidPayload := `{"schema":"order","payload":"{\"amount\":\"not-a-number\",\"active\":true}"}`
 	reqVal2 := httptest.NewRequest(http.MethodPost, "/api/v1/schemas/validate", strings.NewReader(invalidPayload))
 	wVal2 := httptest.NewRecorder()
-	handleSchemaValidationAPI(wVal2, reqVal2)
+	web.HandleSchemaValidationAPI(wVal2, reqVal2)
 
 	var res2 map[string]interface{}
 	json.NewDecoder(wVal2.Body).Decode(&res2)
@@ -359,13 +361,13 @@ func TestMarketplace(t *testing.T) {
 	// 1. Get initial marketplace list
 	reqGet := httptest.NewRequest(http.MethodGet, "/api/v1/marketplace/list", nil)
 	wGet := httptest.NewRecorder()
-	handleMarketplaceList(wGet, reqGet)
+	web.HandleMarketplaceList(wGet, reqGet)
 
 	if wGet.Code != http.StatusOK {
 		t.Fatalf("Expected 200, got %d", wGet.Code)
 	}
 
-	var list []MarketplaceItem
+	var list []web.MarketplaceItem
 	if err := json.Unmarshal(wGet.Body.Bytes(), &list); err != nil {
 		t.Fatalf("failed to parse list: %v", err)
 	}
@@ -377,7 +379,7 @@ func TestMarketplace(t *testing.T) {
 	newItem := `{"name":"custom-workflow","version":"2.1.0","type":"workflow","description":"Test custom workflow template","publisher":"Alice","url":"https://serv.dev/marketplace/custom-workflow.json"}`
 	reqPub := httptest.NewRequest(http.MethodPost, "/api/v1/marketplace/publish", strings.NewReader(newItem))
 	wPub := httptest.NewRecorder()
-	handleMarketplacePublish(wPub, reqPub)
+	web.HandleMarketplacePublish(wPub, reqPub)
 
 	if wPub.Code != http.StatusCreated {
 		t.Fatalf("Expected 201 Created, got %d", wPub.Code)
@@ -385,7 +387,7 @@ func TestMarketplace(t *testing.T) {
 
 	// 3. Verify new item is listed
 	wGet2 := httptest.NewRecorder()
-	handleMarketplaceList(wGet2, reqGet)
+	web.HandleMarketplaceList(wGet2, reqGet)
 	if err := json.Unmarshal(wGet2.Body.Bytes(), &list); err != nil {
 		t.Fatalf("failed to parse list: %v", err)
 	}
@@ -396,7 +398,7 @@ func TestMarketplace(t *testing.T) {
 
 func TestACLStoreAndScopedPublish(t *testing.T) {
 	tempFile := filepath.Join(t.TempDir(), "acls.json")
-	store := NewACLStore(tempFile)
+	store := registry.NewACLStore(tempFile)
 
 	pubKey1 := "pubkey1111111111111111111111111111111111111111111111111111111111"
 	pubKey2 := "pubkey2222222222222222222222222222222222222222222222222222222222"
