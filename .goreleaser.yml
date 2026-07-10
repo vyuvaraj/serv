@@ -74,3 +74,6 @@ scoops:
     homepage: "https://github.com/vyuvaraj/ServCache"
     description: "Distributed caching service from the ServVerse platform"
     license: "Apache-2.0"
+
+release:
+  replace_existing: true
