@@ -76,3 +76,6 @@ scoops:
     homepage: "https://github.com/vyuvaraj/ServConsole"
     description: "Management console and dashboard for the ServVerse platform"
     license: "Apache-2.0"
+
+release:
+  replace_existing: true
