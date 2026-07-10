@@ -43,11 +43,17 @@ func main() {
 		return
 	}
 
+	standalone := ServShared.IsStandalone()
+
 	// Initialize distributed tracing
-	otel.Init()
+	if !standalone {
+		otel.Init()
+	} else {
+		log.Println("Gateway: Running in standalone mode. Tracing disabled.")
+	}
 
 	var prov proxy.ConfigProvider
-	if os.Getenv("SERV_CONFIG_S3_BUCKET") != "" || os.Getenv("SERVVERSE_DISCOVERY") != "" {
+	if !standalone && (os.Getenv("SERV_CONFIG_S3_BUCKET") != "" || os.Getenv("SERVVERSE_DISCOVERY") != "") {
 		log.Println("Gateway: Using S3-compatible configuration provider")
 		prov = proxy.NewS3ConfigProvider()
 	} else {
