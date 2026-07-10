@@ -216,6 +216,11 @@ func main() {
 		mockSMTPPort = *mockSMTPPortStr
 	}
 
+	standalone := ServShared.IsStandalone()
+	if standalone {
+		log.Println("[INFO] ServMail: Running in standalone mode. Store persistence redirected to local directory.")
+	}
+
 	initStore()
 
 	defaultServer = NewMailServer(port, templateStore,
