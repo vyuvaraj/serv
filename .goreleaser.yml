@@ -79,3 +79,6 @@ scoops:
     homepage: "https://github.com/vyuvaraj/ServGate"
     description: "High-performance API gateway and reverse proxy from the ServVerse platform"
     license: "Apache-2.0"
+
+release:
+  replace_existing: true
