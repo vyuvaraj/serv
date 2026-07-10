@@ -4,10 +4,15 @@ import (
 	"context"
 	"embed"
 	"flag"
+	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +25,80 @@ import (
 	"servregistry/pkg/registry"
 	"servregistry/pkg/web"
 )
+
+func startMockS3Server() string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		log.Fatalf("Failed to start local S3 mock: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	_ = os.MkdirAll("./packages", 0755)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		trimmed := strings.TrimPrefix(path, "/serv-packages")
+		localPath := filepath.Join("./packages", trimmed)
+
+		if r.Method == "PUT" {
+			if trimmed == "" || trimmed == "/" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			_ = os.MkdirAll(filepath.Dir(localPath), 0755)
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			err = os.WriteFile(localPath, data, 0644)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+
+		if r.Method == "GET" {
+			if r.URL.Query().Has("list-type") {
+				w.Header().Set("Content-Type", "application/xml")
+				w.WriteHeader(http.StatusOK)
+				
+				var contentsXml []string
+				_ = filepath.Walk("./packages", func(p string, info os.FileInfo, err error) error {
+					if err == nil && !info.IsDir() {
+						rel, _ := filepath.Rel("./packages", p)
+						rel = filepath.ToSlash(rel)
+						contentsXml = append(contentsXml, fmt.Sprintf("<Contents><Key>%s</Key><Size>%d</Size></Contents>", rel, info.Size()))
+					}
+					return nil
+				})
+
+				w.Write([]byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>serv-packages</Name><IsTruncated>false</IsTruncated>%s</ListBucketResult>`, strings.Join(contentsXml, ""))))
+				return
+			}
+
+			data, err := os.ReadFile(localPath)
+			if err != nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(data)
+			return
+		}
+
+		if r.Method == "HEAD" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	})
+
+	go http.Serve(listener, mux)
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
+}
 
 //go:embed web/*
 var webAssets embed.FS
@@ -46,7 +125,14 @@ func main() {
 		*s3SecretKey = envSecretKey
 	}
 
-	log.Printf("Connecting to ServStore S3 at %s...", *s3Endpoint)
+	standalone := ServShared.IsStandalone()
+	if standalone {
+		mockEndpoint := startMockS3Server()
+		log.Printf("ServRegistry: Running in standalone mode. Redirecting package storage to local packages/ directory via mock S3 at %s.", mockEndpoint)
+		*s3Endpoint = mockEndpoint
+	} else {
+		log.Printf("Connecting to ServStore S3 at %s...", *s3Endpoint)
+	}
 
 	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 		return aws.Endpoint{
