@@ -1,5 +1,9 @@
 # ServFlow
 
+```bash
+docker run -p 8089:8089 ghcr.io/vyuvaraj/servflow:latest
+```
+
 ServFlow is a stateful DAG-based workflow orchestrator and Saga compensation engine of the Servverse ecosystem.
 
 ## Features
