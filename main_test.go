@@ -642,12 +642,13 @@ func BenchmarkWorkflowDefinitionLookup(b *testing.B) {
 		mu.Unlock()
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := fmt.Sprintf("workflow-%d", i%1000)
 		mu.RLock()
 		_, _ = definitions[key]
 		mu.RUnlock()
+		i++
 	}
 }
 
