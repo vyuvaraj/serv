@@ -42,3 +42,14 @@ This roadmap outlines the planned development phases for the ServMail notificati
 | 5.7 | **Scheduled sends** | Small | Accept `send_at` parameter to delay delivery. Integrate with ServCron for precise timing | [ ] |
 
 > See [UNIFIED_ROADMAP.md](../servverse-repo/UNIFIED_ROADMAP.md) for the full ecosystem priority matrix.
+
+
+---
+
+## Phase 6: Test Coverage (Pending — Phase 22)
+
+> **Issue:** Only 10 test functions in 1 file.
+
+| # | Item | Effort | Description | Status |
+|---|------|--------|-------------|--------|
+| 6.1 | **Expand test suite** | Medium | From 10 → 30+ test functions: template rendering errors (missing vars), multi-channel delivery failures, DLQ retry logic, rate limiting enforcement, attachment handling | [ ] |
