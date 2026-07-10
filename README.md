@@ -76,3 +76,17 @@ Run the integration test suite:
 ```bash
 go test ./... -v
 ```
+
+---
+
+## Use Without Servverse (Standalone Quickstart)
+
+`ServQueue` can function as a standalone, independent STOMP message broker:
+1. Run the broker:
+   ```bash
+   ./servqueue --port 8082 --stomp-port 61613
+   ```
+2. Connect using any standard STOMP client library (Python `stomp.py`, Go `stomp`, Node `stompjs`) to port `61613` using:
+   - Username: `admin`
+   - Password: `secret-token`
+
