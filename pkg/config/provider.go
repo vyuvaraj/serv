@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"bytes"
@@ -40,7 +40,7 @@ func (p *LocalFileProvider) Load() (*GatewayConfig, error) {
 	}
 
 	if secret := os.Getenv("SERV_JWT_SECRET"); secret != "" {
-		if err := verifyConfigSignature(&cfg, []byte(secret)); err != nil {
+		if err := VerifyConfigSignature(&cfg, []byte(secret)); err != nil {
 			return nil, fmt.Errorf("config signature verification failed: %w", err)
 		}
 	}
@@ -50,7 +50,7 @@ func (p *LocalFileProvider) Load() (*GatewayConfig, error) {
 
 func (p *LocalFileProvider) Save(cfg *GatewayConfig) error {
 	if secret := os.Getenv("SERV_JWT_SECRET"); secret != "" {
-		if err := signConfig(cfg, []byte(secret)); err != nil {
+		if err := SignConfig(cfg, []byte(secret)); err != nil {
 			return fmt.Errorf("failed to sign config: %w", err)
 		}
 	}
@@ -79,14 +79,14 @@ func NewS3ConfigProvider() *S3ConfigProvider {
 	authToken := os.Getenv("SERV_CONFIG_S3_AUTH_TOKEN")
 
 	if endpoint == "" {
-		endpoint = activeDiscovery.Store
+		endpoint = ActiveDiscovery.Store
 	}
 	if authToken == "" {
-		authToken = activeDiscovery.AuthToken
+		authToken = ActiveDiscovery.AuthToken
 	}
 
 	if endpoint == "" {
-		endpoint = "http://localhost:8081" // fallback to ServStore default
+		endpoint = "http://localhost:8081"
 	}
 	if bucket == "" {
 		bucket = "serv-config"
@@ -95,7 +95,7 @@ func NewS3ConfigProvider() *S3ConfigProvider {
 		key = "gate-config.json"
 	}
 	if authToken == "" {
-		authToken = "gateway-secret-token" // default secret token
+		authToken = "gateway-secret-token"
 	}
 
 	return &S3ConfigProvider{
@@ -157,7 +157,7 @@ func (p *S3ConfigProvider) Load() (*GatewayConfig, error) {
 	}
 
 	if secret := os.Getenv("SERV_JWT_SECRET"); secret != "" {
-		if err := verifyConfigSignature(&cfg, []byte(secret)); err != nil {
+		if err := VerifyConfigSignature(&cfg, []byte(secret)); err != nil {
 			return nil, fmt.Errorf("config signature verification failed: %w", err)
 		}
 	}
@@ -167,7 +167,7 @@ func (p *S3ConfigProvider) Load() (*GatewayConfig, error) {
 
 func (p *S3ConfigProvider) Save(cfg *GatewayConfig) error {
 	if secret := os.Getenv("SERV_JWT_SECRET"); secret != "" {
-		if err := signConfig(cfg, []byte(secret)); err != nil {
+		if err := SignConfig(cfg, []byte(secret)); err != nil {
 			return fmt.Errorf("failed to sign config: %w", err)
 		}
 	}
@@ -205,7 +205,7 @@ func (p *S3ConfigProvider) Save(cfg *GatewayConfig) error {
 	return nil
 }
 
-func signConfig(cfg *GatewayConfig, secret []byte) error {
+func SignConfig(cfg *GatewayConfig, secret []byte) error {
 	routesData, err := json.Marshal(cfg.Routes)
 	if err != nil {
 		return err
@@ -244,7 +244,7 @@ func signConfig(cfg *GatewayConfig, secret []byte) error {
 	return nil
 }
 
-func verifyConfigSignature(cfg *GatewayConfig, secret []byte) error {
+func VerifyConfigSignature(cfg *GatewayConfig, secret []byte) error {
 	if cfg.Signature == "" {
 		return fmt.Errorf("missing configuration signature")
 	}
@@ -256,17 +256,16 @@ func verifyConfigSignature(cfg *GatewayConfig, secret []byte) error {
 
 	headerPart, payloadPart, signaturePart := parts[0], parts[1], parts[2]
 
-	// Validate signature
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(headerPart + "." + payloadPart))
 	expectedMac := mac.Sum(nil)
 
-	sigBytes, err := decodeBase64Url(signaturePart)
+	sigBytes, err := DecodeBase64Url(signaturePart)
 	if err != nil || !hmac.Equal(sigBytes, expectedMac) {
 		return fmt.Errorf("invalid signature")
 	}
 
-	payloadBytes, err := decodeBase64Url(payloadPart)
+	payloadBytes, err := DecodeBase64Url(payloadPart)
 	if err != nil {
 		return fmt.Errorf("failed to decode signature claims")
 	}
@@ -303,9 +302,7 @@ func verifyConfigSignature(cfg *GatewayConfig, secret []byte) error {
 	return nil
 }
 
-
-
-func decodeBase64Url(s string) ([]byte, error) {
+func DecodeBase64Url(s string) ([]byte, error) {
 	if l := len(s) % 4; l > 0 {
 		s += strings.Repeat("=", 4-l)
 	}

@@ -11,6 +11,137 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"servconsole/pkg/config"
+	"servconsole/pkg/tabs"
+	"servconsole/pkg/topology"
+	pkgalerts "servconsole/pkg/alerts"
+	pkgdashboards "servconsole/pkg/dashboards"
+	"servconsole/pkg/launcher"
+	"servconsole/pkg/incidents"
+	"servconsole/pkg/provision"
+	"servconsole/pkg/ai"
+)
+
+type Route = config.Route
+type GatewayConfig = config.GatewayConfig
+type Alert = pkgalerts.Alert
+type LogEntry = pkgdashboards.LogEntry
+type SLOIndicator = pkgdashboards.SLOIndicator
+type ReplayResponse = topology.ReplayResponse
+type IncidentTimeline = incidents.IncidentTimeline
+type TimelineEvent = incidents.TimelineEvent
+type Deployment = tabs.Deployment
+type RunbookAction = tabs.RunbookAction
+type Playbook = tabs.Playbook
+type AIMetricsResponse = ai.AIMetricsResponse
+type LiveTopologyResponse = topology.LiveTopologyResponse
+type Dashboard = pkgdashboards.Dashboard
+type NLQResult = pkgdashboards.NLQResult
+type PredictiveAlert = pkgdashboards.PredictiveAlert
+type PlaybookExecResult = tabs.PlaybookExecResult
+type CapacityResponse = pkgdashboards.CapacityResponse
+type CorrelationEvent = pkgdashboards.CorrelationEvent
+type WaterfallResponse = topology.WaterfallResponse
+
+var (
+	envMu             = &tabs.EnvMu
+	activeEnvironment = &tabs.ActiveEnvironment
+	handleDiagnosticExec = tabs.HandleDiagnosticExec
+)
+
+func TestMain(m *testing.M) {
+	pkgalerts.Init(&alerts, &alertsMu, config.CheckStatus, WriteJSONError)
+	pkgdashboards.Init(config.CheckStatus, WriteJSONError, pkgalerts.AddOrUpdateAlert, pkgalerts.ClearAlert, func(*http.Request) string { return "admin" }, handleScaleTrigger, func(user string, action string, method string, path string, status int) {})
+	tabs.Init(&deployments, &deploymentsMu, WriteJSONError, func(user string, action string, method string, path string, status int) {}, func(*http.Request) string { return "admin" }, config.CheckStatus)
+	topology.Init(WriteJSONError)
+	provision.Init(WriteJSONError, func(user string, action string, method string, path string, status int) {})
+	pkgdashboards.LogBuffer = &logBuffer
+	pkgdashboards.LogBufferMu = &logBufferMu
+	pkgdashboards.Dashboards = &dashboards
+	pkgdashboards.DashboardsMu = &dashboardsMu
+	pkgdashboards.AlertsMuLock = func() { alertsMu.Lock() }
+	pkgdashboards.AlertsMuUnlock = func() { alertsMu.Unlock() }
+	os.Exit(m.Run())
+}
+
+var (
+	gateUrl = config.GateUrl
+	storeUrl = config.StoreUrl
+	queueUrl = config.QueueUrl
+	tunnelUrl = config.TunnelUrl
+	traceUrl = config.TraceUrl
+	authUrl = config.AuthUrl
+	dbUrl = config.DbUrl
+	mailUrl = config.MailUrl
+	flowUrl = config.FlowUrl
+	meshUrl = config.MeshUrl
+	cronUrl = config.CronUrl
+	cacheUrl = config.CacheUrl
+	registryUrl = config.RegistryUrl
+	cloudUrl = config.CloudUrl
+	docsUrl = config.DocsUrl
+	port = config.Port
+	authToken = config.AuthToken
+	gateConfig = config.GateConfig
+	startAll = config.StartAll
+
+	handleDbQuery = tabs.HandleDbQuery
+	handleStatus = config.HandleStatus
+	handleRoutes = tabs.HandleRoutes
+	handleCluster = tabs.HandleCluster
+	handleRebalance = tabs.HandleRebalance
+	handleDiscovery = tabs.HandleDiscovery
+	handleDeployments = tabs.HandleDeployments
+	handleRollback = tabs.HandleRollback
+	handleEnvironments = tabs.HandleEnvironments
+	handleSelectEnvironment = tabs.HandleSelectEnvironment
+	handleRunbooks = tabs.HandleRunbooks
+	handleExecuteRunbook = tabs.HandleExecuteRunbook
+	handlePlaybooks = tabs.HandlePlaybooks
+	handleExecutePlaybook = tabs.HandleExecutePlaybook
+	handleDesignerLayout = tabs.HandleDesignerLayout
+	handleDesignerSync = tabs.HandleDesignerSync
+	handleStudioProjects = tabs.HandleStudioProjects
+	handleStudioDebug = tabs.HandleStudioDebug
+	handleDiagnosticsExec = tabs.HandleDiagnosticExec
+	handleDevServices = launcher.HandleDevServices
+	handleDevRestart = launcher.HandleDevRestart
+	handlePlaygroundCompile = tabs.HandlePlaygroundCompile
+	handleTenantSwitch = tabs.HandleTenantSwitch
+	handleGetPlugins = tabs.HandleGetPlugins
+	handleRegisterPlugin = tabs.HandleRegisterPlugin
+	handleServePlugin = tabs.HandleServePlugin
+	handleConsoleCronJobs = tabs.HandleConsoleCronJobs
+	handleConsoleCronJobsItem = tabs.HandleConsoleCronJobsItem
+	handleConsoleCacheStats = tabs.HandleConsoleCacheStats
+	handleConsoleCacheClear = tabs.HandleConsoleCacheClear
+	handleConsoleMeshInstances = tabs.HandleConsoleMeshInstances
+	handleConsoleRegistryPackages = tabs.HandleConsoleRegistryPackages
+	handleConsoleCloudServices = tabs.HandleConsoleCloudServices
+	handleConsoleCloudServicesItem = tabs.HandleConsoleCloudServicesItem
+	handleConsoleCloudDeploy = tabs.HandleConsoleCloudDeploy
+	handleConsoleCloudHistory = tabs.HandleConsoleCloudHistory
+	handleDocsSpec = tabs.HandleDocsSpec
+	handleProvisionStore = provision.HandleProvisionStore
+	handleProvisionQueue = provision.HandleProvisionQueue
+	handleTopology = topology.HandleTopology
+	handleTopologyLive = topology.HandleTopologyLive
+	handleTraceReplay = topology.HandleTraceReplay
+	handleTraceWaterfall = topology.HandleTraceWaterfall
+	handleAlerts = pkgalerts.HandleAlerts
+	handleAlertsAck = pkgalerts.HandleAlertsAck
+	handleIngestLog = pkgdashboards.HandleIngestLog
+	handleGetLogs = pkgdashboards.HandleGetLogs
+	handleSLO = pkgdashboards.HandleSLO
+	handleCostEstimation = pkgdashboards.HandleCostEstimation
+	handleDashboards = pkgdashboards.HandleDashboards
+	handleCapacityPlanning = pkgdashboards.HandleCapacityPlanning
+	handleCorrelationTimeline = pkgdashboards.HandleCorrelationTimeline
+	handleNLQ = pkgdashboards.HandleNLQ
+	handlePredictiveAlerts = pkgdashboards.HandlePredictiveAlerts
+	addOrUpdateAlert = pkgalerts.AddOrUpdateAlert
+	clearAlert = pkgalerts.ClearAlert
 )
 
 func TestRouteSerialization(t *testing.T) {
@@ -565,8 +696,8 @@ func TestHandleEnvironments(t *testing.T) {
 	envMu.Lock()
 	currEnv := activeEnvironment
 	envMu.Unlock()
-	if currEnv != "staging" {
-		t.Errorf("expected environment to be 'staging', got %s", currEnv)
+	if *currEnv != "staging" {
+		t.Errorf("expected environment to be 'staging', got %s", *currEnv)
 	}
 }
 
