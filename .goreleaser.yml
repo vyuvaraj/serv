@@ -81,4 +81,4 @@ scoops:
     license: "Apache-2.0"
 
 release:
-  replace_existing: true
+  mode: replace
