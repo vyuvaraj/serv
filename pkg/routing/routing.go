@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/vyuvaraj/ServShared"
-	"servdb/pkg/analytics"
-	"servdb/pkg/migration"
-	"servdb/pkg/pool"
+	"servpool/pkg/analytics"
+	"servpool/pkg/migration"
+	"servpool/pkg/pool"
 )
 
 // QueryRequest is the HTTP request body for /api/db/query.

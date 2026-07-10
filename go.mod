@@ -1,4 +1,4 @@
-module servdb
+module servpool
 
 go 1.26.4
 

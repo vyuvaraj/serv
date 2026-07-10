@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"servdb/pkg/analytics"
-	"servdb/pkg/migration"
-	"servdb/pkg/pool"
-	"servdb/pkg/routing"
+	"servpool/pkg/analytics"
+	"servpool/pkg/migration"
+	"servpool/pkg/pool"
+	"servpool/pkg/routing"
 )
 
 var (

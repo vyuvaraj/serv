@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/vyuvaraj/ServShared"
-	"servdb/pkg/pool"
-	"servdb/pkg/routing"
+	"servpool/pkg/pool"
+	"servpool/pkg/routing"
 )
 
 // Enterprise hooks (overridden in EE build).
