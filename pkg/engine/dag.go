@@ -221,7 +221,7 @@ func RunWorkflow(
 
 				// Trigger durable saga rollback/compensations
 				workflowErr = err
-				go RollbackSaga(inst, def, store, instances, instancesMu)
+				go TriggerRollbackSaga(inst, def, store, instances, instancesMu)
 				return
 			} else {
 				state.Status = "completed"
@@ -336,6 +336,35 @@ func PublishStompMessage(addr string, topic string, body []byte) error {
 	defer conn.Disconnect()
 
 	return conn.Send(topic, "text/plain", body, nil)
+}
+
+// SagaCoordinator defines pluggable coordinator hooks for executing workflow rollback compensations.
+type SagaCoordinator interface {
+	Rollback(
+		inst *storage.WorkflowInstance,
+		def storage.WorkflowDef,
+		store storage.WorkflowStore,
+		instances map[string]*storage.WorkflowInstance,
+		instancesMu *sync.RWMutex,
+	)
+}
+
+// ActiveSagaCoordinator is the globally registered saga rollback coordinator.
+var ActiveSagaCoordinator SagaCoordinator
+
+// TriggerRollbackSaga dispatches Saga rollback logic to the ActiveSagaCoordinator if registered.
+func TriggerRollbackSaga(
+	inst *storage.WorkflowInstance,
+	def storage.WorkflowDef,
+	store storage.WorkflowStore,
+	instances map[string]*storage.WorkflowInstance,
+	instancesMu *sync.RWMutex,
+) {
+	if ActiveSagaCoordinator != nil {
+		ActiveSagaCoordinator.Rollback(inst, def, store, instances, instancesMu)
+	} else {
+		RollbackSaga(inst, def, store, instances, instancesMu)
+	}
 }
 
 func RollbackSaga(

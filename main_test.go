@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"servflow/pkg/engine"
 	"servflow/pkg/storage"
 )
 
@@ -939,6 +941,83 @@ func TestSagaComplexRollbackFailures(t *testing.T) {
 	}
 	if !foundCompFailLog {
 		t.Error("expected logs to contain TaskA compensation failure message")
+	}
+
+	_ = os.Remove(inst.ID + ".state")
+}
+
+type mockSagaCoordinator struct {
+	called bool
+}
+
+func (m *mockSagaCoordinator) Rollback(
+	inst *storage.WorkflowInstance,
+	def storage.WorkflowDef,
+	store storage.WorkflowStore,
+	instances map[string]*storage.WorkflowInstance,
+	instancesMu *sync.RWMutex,
+) {
+	m.called = true
+	inst.Mu.Lock()
+	inst.Logs = append(inst.Logs, "[SAGA] Mocked rollback coordinator executed")
+	inst.Mu.Unlock()
+}
+
+func TestPluggableSagaCoordinator(t *testing.T) {
+	mockCoord := &mockSagaCoordinator{}
+	engine.ActiveSagaCoordinator = mockCoord
+	defer func() { engine.ActiveSagaCoordinator = nil }()
+
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define simple failing workflow
+	defPayload := storage.WorkflowDef{
+		ID: "failing-saga-flow",
+		Tasks: []storage.Task{
+			{Name: "Task1", DependsOn: nil, Action: "fail"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "failing-saga-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst storage.WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait for execution and rollback hook
+	time.Sleep(50 * time.Millisecond)
+
+	if !mockCoord.called {
+		t.Error("expected mock saga coordinator Rollback to be called")
+	}
+
+	// Fetch instance to check logs
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst storage.WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	foundMockLog := false
+	for _, l := range finalInst.Logs {
+		if strings.Contains(l, "[SAGA] Mocked rollback coordinator executed") {
+			foundMockLog = true
+			break
+		}
+	}
+	if !foundMockLog {
+		t.Error("expected logs to contain Mocked rollback coordinator log")
 	}
 
 	_ = os.Remove(inst.ID + ".state")

@@ -223,7 +223,7 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 	if isCompensating {
 		instPointer.Logs = append(instPointer.Logs, "Resuming saga rollback execution from checkpoint.")
 		instPointer.Status = "failed"
-		go engine.RollbackSaga(instPointer, def, ctx.WorkflowStore, ctx.Instances, ctx.Mu)
+		go engine.TriggerRollbackSaga(instPointer, def, ctx.WorkflowStore, ctx.Instances, ctx.Mu)
 	} else {
 		instPointer.Status = "running"
 		instPointer.Logs = append(instPointer.Logs, "Workflow execution resumed from checkpoint.")
@@ -531,7 +531,7 @@ func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *ht
 	def := ctx.Definitions[inst.WorkflowID]
 	ctx.Mu.RUnlock()
 
-	go engine.RollbackSaga(inst, def, ctx.WorkflowStore, ctx.Instances, ctx.Mu)
+	go engine.TriggerRollbackSaga(inst, def, ctx.WorkflowStore, ctx.Instances, ctx.Mu)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ok"}`))
