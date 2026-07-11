@@ -95,5 +95,125 @@ go test ./... -v
    ```
 2. Connect using any standard STOMP client library (Python `stomp.py`, Go `stomp`, Node `stompjs`) to port `61613` using:
    - Username: `admin`
-   - Password: `secret-token`
+   - Password: `secret`
 
+---
+
+## STOMP Client Compatibility Guide (SA.18)
+
+`ServQueue` implements a compliant STOMP v1.1/v1.2 protocol server. You can subscribe and publish using any generic library.
+
+### 1. Python (`stomp.py`)
+```python
+import stomp
+import time
+
+class MyListener(stomp.ConnectionListener):
+    def on_message(self, frame):
+        print(f"Received message: {frame.body}")
+
+conn = stomp.Connection([('127.0.0.1', 61613)])
+conn.set_listener('', MyListener())
+conn.connect('admin', 'secret', wait=True)
+
+# Subscribe to a topic
+conn.subscribe(destination='orders', id='sub-1', ack='auto')
+
+# Publish a message
+conn.send(body='{"order_id": 42}', destination='orders')
+
+time.sleep(2)
+conn.disconnect()
+```
+
+### 2. Spring / Java
+Configure your STOMP client settings:
+```java
+WebSocketClient client = new StandardWebSocketClient();
+WebSocketStompClient stompClient = new WebSocketStompClient(client);
+stompClient.setMessageConverter(new StringMessageConverter());
+
+StompHeaders headers = new StompHeaders();
+headers.add("login", "admin");
+headers.add("passcode", "secret");
+
+stompClient.connect("ws://localhost:8082/stomp", new StompSessionHandlerAdapter() {
+    @Override
+    public void afterConnected(StompSession session, StompHeaders connectedHeaders) {
+        session.subscribe("orders", new StompFrameHandler() {
+            @Override
+            public Type getPayloadType(StompHeaders headers) {
+                return String.class;
+            }
+            @Override
+            public void handleFrame(StompHeaders headers, Object payload) {
+                System.out.println("Received: " + payload);
+            }
+        });
+        session.send("orders", "hello from spring");
+    }
+}, headers);
+```
+
+### 3. Go (`go-stomp`)
+```go
+package main
+
+import (
+	"log"
+	"github.com/go-stomp/stomp/v3"
+)
+
+func main() {
+	options := []func(*stomp.Conn) error{
+		stomp.Conn.Login("admin", "secret"),
+	}
+
+	conn, err := stomp.Dial("tcp", "127.0.0.1:61613", options...)
+	if err != nil {
+		log.Fatalf("cannot connect to STOMP: %v", err)
+	}
+	defer conn.Disconnect()
+
+	// Subscribe
+	sub, err := conn.Subscribe("orders", stomp.AckAuto)
+	if err != nil {
+		log.Fatalf("cannot subscribe: %v", err)
+	}
+
+	// Publish
+	err = conn.Send("orders", "text/plain", []byte("hello from go"), nil)
+	if err != nil {
+		log.Fatalf("cannot send message: %v", err)
+	}
+
+	// Read message
+	msg := <-sub.C
+	log.Printf("Received message: %s", string(msg.Body))
+}
+```
+
+### 4. JavaScript / Browser (`stompjs`)
+```javascript
+import { Client } from '@stomp/stompjs';
+
+const client = new Client({
+    brokerURL: 'ws://localhost:8082/stomp', // or tcp endpoint via proxy
+    connectHeaders: {
+        login: 'admin',
+        passcode: 'secret',
+    },
+    debug: function (str) {
+        console.log(str);
+    },
+    onConnect: () => {
+        client.subscribe('orders', message => {
+            console.log(`Received payload: ${message.body}`);
+        });
+
+        client.publish({ destination: 'orders', body: 'hello browser' });
+    },
+});
+
+client.activate();
+```
