@@ -21,10 +21,11 @@ import (
 
 // LockEntry represents a single held distributed lock.
 type LockEntry struct {
-	Key       string    `json:"key"`
-	Owner     string    `json:"owner"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Key        string    `json:"key"`
+	Owner      string    `json:"owner"`
+	ExpiresAt  time.Time `json:"expires_at"`
 	AcquiredAt time.Time `json:"acquired_at"`
+	Token      int64     `json:"token"`
 }
 
 // IsExpired reports whether the lock has passed its TTL.
@@ -44,8 +45,9 @@ type AcquireResult struct {
 // All operations are O(1) against the in-memory map. Eviction runs
 // on a background goroutine.
 type Store struct {
-	mu    sync.Mutex
-	locks map[string]*LockEntry
+	mu        sync.Mutex
+	locks     map[string]*LockEntry
+	nextToken int64
 
 	// defaultTTL is used when the caller provides ttl=0.
 	defaultTTL time.Duration
@@ -79,19 +81,23 @@ func (s *Store) Acquire(key, owner string, ttl time.Duration) AcquireResult {
 
 	if existing, ok := s.locks[key]; ok && !existing.IsExpired() {
 		if existing.Owner == owner {
-			// Re-acquire by the same owner — refresh TTL.
+			// Re-acquire by the same owner — refresh TTL and increment/update token.
+			s.nextToken++
 			existing.ExpiresAt = time.Now().Add(ttl)
+			existing.Token = s.nextToken
 			return AcquireResult{Acquired: true, Lock: existing}
 		}
 		// Held by a different owner.
 		return AcquireResult{Acquired: false, HeldBy: existing.Owner}
 	}
 
+	s.nextToken++
 	entry := &LockEntry{
 		Key:        key,
 		Owner:      owner,
 		AcquiredAt: time.Now(),
 		ExpiresAt:  time.Now().Add(ttl),
+		Token:      s.nextToken,
 	}
 	s.locks[key] = entry
 	return AcquireResult{Acquired: true, Lock: entry}
