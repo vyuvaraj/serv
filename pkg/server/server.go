@@ -600,22 +600,9 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 		s.mu.RUnlock()
 	}
 
-	if !exists && len(s.federationPeers) > 0 {
-		for _, peer := range s.federationPeers {
-			checkURL := fmt.Sprintf("%s/api/tunnels/%s/exists", peer, subdomain)
-			reqCheck, err := http.NewRequestWithContext(r.Context(), "HEAD", checkURL, nil)
-			if err != nil {
-				continue
-			}
-			client := &http.Client{Timeout: 1 * time.Second}
-			respCheck, err := client.Do(reqCheck)
-			if err == nil {
-				respCheck.Body.Close()
-				if respCheck.StatusCode == http.StatusOK {
-					s.proxyToPeer(w, r, peer)
-					return
-				}
-			}
+	if !exists {
+		if s.routeToFederationPeer(w, r, subdomain) {
+			return
 		}
 	}
 

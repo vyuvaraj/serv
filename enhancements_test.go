@@ -411,6 +411,10 @@ func TestPersistentTunnelsInvitesAndCustomDomain(t *testing.T) {
 }
 
 func TestFederationAndAnalytics(t *testing.T) {
+	if !server.IsFederationSupported {
+		t.Skip("Skipping: federation requires ServTunnel Enterprise Edition")
+	}
+
 	// 1. Setup peer relay
 	lnPeer, _ := net.Listen("tcp", "127.0.0.1:0")
 	peerAddr := lnPeer.Addr().String()
