@@ -20,11 +20,6 @@ import (
 
 const version = "0.1.0"
 
-// Enterprise hooks (overridden in EE build)
-var (
-	EnterpriseListenAndServeTLS = func(srv *http.Server, certFile, keyFile string) error { return nil }
-)
-
 func main() {
 	port := flag.Int("port", 8086, "ServCache listen port")
 	backend := flag.String("backend", "memory", "Cache backend: memory or redis")
