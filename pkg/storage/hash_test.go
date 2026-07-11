@@ -35,7 +35,7 @@ func BenchmarkBlake3Hashing(b *testing.B) {
 	_, _ = rnd.Read(data)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = ParallelBlake3Hash(data)
 	}
 }
