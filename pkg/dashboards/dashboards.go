@@ -679,6 +679,14 @@ func HandleNLQ(w http.ResponseWriter, r *http.Request) {
 	WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 }
 
+// PredictiveAlertsProvider defines pluggable hooks for querying predictive system alerts.
+type PredictiveAlertsProvider interface {
+	GetAlerts() []PredictiveAlert
+}
+
+// ActivePredictiveAlertsProvider is the globally registered predictive alerts provider hook.
+var ActivePredictiveAlertsProvider PredictiveAlertsProvider
+
 func HandlePredictiveAlerts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodGet {
@@ -686,41 +694,11 @@ func HandlePredictiveAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	alertsList := []PredictiveAlert{
-		{
-			ID:         "pred-disk-serv-store",
-			Metric:     "Disk Usage",
-			Service:    "ServStore",
-			Current:    55.4,
-			Threshold:  90.0,
-			Unit:       "%",
-			DaysUntil:  45,
-			Severity:   "warning",
-			Suggestion: "Enable automatic archive rules in ServStore or expand disk volume.",
-		},
-		{
-			ID:         "pred-cert-mtls",
-			Metric:     "mTLS Certificate Expiry",
-			Service:    "ServMesh",
-			Current:    182,
-			Threshold:  30,
-			Unit:       "days",
-			DaysUntil:  152,
-			Severity:   "info",
-			Suggestion: "Certificate auto-renew is active. No action needed.",
-		},
-		{
-			ID:         "pred-ratelimit-gate",
-			Metric:     "Request Rate",
-			Service:    "ServGate",
-			Current:    138,
-			Threshold:  150,
-			Unit:       "req/sec",
-			DaysUntil:  7,
-			Severity:   "critical",
-			Suggestion: "Raise rate limit threshold in Config Editor or scale ServGate horizontally.",
-		},
+	if ActivePredictiveAlertsProvider == nil {
+		WriteJSONError(w, r, "Predictive alerts require Enterprise Edition", "ERR_EE_REQUIRED", http.StatusForbidden)
+		return
 	}
 
+	alertsList := ActivePredictiveAlertsProvider.GetAlerts()
 	json.NewEncoder(w).Encode(alertsList)
 }

@@ -1150,18 +1150,49 @@ func TestHandleNLQMissingParam(t *testing.T) {
 	}
 }
 
+type mockPredictiveAlertsProvider struct{}
+
+func (m *mockPredictiveAlertsProvider) GetAlerts() []PredictiveAlert {
+	return []PredictiveAlert{
+		{
+			ID:         "pred-test",
+			Metric:     "Test Metric",
+			Service:    "TestService",
+			Current:    50,
+			Threshold:  100,
+			Unit:       "units",
+			DaysUntil:  10,
+			Severity:   "warning",
+			Suggestion: "Scale up",
+		},
+	}
+}
+
 func TestHandlePredictiveAlerts(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/predictive/alerts", nil)
-	w := httptest.NewRecorder()
-	handlePredictiveAlerts(w, req)
-	resp := w.Result()
+	// 1. Without provider registered (returns 403)
+	req1 := httptest.NewRequest("GET", "/api/predictive/alerts", nil)
+	w1 := httptest.NewRecorder()
+	handlePredictiveAlerts(w1, req1)
+	if w1.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden, got %d", w1.Code)
+	}
+
+	// 2. With provider registered (returns 200)
+	mock := &mockPredictiveAlertsProvider{}
+	pkgdashboards.ActivePredictiveAlertsProvider = mock
+	defer func() { pkgdashboards.ActivePredictiveAlertsProvider = nil }()
+
+	req2 := httptest.NewRequest("GET", "/api/predictive/alerts", nil)
+	w2 := httptest.NewRecorder()
+	handlePredictiveAlerts(w2, req2)
+	resp := w2.Result()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 	var alerts []PredictiveAlert
 	json.NewDecoder(resp.Body).Decode(&alerts)
-	if len(alerts) == 0 {
-		t.Error("expected at least one predictive alert")
+	if len(alerts) != 1 || alerts[0].ID != "pred-test" {
+		t.Errorf("unexpected alerts: %+v", alerts)
 	}
 }
 
