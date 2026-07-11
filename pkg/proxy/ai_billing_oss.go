@@ -6,74 +6,27 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 )
+
+// IsSemanticCacheSupported flags if the semantic cache is supported in this build.
+const IsSemanticCacheSupported = false
+
+func (h *GatewayHandler) getSemanticCache(matchedRoute *Route, prompt string) ([]byte, bool) {
+	// Semantic API Caching requires Enterprise Edition.
+	return nil, false
+}
+
+func (h *GatewayHandler) setSemanticCache(matchedRoute *Route, prompt string, response []byte) {
+	// No-op in OSS
+}
 
 func (h *GatewayHandler) handleLLMRouting(w http.ResponseWriter, r *http.Request, matchedRoute *Route, _ interface{}) bool {
 	if matchedRoute.LLMRouting == nil {
 		return false
 	}
-
-	cfg := matchedRoute.LLMRouting
-
-	// Read original request body so we can reuse/resend it if we fallback
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		WriteJSONError(w, r, "Failed to read request body", "ERR_BAD_REQUEST", http.StatusBadRequest)
-		return true
-	}
-	r.Body.Close()
-
-	// 1. Try Primary target
-	useFallback := false
-	respBytes, respHeader, statusCode, err := h.proxyToLLMTarget(cfg.Primary, bodyBytes, r)
-
-	if err != nil || statusCode >= 500 {
-		useFallback = true
-	} else if cfg.ConfidenceHeader != "" {
-		confVal := respHeader.Get(cfg.ConfidenceHeader)
-		if confVal != "" {
-			if val, err := strconv.ParseFloat(confVal, 64); err == nil {
-				if val < cfg.MinConfidence {
-					useFallback = true
-				}
-			}
-		}
-	}
-
-	var finalRespBytes []byte
-	var finalHeader http.Header
-	var finalStatusCode int
-	isFallback := "false"
-
-	if useFallback {
-		// 2. Fallback to premium target
-		isFallback = "true"
-		fBytes, fHeader, fCode, fErr := h.proxyToLLMTarget(cfg.Fallback, bodyBytes, r)
-		if fErr != nil {
-			WriteJSONError(w, r, "Fallback target failed", "ERR_FALLBACK_FAILED", http.StatusBadGateway)
-			return true
-		}
-		finalRespBytes = fBytes
-		finalHeader = fHeader
-		finalStatusCode = fCode
-	} else {
-		finalRespBytes = respBytes
-		finalHeader = respHeader
-		finalStatusCode = statusCode
-	}
-
-	// Copy response headers and body back
-	for k, vv := range finalHeader {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.Header().Set("X-LLM-Fallback", isFallback)
-	w.WriteHeader(finalStatusCode)
-	w.Write(finalRespBytes)
-
+	// Cost-Aware LLM Routing requires Enterprise Edition.
+	WriteJSONError(w, r, "Cost-Aware LLM Routing requires ServGate Enterprise Edition", "ERR_EE_REQUIRED", http.StatusForbidden)
 	return true
 }
 

@@ -1189,18 +1189,16 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// 3. AI Semantic Cache (Lookup)
 		if matchedRoute.SemanticCache && prompt != "" {
-			if cache, ok := h.semanticCaches[matchedRoute.Prefix]; ok {
-				if cachedResp, hit := cache.Get(prompt); hit {
-					w.Header().Set("Content-Type", "application/json")
-					w.Header().Set("X-Cache", "HIT-SEMANTIC")
-					w.WriteHeader(http.StatusOK)
-					w.Write(cachedResp)
-					otel.EndSpan(span, nil, map[string]interface{}{
-						"http.route": matchedRoute.Prefix,
-						"cache.hit":  true,
-					})
-					return
-				}
+			if cachedResp, hit := h.getSemanticCache(&matchedRoute, prompt); hit {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Cache", "HIT-SEMANTIC")
+				w.WriteHeader(http.StatusOK)
+				w.Write(cachedResp)
+				otel.EndSpan(span, nil, map[string]interface{}{
+					"http.route": matchedRoute.Prefix,
+					"cache.hit":  true,
+				})
+				return
 			}
 		}
 
@@ -1560,9 +1558,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if matchedRoute.SemanticCache {
 			prompt := extractPrompt(reqBody)
 			if prompt != "" {
-				if cache, ok := h.semanticCaches[matchedRoute.Prefix]; ok {
-					cache.Set(prompt, bodyBytes)
-				}
+				h.setSemanticCache(&matchedRoute, prompt, bodyBytes)
 			}
 		}
 

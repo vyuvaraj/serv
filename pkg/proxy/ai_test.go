@@ -94,6 +94,10 @@ func TestAiPiiRedaction(t *testing.T) {
 }
 
 func TestAiSemanticCache(t *testing.T) {
+	if !IsSemanticCacheSupported {
+		t.Skip("Skipping: AI Semantic Cache requires ServGate Enterprise Edition")
+	}
+
 	backendHits := 0
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		backendHits++
