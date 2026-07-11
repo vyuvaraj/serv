@@ -63,22 +63,69 @@ go test ./... -v
 
 ---
 
-## Use Without Servverse (Standalone Quickstart)
+## Standalone Gateway Setup (Express / Flask / Spring Boot)
 
-`ServGate` can run as an independent API Gateway/reverse proxy with zero other Servverse components:
-1. Create a `config.json` defining your route targets:
-   ```json
-   {
-     "routes": [
-       {
-         "prefix": "/service/users",
-         "target": "http://localhost:8081"
-       }
-     ]
-   }
-   ```
-2. Start `ServGate` in standalone mode:
-   ```bash
-   ./servgate --standalone --config config.json
-   ```
+`ServGate` can act as a high-performance standalone API Gateway in front of non-ecosystem applications built with frameworks like Node.js (Express), Python (Flask), or Java (Spring Boot) without requiring any WebAssembly filters:
+
+### 1. Express Backend Setup (Node.js)
+To forward client requests dynamically from `ServGate` to an Express app listening on `:3000`:
+* Configure a path-based routing rule in `config.json`:
+  ```json
+  {
+    "prefix": "/api/users",
+    "target": "http://localhost:3000"
+  }
+  ```
+* Requests to `http://localhost:8080/api/users/profile` will be automatically stripped and routed to `http://localhost:3000/profile`.
+
+### 2. Flask Backend Setup (Python)
+For Flask APIs running on port `:5000`:
+* Add the routing target rule to your `config.json` list:
+  ```json
+  {
+    "prefix": "/api/predict",
+    "target": "http://localhost:5000"
+  }
+  ```
+* `ServGate` handles HTTP headers forwarding, logging, and connection pooling out-of-the-box.
+
+### 3. Spring Boot Backend Setup (Java)
+For Spring Boot controllers running on port `:8080` (or custom port `:8081`):
+* Configure the target path mappings:
+  ```json
+  {
+    "prefix": "/api/v1/billing",
+    "target": "http://localhost:8081"
+  }
+  ```
+
+### Complete Standalone `config.json` Example
+Create a `config.json` file combining your multi-backend routing policies:
+```json
+{
+  "addr": ":8080",
+  "auth_token": "gateway-secret-token",
+  "routes": [
+    {
+      "prefix": "/api/users",
+      "target": "http://localhost:3000"
+    },
+    {
+      "prefix": "/api/predict",
+      "target": "http://localhost:5000"
+    },
+    {
+      "prefix": "/api/v1/billing",
+      "target": "http://localhost:8081"
+    }
+  ]
+}
+```
+
+### Launch Standalone Gateway
+Start the gateway pointing directly to your custom config file:
+```bash
+./servgate.exe --standalone --config config.json
+```
+The gateway is now running at `http://localhost:8080`, proxying requests dynamically based on prefixes!
 
