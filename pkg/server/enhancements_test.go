@@ -439,3 +439,66 @@ func TestProfilingSummary(t *testing.T) {
 	}
 }
 
+type mockAnomalyExplainer struct{}
+
+func (m *mockAnomalyExplainer) Explain(traceID string) (map[string]interface{}, error) {
+	return map[string]interface{}{"explanation": "mock-explanation-for-" + traceID}, nil
+}
+
+type mockSloBreachPredictor struct{}
+
+func (m *mockSloBreachPredictor) Predict(traces []store.TraceSummary) (map[string]interface{}, error) {
+	return map[string]interface{}{"days_to_breach": 12.3}, nil
+}
+
+func TestPluggableTraceEnterpriseFeatures(t *testing.T) {
+	ts := store.NewStore(100)
+	srv := NewServer(ts)
+
+	// 1. Check fallback to 403 when ActiveAnomalyExplainer and ActiveSloBreachPredictor are nil
+	reqExplainOSS := httptest.NewRequest("GET", "/api/v1/anomalies/explain?traceId=test-trace", nil)
+	wExplainOSS := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wExplainOSS, reqExplainOSS)
+	if wExplainOSS.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for explain endpoint in OSS, got %d", wExplainOSS.Code)
+	}
+
+	reqSloOSS := httptest.NewRequest("GET", "/api/trace/anomaly/slo-breach-predict", nil)
+	wSloOSS := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wSloOSS, reqSloOSS)
+	if wSloOSS.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for SLO predict endpoint in OSS, got %d", wSloOSS.Code)
+	}
+
+	// 2. Check returns 200 and calls providers when hooks are registered
+	mockExp := &mockAnomalyExplainer{}
+	ActiveAnomalyExplainer = mockExp
+	defer func() { ActiveAnomalyExplainer = nil }()
+
+	mockSlo := &mockSloBreachPredictor{}
+	ActiveSloBreachPredictor = mockSlo
+	defer func() { ActiveSloBreachPredictor = nil }()
+
+	wExplainEE := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wExplainEE, reqExplainOSS)
+	if wExplainEE.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for explain, got %d", wExplainEE.Code)
+	}
+	var explainResp map[string]interface{}
+	json.Unmarshal(wExplainEE.Body.Bytes(), &explainResp)
+	if explainResp["explanation"] != "mock-explanation-for-test-trace" {
+		t.Errorf("expected mock explanation, got %v", explainResp)
+	}
+
+	wSloEE := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wSloEE, reqSloOSS)
+	if wSloEE.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for SLO predict, got %d", wSloEE.Code)
+	}
+	var sloResp map[string]interface{}
+	json.Unmarshal(wSloEE.Body.Bytes(), &sloResp)
+	if sloResp["days_to_breach"] != 12.3 {
+		t.Errorf("expected mock days_to_breach 12.3, got %v", sloResp)
+	}
+}
+

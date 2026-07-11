@@ -14,6 +14,22 @@ import (
 	"github.com/vyuvaraj/ServShared"
 )
 
+// AnomalyExplainer defines pluggable hooks to explain trace anomaly root causes.
+type AnomalyExplainer interface {
+	Explain(traceID string) (map[string]interface{}, error)
+}
+
+// SloBreachPredictor defines pluggable hooks to project days remaining until SLO breach.
+type SloBreachPredictor interface {
+	Predict(traces []store.TraceSummary) (map[string]interface{}, error)
+}
+
+// ActiveAnomalyExplainer is the globally registered anomaly explainer hook.
+var ActiveAnomalyExplainer AnomalyExplainer
+
+// ActiveSloBreachPredictor is the globally registered SLO breach predictor hook.
+var ActiveSloBreachPredictor SloBreachPredictor
+
 type Server struct {
 	traceStore *store.Store
 }
@@ -446,16 +462,21 @@ func (s *Server) handleExplainAnomaly(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	if ActiveAnomalyExplainer == nil {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Enterprise Edition required for anomaly explanation"})
+		return
+	}
+
 	traceID := req.URL.Query().Get("traceId")
-	explanation, err := s.ExplainAnomaly(traceID)
+	explanation, err := ActiveAnomalyExplainer.Explain(traceID)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(explanation)
 }
 
@@ -512,44 +533,22 @@ func (s *Server) handleSloBreachPredict(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	traces := s.traceStore.ListTraces()
-	total := len(traces)
-	errors := 0
-
-	for _, t := range traces {
-		if t.ErrorCount > 0 {
-			errors++
-		}
-	}
-
-	failureRate := 0.0
-	if total > 0 {
-		failureRate = float64(errors) / float64(total)
-	}
-
-	// Simple linear extrapolation of SLO budget remaining
-	sloTarget := 0.99 // 99% availability target
-	allowedFailRate := 1.0 - sloTarget
-	budgetBurnRatio := 0.0
-	if allowedFailRate > 0 {
-		budgetBurnRatio = failureRate / allowedFailRate
-	}
-
-	daysRemaining := 30.0
-	if budgetBurnRatio > 1.0 {
-		daysRemaining = 30.0 / budgetBurnRatio
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_traces":    total,
-		"error_count":     errors,
-		"failure_rate":    failureRate,
-		"slo_target":      sloTarget,
-		"budget_burn":     budgetBurnRatio,
-		"days_to_breach":  daysRemaining,
-		"status":          fmt.Sprintf("Current error rate trajectory: SLO budget exhausted in %.1f days", daysRemaining),
-	})
+	if ActiveSloBreachPredictor == nil {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Enterprise Edition required for SLO breach prediction"})
+		return
+	}
+
+	traces := s.traceStore.ListTraces()
+	prediction, err := ActiveSloBreachPredictor.Predict(traces)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(prediction)
 }
 
 func (s *Server) startSelfHealingLoop() {
