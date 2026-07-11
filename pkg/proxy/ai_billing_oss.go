@@ -12,12 +12,12 @@ import (
 // IsSemanticCacheSupported flags if the semantic cache is supported in this build.
 const IsSemanticCacheSupported = false
 
-func (h *GatewayHandler) getSemanticCache(matchedRoute *Route, prompt string) ([]byte, bool) {
+func (h *GatewayHandler) getSemanticCache(_ *Route, _ string) ([]byte, bool) {
 	// Semantic API Caching requires Enterprise Edition.
 	return nil, false
 }
 
-func (h *GatewayHandler) setSemanticCache(matchedRoute *Route, prompt string, response []byte) {
+func (h *GatewayHandler) setSemanticCache(_ *Route, _ string, _ []byte) {
 	// No-op in OSS
 }
 
