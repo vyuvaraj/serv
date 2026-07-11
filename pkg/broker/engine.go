@@ -264,11 +264,8 @@ func (e *BrokerEngine) dispatchLoop(ctx context.Context, topic string, pq *Prior
 
 			for _, sub := range subs {
 				// AI.24: Semantic message routing filter
-				if strings.Contains(topic, "support") {
-					isBilling := strings.Contains(strings.ToLower(msg.Payload), "billing") || strings.Contains(strings.ToLower(msg.Payload), "invoice")
-					if isBilling && !strings.Contains(topic, "billing") {
-						continue
-					}
+				if e.filterSemanticRoute(topic, msg.Payload) {
+					continue
 				}
 
 				select {
