@@ -499,6 +499,10 @@ func TestEnvVariablesManagement(t *testing.T) {
 }
 
 func TestHorizontalAutoScaling(t *testing.T) {
+	if !server.IsAutoscaleSupported {
+		t.Skip("Skipping: auto-scaling requires ServCloud Enterprise Edition")
+	}
+
 	tempDir, err := os.MkdirTemp("", "servcloud-autoscale-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -587,6 +591,10 @@ func TestHorizontalAutoScaling(t *testing.T) {
 }
 
 func TestScaleToZeroAndInvoke(t *testing.T) {
+	if !server.IsAutoscaleSupported {
+		t.Skip("Skipping: scale-to-zero requires ServCloud Enterprise Edition")
+	}
+
 	tempDir, err := os.MkdirTemp("", "servcloud-scale-to-zero-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)

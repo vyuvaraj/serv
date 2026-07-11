@@ -1,3 +1,5 @@
+//go:build enterprise
+
 package server
 
 import (
@@ -12,6 +14,8 @@ import (
 
 	"servcloud/pkg/orchestrator"
 )
+
+const IsAutoscaleSupported = true
 
 type gatewayConsoleSyncResponse struct {
 	Routes []struct {
