@@ -97,16 +97,11 @@ func (w *WAL) Append(topic, payload string) error {
 	frame.Write(payloadBytes)
 	frame.Write(checksum)
 
-	written, err := w.file.Write(frame.Bytes())
+	written, err := w.writeRecord(frame.Bytes())
 	if err != nil {
-		return fmt.Errorf("wal: append write failed: %w", err)
+		return err
 	}
 	w.bytesWrit += int64(written)
-
-	if err := w.file.Sync(); err != nil {
-		return fmt.Errorf("wal: append sync failed: %w", err)
-	}
-
 	return nil
 }
 
