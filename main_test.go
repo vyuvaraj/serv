@@ -563,20 +563,21 @@ func TestHorizontalAutoScaling(t *testing.T) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
+OuterLoop:
 	for {
 		select {
 		case <-timeout:
-			break
+			break OuterLoop
 		case <-ticker.C:
 			routesMu.Lock()
 			targets = registeredRoutes["/service/scale-app"]
 			routesMu.Unlock()
 			if len(targets) >= 2 {
-				break
+				break OuterLoop
 			}
 		}
 		if len(targets) >= 2 {
-			break
+			break OuterLoop
 		}
 	}
 
