@@ -1189,7 +1189,7 @@ func TestResponseCache(t *testing.T) {
 		hitCount++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"hit":%d}`, hitCount)))
+		w.Write(fmt.Appendf(nil, `{"hit":%d}`, hitCount))
 	}))
 	defer backend.Close()
 
