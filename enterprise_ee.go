@@ -13,6 +13,8 @@ import (
 
 // registerEnterpriseHandlers registers all enterprise-only endpoints in the EE build.
 func registerEnterpriseHandlers(mux *http.ServeMux) {
+	pkgdashboards.ActivePredictiveAlertsProvider = &eePredictiveAlertsProvider{}
+
 	var sloTracker = incidents.NewSLOTracker()
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(pkgdashboards.HandleCostEstimation))
 	mux.HandleFunc("/api/slo", authorizeConsole(func(w http.ResponseWriter, r *http.Request) {
