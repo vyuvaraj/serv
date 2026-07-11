@@ -12,6 +12,9 @@ import (
 // IsSemanticCacheSupported flags if the semantic cache is supported in this build.
 const IsSemanticCacheSupported = false
 
+// IsVectorSearchAccelerated flags if GPU/SIMD vector acceleration is supported.
+const IsVectorSearchAccelerated = false
+
 func (h *GatewayHandler) getSemanticCache(_ *Route, _ string) ([]byte, bool) {
 	// Semantic API Caching requires Enterprise Edition.
 	return nil, false
