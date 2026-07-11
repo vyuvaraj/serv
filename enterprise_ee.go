@@ -11,40 +11,25 @@ import (
 	"servconsole/pkg/tabs"
 )
 
-var (
-	handleCostEstimation = pkgdashboards.HandleCostEstimation
-	handleSLO            = pkgdashboards.HandleSLO
-	handleRunbooks       = tabs.HandleRunbooks
-	handleExecuteRunbook = tabs.HandleExecuteRunbook
-	handleDashboards     = pkgdashboards.HandleDashboards
-	handleProvisionStore = provision.HandleProvisionStore
-	handleProvisionQueue = provision.HandleProvisionQueue
-	handleDiagnosticExec = tabs.HandleDiagnosticExec
-	handleEnvironments   = tabs.HandleEnvironments
-	handleSelectEnvironment = tabs.HandleSelectEnvironment
-	handleRollback       = tabs.HandleRollback
-	handleTenantSwitch   = tabs.HandleTenantSwitch
-)
-
 // registerEnterpriseHandlers registers all enterprise-only endpoints in the EE build.
 func registerEnterpriseHandlers(mux *http.ServeMux) {
 	var sloTracker = incidents.NewSLOTracker()
-	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
+	mux.HandleFunc("/api/cost-estimation", authorizeConsole(pkgdashboards.HandleCostEstimation))
 	mux.HandleFunc("/api/slo", authorizeConsole(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("decomposed") == "true" {
 			sloTracker.HandleSLO(w, r)
 		} else {
-			handleSLO(w, r)
+			pkgdashboards.HandleSLO(w, r)
 		}
 	}))
-	mux.HandleFunc("/api/runbooks", authorizeConsole(handleRunbooks))
-	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(handleExecuteRunbook))
-	mux.HandleFunc("/api/dashboards", authorizeConsole(handleDashboards))
-	mux.HandleFunc("/api/provision/store", authorizeConsole(handleProvisionStore))
-	mux.HandleFunc("/api/provision/queue", authorizeConsole(handleProvisionQueue))
-	mux.HandleFunc("/api/diagnostics/exec", authorizeConsole(handleDiagnosticExec))
-	mux.HandleFunc("/api/environments", authorizeConsole(handleEnvironments))
-	mux.HandleFunc("/api/environments/select", authorizeConsole(handleSelectEnvironment))
-	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(handleRollback))
-	mux.HandleFunc("/api/tenant/switch", authorizeConsole(handleTenantSwitch))
+	mux.HandleFunc("/api/runbooks", authorizeConsole(tabs.HandleRunbooks))
+	mux.HandleFunc("/api/runbooks/execute", authorizeConsole(tabs.HandleExecuteRunbook))
+	mux.HandleFunc("/api/dashboards", authorizeConsole(pkgdashboards.HandleDashboards))
+	mux.HandleFunc("/api/provision/store", authorizeConsole(provision.HandleProvisionStore))
+	mux.HandleFunc("/api/provision/queue", authorizeConsole(provision.HandleProvisionQueue))
+	mux.HandleFunc("/api/diagnostics/exec", authorizeConsole(tabs.HandleDiagnosticExec))
+	mux.HandleFunc("/api/environments", authorizeConsole(tabs.HandleEnvironments))
+	mux.HandleFunc("/api/environments/select", authorizeConsole(tabs.HandleSelectEnvironment))
+	mux.HandleFunc("/api/deployments/rollback", authorizeConsole(tabs.HandleRollback))
+	mux.HandleFunc("/api/tenant/switch", authorizeConsole(tabs.HandleTenantSwitch))
 }
