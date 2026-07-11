@@ -557,6 +557,10 @@ func main() {
 	autoTLSDomain := os.Getenv("SERV_AUTO_TLS_DOMAIN")
 
 	go func() {
+		if SetupSSLOffloading(server) {
+			return
+		}
+
 		if autoTLS && autoTLSDomain != "" {
 			log.Printf("Gateway: Enabling Let's Encrypt Auto TLS for domain: %s", autoTLSDomain)
 			certManager := autocert.Manager{
