@@ -2,7 +2,7 @@
 
 package main
 
-import "net/http"
+
 
 // IsSSLOffloadingSupported indicates if hardware SSL/TLS offloading is supported.
 const IsSSLOffloadingSupported = true
