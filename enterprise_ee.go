@@ -5,14 +5,31 @@ package main
 import (
 	"net/http"
 
+	pkgdashboards "servconsole/pkg/dashboards"
 	"servconsole/pkg/incidents"
+	"servconsole/pkg/provision"
+	"servconsole/pkg/tabs"
+)
+
+var (
+	handleCostEstimation = pkgdashboards.HandleCostEstimation
+	handleSLO            = pkgdashboards.HandleSLO
+	handleRunbooks       = tabs.HandleRunbooks
+	handleExecuteRunbook = tabs.HandleExecuteRunbook
+	handleDashboards     = pkgdashboards.HandleDashboards
+	handleProvisionStore = provision.HandleProvisionStore
+	handleProvisionQueue = provision.HandleProvisionQueue
+	handleDiagnosticExec = tabs.HandleDiagnosticExec
+	handleEnvironments   = tabs.HandleEnvironments
+	handleSelectEnvironment = tabs.HandleSelectEnvironment
+	handleRollback       = tabs.HandleRollback
+	handleTenantSwitch   = tabs.HandleTenantSwitch
 )
 
 // registerEnterpriseHandlers registers all enterprise-only endpoints in the EE build.
 func registerEnterpriseHandlers(mux *http.ServeMux) {
 	var sloTracker = incidents.NewSLOTracker()
 	mux.HandleFunc("/api/cost-estimation", authorizeConsole(handleCostEstimation))
-	mux.HandleFunc("/api/anomalies/explain", authorizeConsole(handleExplainAnomaly))
 	mux.HandleFunc("/api/slo", authorizeConsole(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("decomposed") == "true" {
 			sloTracker.HandleSLO(w, r)
