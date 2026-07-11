@@ -77,3 +77,7 @@ Once your application exports traces, you can inspect them via the HTTP API:
 - Reassembled trace summaries: `curl http://localhost:8090/api/traces`
 - Full trace waterfall details: `curl http://localhost:8090/api/traces/<trace-id>`
 
+### Jaeger Alternative Comparison
+
+Unlike running full Jaeger infrastructure (which requires Elasticsearch/Cassandra backends and multiple collector/query binaries), ServTrace compiles down to a single binary with zero external dependencies, making it the perfect lightweight Jaeger replacement for local development, testing pipelines, and resource-constrained environments.
+
