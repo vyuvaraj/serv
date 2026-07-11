@@ -415,7 +415,8 @@ func BenchmarkTraceStoreAddSpans(b *testing.B) {
 	now := int64(1700000000000000000)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		traceID := fmt.Sprintf("trace-%d", i%100)
 		spans := []store.Span{
 			{
@@ -428,6 +429,7 @@ func BenchmarkTraceStoreAddSpans(b *testing.B) {
 			},
 		}
 		s.AddSpans(spans)
+		i++
 	}
 }
 
