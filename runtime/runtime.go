@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"flag"
 	"runtime"
 	"runtime/pprof"
 	"strconv"
@@ -556,8 +557,12 @@ func StartServer() interface{} {
 		EndTrace(trace, statusCode)
 	})
 
+	host := ""
+	if flag.Lookup("test.v") != nil || os.Getenv("SERV_ENV") == "test" || os.Getenv("TESTING") == "true" {
+		host = "127.0.0.1"
+	}
 	srv := &http.Server{
-		Addr:    "127.0.0.1:" + serverPort,
+		Addr:    host + ":" + serverPort,
 		Handler: mux,
 	}
 

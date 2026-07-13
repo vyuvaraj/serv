@@ -2,8 +2,6 @@
 
 package runtime
 
-var SrvSourceMap map[string]int
-
 import (
 	"fmt"
 	"os"
@@ -11,6 +9,8 @@ import (
 	"sync"
 	"time"
 )
+
+var SrvSourceMap map[string]int
 
 // Request represents an HTTP request (stub for WASM target).
 type Request struct {

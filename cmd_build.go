@@ -171,6 +171,7 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 		}
 
 		// Generate source map mappings
+		seen := make(map[string]bool)
 		var mappings []string
 		lines := strings.Split(fullCode, "\n")
 		for goLineZeroIndex, lineContent := range lines {
@@ -180,8 +181,16 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 				rest := strings.TrimPrefix(trimmed, "// .srv line ")
 				srvLine, err := strconv.Atoi(strings.TrimSpace(rest))
 				if err == nil {
-					mappings = append(mappings, fmt.Sprintf("%q: %d", fmt.Sprintf("%s:%d", outName, goLine), srvLine))
-					mappings = append(mappings, fmt.Sprintf("%q: %d", fmt.Sprintf("%s:%d", outName, goLine+1), srvLine))
+					key1 := fmt.Sprintf("%s:%d", outName, goLine)
+					if !seen[key1] {
+						seen[key1] = true
+						mappings = append(mappings, fmt.Sprintf("%q: %d", key1, srvLine))
+					}
+					key2 := fmt.Sprintf("%s:%d", outName, goLine+1)
+					if !seen[key2] {
+						seen[key2] = true
+						mappings = append(mappings, fmt.Sprintf("%q: %d", key2, srvLine))
+					}
 				}
 			}
 		}
