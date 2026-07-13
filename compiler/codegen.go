@@ -42,6 +42,7 @@ type Codegen struct {
 	actors              map[string]*ActorDecl
 	currentWorkflow     *WorkflowDecl
 	dbTables            map[string]DBTable
+	Filename            string
 }
 
 func NewCodegen(program *Program) *Codegen {
@@ -161,6 +162,11 @@ func (c *Codegen) GenerateStatements(statements []Statement) (string, error) {
 	for _, stmt := range statements {
 		if tok := stmtToken(stmt); tok.Line > 0 {
 			body.WriteString(fmt.Sprintf("// .srv line %d\n", tok.Line))
+			filename := "main.srv"
+			if c.Filename != "" {
+				filename = filepath.Base(c.Filename)
+			}
+			body.WriteString(fmt.Sprintf("//line %s:%d\n", filename, tok.Line))
 		}
 		gen, err := c.genStatement(stmt)
 		if err != nil {

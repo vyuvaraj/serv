@@ -11,13 +11,19 @@ func analyzeTypeMismatches(fn *FnDecl, program *Program) []Diagnostic {
 
 	// Build a map of function signatures from the program
 	funcSigs := make(map[string]*FnDecl)
+	structSigs := make(map[string]*StructDecl)
 	for _, stmt := range program.Statements {
 		switch s := stmt.(type) {
 		case *FnDecl:
 			funcSigs[s.Name] = s
+		case *StructDecl:
+			structSigs[s.Name] = s
 		case *ExportStmt:
 			if inner, ok := s.Inner.(*FnDecl); ok {
 				funcSigs[inner.Name] = inner
+			}
+			if inner, ok := s.Inner.(*StructDecl); ok {
+				structSigs[inner.Name] = inner
 			}
 		}
 	}
@@ -25,6 +31,8 @@ func analyzeTypeMismatches(fn *FnDecl, program *Program) []Diagnostic {
 	// Walk the function body looking for call expressions and null safety violations
 	for _, stmt := range fn.Body.Statements {
 		diags = append(diags, checkCallTypes(stmt, funcSigs, fn)...)
+		diags = append(diags, checkReturnTypes(stmt, fn)...)
+		diags = append(diags, checkStructLiteralTypes(stmt, structSigs)...)
 		diags = append(diags, checkNullSafety(stmt)...)
 	}
 
@@ -239,6 +247,127 @@ func checkNullSafety(stmt Statement) []Diagnostic {
 		}
 	}
 
+	return diags
+}
+
+func checkReturnTypes(stmt Statement, enclosingFn *FnDecl) []Diagnostic {
+	var diags []Diagnostic
+	if enclosingFn == nil || enclosingFn.ReturnType == "" || enclosingFn.ReturnType == "any" {
+		return diags
+	}
+
+	switch s := stmt.(type) {
+	case *ReturnStmt:
+		if s.Value == nil {
+			diags = append(diags, Diagnostic{
+				Line:     s.Token.Line,
+				Col:      s.Token.Col,
+				Severity: "error",
+				Message:  fmt.Sprintf("function '%s' expects return type '%s', got empty return", enclosingFn.Name, enclosingFn.ReturnType),
+			})
+			return diags
+		}
+		actualType := inferLiteralType(s.Value)
+		if actualType != "" && !typesCompatible(actualType, enclosingFn.ReturnType) {
+			diags = append(diags, Diagnostic{
+				Line:     s.Token.Line,
+				Col:      s.Token.Col,
+				Severity: "error",
+				Message:  fmt.Sprintf("function '%s' expects return type '%s', got '%s'", enclosingFn.Name, enclosingFn.ReturnType, actualType),
+			})
+		}
+	case *IfStmt:
+		if s.Body != nil {
+			for _, inner := range s.Body.Statements {
+				diags = append(diags, checkReturnTypes(inner, enclosingFn)...)
+			}
+		}
+		if s.ElseBody != nil {
+			for _, inner := range s.ElseBody.Statements {
+				diags = append(diags, checkReturnTypes(inner, enclosingFn)...)
+			}
+		}
+	case *ForStmt:
+		if s.Body != nil {
+			for _, inner := range s.Body.Statements {
+				diags = append(diags, checkReturnTypes(inner, enclosingFn)...)
+			}
+		}
+	}
+	return diags
+}
+
+func checkStructLiteralTypes(stmt Statement, structSigs map[string]*StructDecl) []Diagnostic {
+	var diags []Diagnostic
+
+	switch s := stmt.(type) {
+	case *LetStmt:
+		diags = append(diags, checkExprStructLiteral(s.Value, structSigs)...)
+	case *ExprStmt:
+		diags = append(diags, checkExprStructLiteral(s.Value, structSigs)...)
+	case *ReturnStmt:
+		diags = append(diags, checkExprStructLiteral(s.Value, structSigs)...)
+	case *IfStmt:
+		if s.Body != nil {
+			for _, inner := range s.Body.Statements {
+				diags = append(diags, checkStructLiteralTypes(inner, structSigs)...)
+			}
+		}
+		if s.ElseBody != nil {
+			for _, inner := range s.ElseBody.Statements {
+				diags = append(diags, checkStructLiteralTypes(inner, structSigs)...)
+			}
+		}
+	case *ForStmt:
+		if s.Body != nil {
+			for _, inner := range s.Body.Statements {
+				diags = append(diags, checkStructLiteralTypes(inner, structSigs)...)
+			}
+		}
+	}
+	return diags
+}
+
+func checkExprStructLiteral(expr Expression, structSigs map[string]*StructDecl) []Diagnostic {
+	var diags []Diagnostic
+	if expr == nil {
+		return diags
+	}
+
+	switch e := expr.(type) {
+	case *StructLiteral:
+		if sDecl, ok := structSigs[e.TypeName]; ok {
+			fields := make(map[string]string)
+			for _, f := range sDecl.Fields {
+				fields[f.Name] = f.Type
+			}
+			for k, val := range e.Fields {
+				expectedType, ok := fields[k]
+				if !ok {
+					diags = append(diags, Diagnostic{
+						Line:     e.Token.Line,
+						Col:      e.Token.Col,
+						Severity: "error",
+						Message:  fmt.Sprintf("struct '%s' has no field '%s'", e.TypeName, k),
+					})
+					continue
+				}
+				actualType := inferLiteralType(val)
+				if actualType != "" && !typesCompatible(actualType, expectedType) {
+					diags = append(diags, Diagnostic{
+						Line:     e.Token.Line,
+						Col:      e.Token.Col,
+						Severity: "error",
+						Message:  fmt.Sprintf("field '%s.%s' expects type '%s', got '%s'", e.TypeName, k, expectedType, actualType),
+					})
+				}
+			}
+		}
+	case *CallExpr:
+		for _, arg := range e.Arguments {
+			diags = append(diags, checkExprStructLiteral(arg, structSigs)...)
+		}
+	}
 	return diags
 }
 

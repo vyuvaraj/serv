@@ -122,6 +122,7 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 			continue
 		}
 
+		codegen.Filename = filePath
 		fileGoCode, err := codegen.GenerateStatements(fileProg.Statements)
 		if err != nil {
 			return "", err

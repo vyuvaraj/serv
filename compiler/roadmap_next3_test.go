@@ -102,3 +102,73 @@ func TestParserErrorRecovery(t *testing.T) {
 		t.Errorf("expected syntax errors at both line 2 and line 6. Got: %v", errors)
 	}
 }
+
+func TestCodegenLinePragmas(t *testing.T) {
+	input := `
+	let x = 42
+	return x
+	`
+	l := NewLexer(input)
+	p := NewParser(l)
+	prog := p.ParseProgram()
+
+	cg := NewCodegen(prog)
+	cg.Filename = "test_src.srv"
+	code, err := cg.GenerateStatements(prog.Statements)
+	if err != nil {
+		t.Fatalf("codegen error: %v", err)
+	}
+
+	if !strings.Contains(code, "//line test_src.srv:2") {
+		t.Errorf("expected Go line pragma annotation for test_src.srv:2, got generated code:\n%s", code)
+	}
+}
+
+func TestTypeCheckerCompleteness(t *testing.T) {
+	input := `
+	struct User {
+		name: string
+		age: int
+	}
+
+	fn getAge(u: User) -> string {
+		return 42
+	}
+
+	fn process() {
+		let u = User { name: 123, age: "hello" }
+	}
+	`
+	l := NewLexer(input)
+	p := NewParser(l)
+	prog := p.ParseProgram()
+
+	diags := Analyze(prog)
+	foundReturnErr := false
+	foundStructErrName := false
+	foundStructErrAge := false
+
+	for _, d := range diags {
+		if d.Severity == "error" {
+			if strings.Contains(d.Message, "expects return type 'string', got 'int'") {
+				foundReturnErr = true
+			}
+			if strings.Contains(d.Message, "field 'User.name' expects type 'string', got 'int'") {
+				foundStructErrName = true
+			}
+			if strings.Contains(d.Message, "field 'User.age' expects type 'int', got 'string'") {
+				foundStructErrAge = true
+			}
+		}
+	}
+
+	if !foundReturnErr {
+		t.Error("expected return type mismatch error")
+	}
+	if !foundStructErrName {
+		t.Error("expected struct field type mismatch error for 'name'")
+	}
+	if !foundStructErrAge {
+		t.Error("expected struct field type mismatch error for 'age'")
+	}
+}
