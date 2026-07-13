@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"serv/compiler"
 	"serv/runtime"
 )
 
-func runAIScaffold(prompt string) {
+func runAIScaffold(prompt string, autoFix bool) {
 	fmt.Printf("Generating project scaffolding for prompt: %q...\n", prompt)
 
 	// Configure local LLM default fallback or environment key if present
@@ -33,36 +34,71 @@ Serv DSL Syntax Quick Reference:
 - cron "0 0 * * *" { log.info("Daily job"); }
 `
 
-	payload := map[string]interface{}{
-		"prompt": fmt.Sprintf("System Instructions:\n%s\n\nUser Request: %s", systemPrompt, prompt),
-		"max_tokens": 2048,
-		"temperature": 0.2,
+	currentPrompt := prompt
+	maxAttempts := 1
+	if autoFix {
+		maxAttempts = 4
 	}
 
-	var result interface{}
-	if mockResp := os.Getenv("SERV_TEST_AI_RESPONSE"); mockResp != "" {
-		result = mockResp
-	} else {
-		result = runtime.AIComplete(payload)
-	}
-	
-	if result == nil {
-		fmt.Println("AI scaffolding generator failed: AI provider did not return a response.")
-		os.Exit(1)
-	}
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		payload := map[string]interface{}{
+			"prompt":      fmt.Sprintf("System Instructions:\n%s\n\nUser Request: %s", systemPrompt, currentPrompt),
+			"max_tokens":  2048,
+			"temperature": 0.2,
+		}
 
-	code := fmt.Sprint(result)
-	// Clean up markdown block fences if returned by LLM
-	code = strings.TrimPrefix(code, "```serv")
-	code = strings.TrimPrefix(code, "```")
-	code = strings.TrimSuffix(code, "```")
-	code = strings.TrimSpace(code)
+		var result interface{}
+		if mockResp := os.Getenv("SERV_TEST_AI_RESPONSE"); mockResp != "" {
+			result = mockResp
+		} else {
+			result = runtime.AIComplete(payload)
+		}
 
-	outputFile := "main.srv"
-	if err := os.WriteFile(outputFile, []byte(code), 0644); err != nil {
-		fmt.Printf("Failed to write scaffolded code to %s: %v\n", outputFile, err)
-		os.Exit(1)
+		if result == nil {
+			fmt.Println("AI scaffolding generator failed: AI provider did not return a response.")
+			os.Exit(1)
+		}
+
+		code := fmt.Sprint(result)
+		// Clean up markdown block fences if returned by LLM
+		code = strings.TrimPrefix(code, "```serv")
+		code = strings.TrimPrefix(code, "```")
+		code = strings.TrimSuffix(code, "```")
+		code = strings.TrimSpace(code)
+
+		// Validate the generated code
+		lexer := compiler.NewLexer(code)
+		parser := compiler.NewParser(lexer)
+		program := parser.ParseProgram()
+
+		var errors []string
+		for _, errMsg := range parser.Errors() {
+			errors = append(errors, errMsg)
+		}
+
+		diags := compiler.Analyze(program)
+		for _, d := range diags {
+			if d.Severity == "error" {
+				errors = append(errors, fmt.Sprintf("Line %d Col %d: %s", d.Line, d.Col, d.Message))
+			}
+		}
+
+		if len(errors) == 0 {
+			outputFile := "main.srv"
+			if err := os.WriteFile(outputFile, []byte(code), 0644); err != nil {
+				fmt.Printf("Failed to write scaffolded code to %s: %v\n", outputFile, err)
+				os.Exit(1)
+			}
+			fmt.Printf("Successfully scaffolded service code into %s!\n", outputFile)
+			return
+		}
+
+		if attempt == maxAttempts {
+			fmt.Printf("AI scaffolding generator failed after %d attempts with errors:\n%s\n", attempt, strings.Join(errors, "\n"))
+			os.Exit(1)
+		}
+
+		fmt.Printf("Attempt %d generated code has compiler/analysis errors. Retrying with feedback...\n", attempt)
+		currentPrompt = fmt.Sprintf("%s\n\nYour previous code had compilation errors:\n%s\n\nPlease fix the errors and provide the corrected Serv code.", prompt, strings.Join(errors, "\n"))
 	}
-
-	fmt.Printf("Successfully scaffolded service code into %s!\n", outputFile)
 }

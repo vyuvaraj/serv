@@ -230,16 +230,17 @@ func main() {
 
 	case "create":
 		createCmd := flag.NewFlagSet("create", flag.ExitOnError)
+		fixFlag := createCmd.Bool("fix", false, "Repairs failures automatically using serv test results")
 		if err := createCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
 		}
 		args := createCmd.Args()
 		if len(args) < 1 {
-			fmt.Println("Usage: serv create \"<prompt describing your service>\"")
+			fmt.Println("Usage: serv create [--fix] \"<prompt describing your service>\"")
 			os.Exit(1)
 		}
-		runAIScaffold(args[0])
+		runAIScaffold(args[0], *fixFlag)
 
 	case "debug":
 		targetFile := "."

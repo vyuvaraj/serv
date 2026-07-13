@@ -140,6 +140,11 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 			}
 		}
 		return diags
+	case *WorkflowDecl:
+		var diags []Diagnostic
+		diags = append(diags, analyzeBlock(s.Body, nil)...)
+		diags = append(diags, analyzeWorkflowDAG(s)...)
+		return diags
 	}
 	return nil
 }
@@ -416,4 +421,112 @@ func resolveExpressionType(expr Expression, program *Program, localVars map[stri
 		}
 	}
 	return "interface{}"
+}
+
+func analyzeWorkflowDAG(wf *WorkflowDecl) []Diagnostic {
+	var diags []Diagnostic
+
+	// Map of varName -> list of dependencies (variables it depends on)
+	adj := make(map[string][]string)
+
+	var walk func(stmt Statement)
+	walk = func(stmt Statement) {
+		if stmt == nil {
+			return
+		}
+		switch s := stmt.(type) {
+		case *BlockStmt:
+			for _, inner := range s.Statements {
+				walk(inner)
+			}
+		case *LetStmt:
+			deps := findReferencedIdents(s.Value)
+			adj[s.Name] = deps
+		case *IfStmt:
+			if s.Body != nil {
+				walk(s.Body)
+			}
+			if s.ElseBody != nil {
+				walk(s.ElseBody)
+			}
+		case *ForStmt:
+			if s.Body != nil {
+				walk(s.Body)
+			}
+		}
+	}
+	walk(wf.Body)
+
+	// Detect cycles using DFS (three-color graph search: 0=unvisited, 1=visiting, 2=visited)
+	visited := make(map[string]int)
+
+	var detectCycle func(node string, path []string) []string
+	detectCycle = func(node string, path []string) []string {
+		visited[node] = 1 // visiting
+		path = append(path, node)
+
+		for _, dep := range adj[node] {
+			if visited[dep] == 1 {
+				for i, p := range path {
+					if p == dep {
+						return append(path[i:], dep)
+					}
+				}
+				return []string{dep, node, dep}
+			}
+			if visited[dep] == 0 {
+				if cycle := detectCycle(dep, path); len(cycle) > 0 {
+					return cycle
+				}
+			}
+		}
+
+		visited[node] = 2 // visited
+		return nil
+	}
+
+	for node := range adj {
+		if visited[node] == 0 {
+			if cycle := detectCycle(node, nil); len(cycle) > 0 {
+				diags = append(diags, Diagnostic{
+					Line:     wf.Token.Line,
+					Col:      wf.Token.Col,
+					Severity: "error",
+					Message:  fmt.Sprintf("Workflow '%s' contains cyclic step dependency: %s", wf.Name, strings.Join(cycle, " -> ")),
+				})
+				break
+			}
+		}
+	}
+
+	return diags
+}
+
+func findReferencedIdents(expr Expression) []string {
+	var idents []string
+	if expr == nil {
+		return idents
+	}
+	switch e := expr.(type) {
+	case *Identifier:
+		idents = append(idents, e.Value)
+	case *AwaitExpr:
+		idents = append(idents, findReferencedIdents(e.Value)...)
+	case *CallExpr:
+		idents = append(idents, findReferencedIdents(e.Function)...)
+		for _, arg := range e.Arguments {
+			idents = append(idents, findReferencedIdents(arg)...)
+		}
+	case *InfixExpr:
+		idents = append(idents, findReferencedIdents(e.Left)...)
+		idents = append(idents, findReferencedIdents(e.Right)...)
+	case *PrefixExpr:
+		idents = append(idents, findReferencedIdents(e.Right)...)
+	case *IndexExpr:
+		idents = append(idents, findReferencedIdents(e.Left)...)
+		idents = append(idents, findReferencedIdents(e.Index)...)
+	case *MemberExpr:
+		idents = append(idents, findReferencedIdents(e.Object)...)
+	}
+	return idents
 }

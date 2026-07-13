@@ -2,6 +2,8 @@
 
 package runtime
 
+var SrvSourceMap map[string]int
+
 import (
 	"fmt"
 	"os"

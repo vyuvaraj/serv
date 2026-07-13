@@ -165,8 +165,49 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 		}
 
 		fileHeader := codegen.GenerateFileHeader(fileImports)
-		if err := os.WriteFile(outPath, []byte(fileHeader+fileGoCode), 0644); err != nil {
+		fullCode := fileHeader + fileGoCode
+		if err := os.WriteFile(outPath, []byte(fullCode), 0644); err != nil {
 			return "", err
+		}
+
+		// Generate source map mappings
+		var mappings []string
+		lines := strings.Split(fullCode, "\n")
+		for goLineZeroIndex, lineContent := range lines {
+			goLine := goLineZeroIndex + 1
+			trimmed := strings.TrimSpace(lineContent)
+			if strings.HasPrefix(trimmed, "// .srv line ") {
+				rest := strings.TrimPrefix(trimmed, "// .srv line ")
+				srvLine, err := strconv.Atoi(strings.TrimSpace(rest))
+				if err == nil {
+					mappings = append(mappings, fmt.Sprintf("%q: %d", fmt.Sprintf("%s:%d", outName, goLine), srvLine))
+					mappings = append(mappings, fmt.Sprintf("%q: %d", fmt.Sprintf("%s:%d", outName, goLine+1), srvLine))
+				}
+			}
+		}
+
+		if len(mappings) > 0 {
+			smCode := fmt.Sprintf(`package main
+
+import "serv/runtime"
+
+func init() {
+	if runtime.SrvSourceMap == nil {
+		runtime.SrvSourceMap = make(map[string]int)
+	}
+	maps := map[string]int{
+		%s,
+	}
+	for k, v := range maps {
+		runtime.SrvSourceMap[k] = v
+	}
+}
+`, strings.Join(mappings, ",\n\t\t"))
+
+			smPath := filepath.Join(buildDir, strings.TrimSuffix(outName, ".go")+"_sourcemap.go")
+			if err := os.WriteFile(smPath, []byte(smCode), 0644); err != nil {
+				return "", err
+			}
 		}
 	}
 
