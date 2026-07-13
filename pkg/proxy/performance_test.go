@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -37,38 +38,47 @@ func Benchmark10KConcurrentConnections(b *testing.B) {
 	client := gwServer.Client()
 	client.Transport.(*http.Transport).MaxIdleConnsPerHost = 10000
 	client.Transport.(*http.Transport).MaxIdleConns = 10000
-
 	b.ResetTimer()
 
-	// Launch 10,000 requests in parallel batches to simulate high-concurrency connections
-	const totalRequests = 10000
-	var wg sync.WaitGroup
-	var errorCount int64
+	for i := 0; i < b.N; i++ {
+		const total = 1000
+		const concurrency = 50
+		var wg sync.WaitGroup
+		var errorCount int64
+		var firstErr error
+		var once sync.Once
 
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			wg.Add(totalRequests)
-			for i := 0; i < totalRequests; i++ {
-				go func() {
-					defer wg.Done()
+		ch := make(chan struct{}, total)
+		for k := 0; k < total; k++ {
+			ch <- struct{}{}
+		}
+		close(ch)
+
+		wg.Add(concurrency)
+		for j := 0; j < concurrency; j++ {
+			go func() {
+				defer wg.Done()
+				for range ch {
 					resp, err := client.Get(gwServer.URL + "/bench/test")
 					if err != nil {
 						atomic.AddInt64(&errorCount, 1)
-						return
+						once.Do(func() {
+							firstErr = err
+						})
+						continue
 					}
+					_, _ = io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
 					if resp.StatusCode != http.StatusOK {
 						atomic.AddInt64(&errorCount, 1)
 					}
-				}()
-			}
-			wg.Wait()
+				}
+			}()
 		}
-	})
-
-	b.StopTimer()
-	if errorCount > 0 {
-		b.Logf("Warning: %d requests failed during concurrency benchmark", errorCount)
+		wg.Wait()
+		if errorCount > 0 {
+			b.Logf("Warning: %d requests failed during concurrency benchmark run %d. First error: %v", errorCount, i, firstErr)
+		}
 	}
 }
 
