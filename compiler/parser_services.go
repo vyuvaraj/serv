@@ -226,10 +226,11 @@ func (p *Parser) parseRouteStatement() Statement {
 	}
 
 	for p.peekToken.Type == TOKEN_STREAM || p.peekToken.Type == TOKEN_RET_ARROW {
-		if p.peekToken.Type == TOKEN_STREAM {
+		switch p.peekToken.Type {
+		case TOKEN_STREAM:
 			p.nextToken()
 			stmt.Stream = true
-		} else if p.peekToken.Type == TOKEN_RET_ARROW {
+		case TOKEN_RET_ARROW:
 			p.nextToken() // consume '->'
 			p.nextToken() // type identifier
 			stmt.ReturnType = p.parseTypeAnnotation()

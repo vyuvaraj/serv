@@ -185,7 +185,7 @@ func validateStructLiteralAgainstSchema(structLit *StructLiteral, schema map[str
 		}
 
 		// Try to deduce the type of valExpr
-		actualType := getExpressionType(valExpr, structs)
+		actualType := getExpressionType(valExpr)
 		if actualType != "" && !typesAreCompatible(actualType, expectedType) {
 			diags = append(diags, Diagnostic{
 				Line:     structLit.Token.Line,
@@ -200,7 +200,7 @@ func validateStructLiteralAgainstSchema(structLit *StructLiteral, schema map[str
 }
 
 // Simple type deduction for expressions during linting
-func getExpressionType(expr Expression, structs map[string]*StructDecl) string {
+func getExpressionType(expr Expression) string {
 	switch e := expr.(type) {
 	case *StringLiteral, *FStringLiteral:
 		return "string"

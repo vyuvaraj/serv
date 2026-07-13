@@ -9,9 +9,10 @@ func (p *Parser) parseFnDeclaration() Statement {
 	isCached := false
 
 	for p.curToken.Type == TOKEN_RESILIENT || p.curToken.Type == TOKEN_CACHED {
-		if p.curToken.Type == TOKEN_RESILIENT {
+		switch p.curToken.Type {
+		case TOKEN_RESILIENT:
 			isResilient = true
-		} else if p.curToken.Type == TOKEN_CACHED {
+		case TOKEN_CACHED:
 			isCached = true
 		}
 		p.nextToken()
