@@ -194,7 +194,7 @@ func typesCompatible(actual, expected string) bool {
 		members := strings.Split(expected, "|")
 		for _, m := range members {
 			m = strings.TrimSpace(m)
-			if actual == m {
+			if typesCompatible(actual, m) {
 				return true
 			}
 		}
@@ -202,6 +202,10 @@ func typesCompatible(actual, expected string) bool {
 	}
 	// float accepts int
 	if expected == "float" && actual == "int" {
+		return true
+	}
+	// string is compatible with error type
+	if expected == "error" && actual == "string" {
 		return true
 	}
 	// Allow any -> any (no constraint)
