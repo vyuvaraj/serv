@@ -15,8 +15,10 @@ func BenchmarkDeduplicatorAdd(b *testing.B) {
 	}
 	
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		id := fmt.Sprintf("msg-id-%d", 1000 + (i % 1000))
+	var idx int
+	for b.Loop() {
+		id := fmt.Sprintf("msg-id-%d", 1000 + (idx % 1000))
 		_ = d.Add(id)
+		idx++
 	}
 }

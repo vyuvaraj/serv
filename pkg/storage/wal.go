@@ -116,8 +116,18 @@ func (w *WAL) Recover() ([]LogEntry, error) {
 
 	header := make([]byte, 16)
 	for {
-		_, err := io.ReadFull(w.file, header)
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		lastValidOffset, err := w.file.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = io.ReadFull(w.file, header)
+		if err == io.EOF {
+			break
+		}
+		if err == io.ErrUnexpectedEOF {
+			// Truncate to clean last valid state
+			w.truncateAndReopen(lastValidOffset)
 			break
 		}
 		if err != nil {
@@ -130,17 +140,20 @@ func (w *WAL) Recover() ([]LogEntry, error) {
 
 		topicBytes := make([]byte, topicLen)
 		if _, err := io.ReadFull(w.file, topicBytes); err != nil {
-			return nil, err
+			w.truncateAndReopen(lastValidOffset)
+			break
 		}
 
 		payloadBytes := make([]byte, payloadLen)
 		if _, err := io.ReadFull(w.file, payloadBytes); err != nil {
-			return nil, err
+			w.truncateAndReopen(lastValidOffset)
+			break
 		}
 
 		checksum := make([]byte, 32)
 		if _, err := io.ReadFull(w.file, checksum); err != nil {
-			return nil, err
+			w.truncateAndReopen(lastValidOffset)
+			break
 		}
 
 		// Verify checksum
@@ -150,10 +163,17 @@ func (w *WAL) Recover() ([]LogEntry, error) {
 		hasher.Write(payloadBytes)
 		computed := hasher.Sum(nil)
 
+		checksumMismatch := false
 		for i := 0; i < 32; i++ {
 			if checksum[i] != computed[i] {
-				return nil, fmt.Errorf("wal: checksum verification failed - data corruption detected")
+				checksumMismatch = true
+				break
 			}
+		}
+
+		if checksumMismatch {
+			w.truncateAndReopen(lastValidOffset)
+			break
 		}
 
 		entries = append(entries, LogEntry{
@@ -164,6 +184,17 @@ func (w *WAL) Recover() ([]LogEntry, error) {
 	}
 
 	return entries, nil
+}
+
+func (w *WAL) truncateAndReopen(offset int64) {
+	_ = w.file.Close()
+	_ = os.Truncate(w.path, offset)
+	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	if err == nil {
+		w.file = file
+		w.bytesWrit = offset
+		_, _ = w.file.Seek(offset, io.SeekStart)
+	}
 }
 
 func (w *WAL) Close() error {
