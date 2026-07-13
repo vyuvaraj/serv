@@ -35,7 +35,7 @@ fn processUsers(users: []User) {
 
 func BenchmarkLexer(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		l := NewLexer(benchSrvSource)
 		for {
 			tok := l.NextToken()
@@ -48,7 +48,7 @@ func BenchmarkLexer(b *testing.B) {
 
 func BenchmarkParser(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		l := NewLexer(benchSrvSource)
 		p := NewParser(l)
 		_ = p.ParseProgram()
@@ -63,7 +63,7 @@ func BenchmarkCodegen(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		cg := NewCodegen(prog)
 		_, _ = cg.GenerateStatements(prog.Statements)
 	}
@@ -76,14 +76,14 @@ func BenchmarkAnalyze(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = Analyze(prog)
 	}
 }
 
 func BenchmarkEndToEnd(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		l := NewLexer(benchSrvSource)
 		p := NewParser(l)
 		prog := p.ParseProgram()
