@@ -132,6 +132,15 @@ func HandleDbQuery(w http.ResponseWriter, r *http.Request) {
 			results = append(results, cleanedRow)
 		}
 
+		if err := rows.Err(); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "Row processing failed: " + err.Error(),
+			})
+			return
+		}
+
 		duration := time.Since(startTime).Milliseconds()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
@@ -233,7 +242,7 @@ func HandleTenantSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	header := auth.Base64UrlEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	payload := auth.Base64UrlEncode([]byte(fmt.Sprintf(`{"username":%q,"exp":%d,"role":%q,"tenant_id":%q}`, username, time.Now().Add(24*time.Hour).Unix(), role, req.TenantID)))
+	payload := auth.Base64UrlEncode(fmt.Appendf(nil, `{"username":%q,"exp":%d,"role":%q,"tenant_id":%q}`, username, time.Now().Add(24*time.Hour).Unix(), role, req.TenantID))
 
 	secret := auth.JwtSecBytes
 	mac := hmac.New(sha256.New, secret)

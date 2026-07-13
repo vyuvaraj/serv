@@ -159,7 +159,7 @@ func Base64UrlDecode(s string) ([]byte, error) {
 	}
 	s = strings.ReplaceAll(s, "-", "+")
 	s = strings.ReplaceAll(s, "_", "/")
-	return base64.URLEncoding.DecodeString(s)
+	return base64.StdEncoding.DecodeString(s)
 }
 
 func GenerateLocalJWT(username string) (string, error) {
@@ -171,7 +171,7 @@ func GenerateLocalJWT(username string) (string, error) {
 		role = "operator"
 	}
 	header := Base64UrlEncode([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	payload := Base64UrlEncode([]byte(fmt.Sprintf(`{"username":%q,"exp":%d,"role":%q}`, username, time.Now().Add(24*time.Hour).Unix(), role)))
+	payload := Base64UrlEncode(fmt.Appendf(nil, `{"username":%q,"exp":%d,"role":%q}`, username, time.Now().Add(24*time.Hour).Unix(), role))
 
 	mac := hmac.New(sha256.New, JwtSecBytes)
 	mac.Write([]byte(header + "." + payload))
