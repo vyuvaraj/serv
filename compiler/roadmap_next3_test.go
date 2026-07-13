@@ -69,3 +69,36 @@ func TestTraceSourceMapping(t *testing.T) {
 	// Temporarily override otelEnabled for testing getSrvCallerLine
 	// (we can verify getSrvCallerLine behavior directly through private call simulations if needed, or by invoking it via reflection/stubs)
 }
+
+func TestParserErrorRecovery(t *testing.T) {
+	input := `
+	let a = ;
+	fn process(x) {
+		return x
+	}
+	let b = ;
+	`
+	l := NewLexer(input)
+	p := NewParser(l)
+	_ = p.ParseProgram()
+
+	errors := p.Errors()
+	if len(errors) < 2 {
+		t.Fatalf("expected at least 2 parser errors, got %d. Errors: %v", len(errors), errors)
+	}
+
+	foundErrorA := false
+	foundErrorB := false
+	for _, err := range errors {
+		if strings.Contains(err, "Line 2") {
+			foundErrorA = true
+		}
+		if strings.Contains(err, "Line 6") {
+			foundErrorB = true
+		}
+	}
+
+	if !foundErrorA || !foundErrorB {
+		t.Errorf("expected syntax errors at both line 2 and line 6. Got: %v", errors)
+	}
+}

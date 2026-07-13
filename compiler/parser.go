@@ -168,14 +168,32 @@ func (p *Parser) ParseProgram() *Program {
 	program.Statements = []Statement{}
 
 	for p.curToken.Type != TOKEN_EOF {
+		prevErrorsLen := len(p.errors)
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
-		p.nextToken()
+		if len(p.errors) > prevErrorsLen {
+			p.synchronize()
+		} else {
+			p.nextToken()
+		}
 	}
 
 	return program
+}
+
+func (p *Parser) synchronize() {
+	for p.curToken.Type != TOKEN_EOF {
+		switch p.curToken.Type {
+		case TOKEN_IMPORT, TOKEN_EXTERN, TOKEN_BROKER, TOKEN_AI, TOKEN_SERVER, TOKEN_ROUTE,
+			TOKEN_TOOL, TOKEN_FN, TOKEN_LET, TOKEN_EVERY, TOKEN_CRON, TOKEN_SUBSCRIBE,
+			TOKEN_DATABASE, TOKEN_CACHE, TOKEN_STRUCT, TOKEN_INTERFACE, TOKEN_MIDDLEWARE,
+			TOKEN_WS, TOKEN_ACTOR, TOKEN_WORKFLOW, TOKEN_EVENT_STORE:
+			return
+		}
+		p.nextToken()
+	}
 }
 
 func (p *Parser) parseStatement() Statement {
