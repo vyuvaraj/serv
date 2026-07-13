@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"embed"
 	"encoding/base64"
@@ -16,9 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"servregistry/pkg/registry"
 	"servregistry/pkg/resolution"
@@ -184,16 +180,9 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 	metadata.Versions = make(map[string]registry.VersionDetails)
 
 	// Try to load existing metadata.json
-	metaResp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(registry.BucketName),
-		Key:    aws.String(metadataKey),
-	})
+	metaData, err := registry.GetObject(r.Context(), metadataKey)
 	if err == nil {
-		metaData, merr := io.ReadAll(metaResp.Body)
-		metaResp.Body.Close()
-		if merr == nil {
-			_ = json.Unmarshal(metaData, &metadata)
-		}
+		_ = json.Unmarshal(metaData, &metadata)
 	}
 
 	// Add/update version details
@@ -211,12 +200,7 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Upload updated metadata.json
-	_, err = registry.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(registry.BucketName),
-		Key:         aws.String(metadataKey),
-		Body:        bytes.NewReader(updatedMetaBytes),
-		ContentType: aws.String("application/json"),
-	})
+	err = registry.PutObject(r.Context(), metadataKey, updatedMetaBytes)
 	if err != nil {
 		log.Printf("Failed to upload metadata to S3: %v", err)
 		registry.WriteJSONError(w, r, "Failed to upload metadata", "ERR_METADATA_UPLOAD_FAILED", http.StatusInternalServerError)
@@ -226,12 +210,7 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 	// 4. Upload tarball payload to S3 key structure: {name}/{version}/{name}-{version}.tar.gz
 	safeFilename := strings.ReplaceAll(name, "/", "-")
 	objectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz", name, version, safeFilename, version)
-	_, err = registry.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(registry.BucketName),
-		Key:         aws.String(objectKey),
-		Body:        bytes.NewReader(data),
-		ContentType: aws.String("application/octet-stream"),
-	})
+	err = registry.PutObject(r.Context(), objectKey, data)
 	if err != nil {
 		log.Printf("Failed to upload package tarball to S3: %v", err)
 		registry.WriteJSONError(w, r, "Failed to upload package to storage: "+err.Error(), "ERR_PACKAGE_UPLOAD_FAILED", http.StatusInternalServerError)
@@ -240,12 +219,7 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Upload signature companion to S3
 	sigObjectKey := fmt.Sprintf("%s/%s/%s-%s.tar.gz.sig", name, version, safeFilename, version)
-	_, err = registry.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(registry.BucketName),
-		Key:         aws.String(sigObjectKey),
-		Body:        bytes.NewReader(sigBytes),
-		ContentType: aws.String("application/octet-stream"),
-	})
+	err = registry.PutObject(r.Context(), sigObjectKey, sigBytes)
 	if err != nil {
 		log.Printf("Failed to upload signature companion to S3: %v", err)
 		registry.WriteJSONError(w, r, "Failed to upload signature to storage: "+err.Error(), "ERR_SIGNATURE_UPLOAD_FAILED", http.StatusInternalServerError)
@@ -272,12 +246,7 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 
 	if len(provenanceData) > 0 {
 		provKey := fmt.Sprintf("%s/%s/provenance.json", name, version)
-		_, _ = registry.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
-			Bucket:      aws.String(registry.BucketName),
-			Key:         aws.String(provKey),
-			Body:        bytes.NewReader(provenanceData),
-			ContentType: aws.String("application/json"),
-		})
+		_ = registry.PutObject(r.Context(), provKey, provenanceData)
 		log.Printf("Recorded build provenance attestation for %s @ %s", name, version)
 	}
 
@@ -335,15 +304,10 @@ func HandleGetPackage(w http.ResponseWriter, r *http.Request) {
 		version = parts[2]
 		if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
 			metadataKey := fmt.Sprintf("%s/metadata.json", name)
-			metaResp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-				Bucket: aws.String(registry.BucketName),
-				Key:    aws.String(metadataKey),
-			})
+			metaData, err := registry.GetObject(r.Context(), metadataKey)
 			if err == nil {
-				defer metaResp.Body.Close()
 				var metadata registry.PackageMetadata
-				metaData, merr := io.ReadAll(metaResp.Body)
-				if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
+				if json.Unmarshal(metaData, &metadata) == nil {
 					version = resolution.ResolveBestVersion(version, metadata.Versions)
 				}
 			}
@@ -355,15 +319,10 @@ func HandleGetPackage(w http.ResponseWriter, r *http.Request) {
 		version = parts[1]
 		if strings.HasPrefix(version, "^") || strings.HasPrefix(version, "~") {
 			metadataKey := fmt.Sprintf("%s/metadata.json", name)
-			metaResp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-				Bucket: aws.String(registry.BucketName),
-				Key:    aws.String(metadataKey),
-			})
+			metaData, err := registry.GetObject(r.Context(), metadataKey)
 			if err == nil {
-				defer metaResp.Body.Close()
 				var metadata registry.PackageMetadata
-				metaData, merr := io.ReadAll(metaResp.Body)
-				if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
+				if json.Unmarshal(metaData, &metadata) == nil {
 					version = resolution.ResolveBestVersion(version, metadata.Versions)
 				}
 			}
@@ -372,17 +331,12 @@ func HandleGetPackage(w http.ResponseWriter, r *http.Request) {
 	} else if !strings.Contains(path, "/") && strings.HasSuffix(path, ".tar.gz") {
 		name = strings.TrimSuffix(path, ".tar.gz")
 		metadataKey := fmt.Sprintf("%s/metadata.json", name)
-		metaResp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-			Bucket: aws.String(registry.BucketName),
-			Key:    aws.String(metadataKey),
-		})
+		metaData, err := registry.GetObject(r.Context(), metadataKey)
 		if err != nil {
 			s3Key = path
 		} else {
-			defer metaResp.Body.Close()
 			var metadata registry.PackageMetadata
-			metaData, merr := io.ReadAll(metaResp.Body)
-			if merr == nil && json.Unmarshal(metaData, &metadata) == nil && len(metadata.Versions) > 0 {
+			if json.Unmarshal(metaData, &metadata) == nil && len(metadata.Versions) > 0 {
 				var latest string
 				var latestTime time.Time
 				for v, details := range metadata.Versions {
@@ -413,10 +367,7 @@ func HandleGetPackage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(registry.BucketName),
-		Key:    aws.String(s3Key),
-	})
+	data, err := registry.GetObject(r.Context(), s3Key)
 	if err != nil {
 		upstream := os.Getenv("SERV_UPSTREAM_REGISTRY")
 		if upstream != "" {
@@ -431,14 +382,9 @@ func HandleGetPackage(w http.ResponseWriter, r *http.Request) {
 				defer upResp.Body.Close()
 				data, readErr := io.ReadAll(upResp.Body)
 				if readErr == nil {
-					// Cache local S3
-					_, _ = registry.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
-						Bucket:      aws.String(registry.BucketName),
-						Key:         aws.String(s3Key),
-						Body:        bytes.NewReader(data),
-						ContentType: aws.String("application/octet-stream"),
-					})
-					log.Printf("Successfully cached package %s from upstream to local S3", s3Key)
+					// Cache locally
+					_ = registry.PutObject(r.Context(), s3Key, data)
+					log.Printf("Successfully cached package %s from upstream to local store", s3Key)
 
 					w.Header().Set("Content-Type", "application/octet-stream")
 					w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
@@ -451,21 +397,18 @@ func HandleGetPackage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		log.Printf("Failed to get object from S3: %v", err)
+		log.Printf("Failed to get object from storage: %v", err)
 		registry.WriteJSONError(w, r, "Package not found", "ERR_PACKAGE_NOT_FOUND", http.StatusNotFound)
 		return
 	}
-	defer resp.Body.Close()
 
 	if name != "" && version != "" {
 		registry.CheckDeprecationsAndAddHeader(w, r.Context(), name, version)
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", resp.ContentLength))
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		log.Printf("Error copying package body: %v", err)
-	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Write(data)
 }
 
 func HandleSearchPackages(w http.ResponseWriter, r *http.Request) {
@@ -532,18 +475,14 @@ func handleGetVersions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
-	resp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(registry.BucketName),
-		Key:    aws.String(metadataKey),
-	})
+	data, err := registry.GetObject(r.Context(), metadataKey)
 	if err != nil {
 		registry.WriteJSONError(w, r, "Package not found", "ERR_PACKAGE_NOT_FOUND", http.StatusNotFound)
 		return
 	}
-	defer resp.Body.Close()
 
 	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
+	w.Write(data)
 }
 
 func handleGetDeps(w http.ResponseWriter, r *http.Request) {
@@ -574,19 +513,9 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch metadata
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
-	resp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(registry.BucketName),
-		Key:    aws.String(metadataKey),
-	})
+	data, err := registry.GetObject(r.Context(), metadataKey)
 	if err != nil {
 		registry.WriteJSONError(w, r, "Package not found", "ERR_PACKAGE_NOT_FOUND", http.StatusNotFound)
-		return
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		registry.WriteJSONError(w, r, "Failed to read metadata", "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
 	}
 
@@ -645,17 +574,11 @@ func handleGetDeps(w http.ResponseWriter, r *http.Request) {
 		seen[depName] = true
 
 		depMetaKey := fmt.Sprintf("%s/metadata.json", depName)
-		depResp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-			Bucket: aws.String(registry.BucketName),
-			Key:    aws.String(depMetaKey),
-		})
+		depData, err := registry.GetObject(r.Context(), depMetaKey)
 		if err != nil {
 			resolved = append(resolved, DepNode{Name: depName, Version: "unknown", Dependencies: nil})
 			continue
 		}
-
-		depData, _ := io.ReadAll(depResp.Body)
-		depResp.Body.Close()
 
 		var depMeta registry.PackageMetadata
 		if err := json.Unmarshal(depData, &depMeta); err != nil {
@@ -734,17 +657,12 @@ func handleDeprecate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
-	resp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(registry.BucketName),
-		Key:    aws.String(metadataKey),
-	})
+	metaData, err := registry.GetObject(r.Context(), metadataKey)
 	if err != nil {
 		registry.WriteJSONError(w, r, "Package not found", "ERR_PACKAGE_NOT_FOUND", http.StatusNotFound)
 		return
 	}
-	defer resp.Body.Close()
 
-	metaData, _ := io.ReadAll(resp.Body)
 	var metadata registry.PackageMetadata
 	_ = json.Unmarshal(metaData, &metadata)
 
@@ -759,12 +677,7 @@ func handleDeprecate(w http.ResponseWriter, r *http.Request) {
 	metadata.Versions[version] = vd
 
 	updatedMetaBytes, _ := json.MarshalIndent(metadata, "", "  ")
-	_, err = registry.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(registry.BucketName),
-		Key:         aws.String(metadataKey),
-		Body:        bytes.NewReader(updatedMetaBytes),
-		ContentType: aws.String("application/json"),
-	})
+	err = registry.PutObject(r.Context(), metadataKey, updatedMetaBytes)
 	if err != nil {
 		registry.WriteJSONError(w, r, "Failed to save deprecation", "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
@@ -962,18 +875,14 @@ func HandleGetProvenance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	provKey := fmt.Sprintf("%s/%s/provenance.json", name, version)
-	resp, err := registry.S3Client.GetObject(r.Context(), &s3.GetObjectInput{
-		Bucket: aws.String(registry.BucketName),
-		Key:    aws.String(provKey),
-	})
+	data, err := registry.GetObject(r.Context(), provKey)
 	if err != nil {
 		registry.WriteJSONError(w, r, "Provenance attestation not found", "ERR_PROVENANCE_NOT_FOUND", http.StatusNotFound)
 		return
 	}
-	defer resp.Body.Close()
 
 	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
+	w.Write(data)
 }
 
 func HandleWebDashboard(w http.ResponseWriter, r *http.Request) {

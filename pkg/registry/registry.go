@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -43,6 +44,53 @@ type PackageInfo struct {
 	Name         string    `json:"name"`
 	Size         int64     `json:"size"`
 	LastModified time.Time `json:"lastModified"`
+}
+
+type PackageStore interface {
+	GetObject(ctx context.Context, key string) ([]byte, error)
+	PutObject(ctx context.Context, key string, data []byte) error
+	ListObjects(ctx context.Context) ([]string, error)
+}
+
+var ActiveStore PackageStore
+
+type S3Store struct {
+	Client *s3.Client
+}
+
+func (s *S3Store) GetObject(ctx context.Context, key string) ([]byte, error) {
+	resp, err := s.Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+func (s *S3Store) PutObject(ctx context.Context, key string, data []byte) error {
+	_, err := s.Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(data),
+	})
+	return err
+}
+
+func (s *S3Store) ListObjects(ctx context.Context) ([]string, error) {
+	resp, err := s.Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(BucketName),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, obj := range resp.Contents {
+		keys = append(keys, *obj.Key)
+	}
+	return keys, nil
 }
 
 var (
@@ -123,9 +171,7 @@ func EnsureBucketExists(ctx context.Context) {
 }
 
 func BuildPackageIndex(ctx context.Context) {
-	resp, err := S3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-		Bucket: aws.String(BucketName),
-	})
+	keys, err := ActiveStore.ListObjects(ctx)
 	if err != nil {
 		log.Printf("Failed to list objects for indexing: %v", err)
 		return
@@ -136,18 +182,9 @@ func BuildPackageIndex(ctx context.Context) {
 
 	PackageIndex = make(map[string]*PackageIndexItem)
 
-	for _, obj := range resp.Contents {
-		key := *obj.Key
+	for _, key := range keys {
 		if strings.HasSuffix(key, "/metadata.json") {
-			mResp, err := S3Client.GetObject(ctx, &s3.GetObjectInput{
-				Bucket: aws.String(BucketName),
-				Key:    aws.String(key),
-			})
-			if err != nil {
-				continue
-			}
-			data, err := io.ReadAll(mResp.Body)
-			mResp.Body.Close()
+			data, err := ActiveStore.GetObject(ctx, key)
 			if err != nil {
 				continue
 			}
@@ -207,18 +244,21 @@ func WriteJSONError(w http.ResponseWriter, r *http.Request, msg string, code str
 
 func CheckDeprecationsAndAddHeader(w http.ResponseWriter, ctx context.Context, name, version string) {
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
-	resp, err := S3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(BucketName),
-		Key:    aws.String(metadataKey),
-	})
+	metaData, err := ActiveStore.GetObject(ctx, metadataKey)
 	if err == nil {
-		defer resp.Body.Close()
 		var metadata PackageMetadata
-		metaData, merr := io.ReadAll(resp.Body)
-		if merr == nil && json.Unmarshal(metaData, &metadata) == nil {
+		if json.Unmarshal(metaData, &metadata) == nil {
 			if vd, ok := metadata.Versions[version]; ok && vd.Deprecated {
 				w.Header().Set("X-Deprecation-Warning", vd.DeprecationMsg)
 			}
 		}
 	}
+}
+
+func GetObject(ctx context.Context, key string) ([]byte, error) {
+	return ActiveStore.GetObject(ctx, key)
+}
+
+func PutObject(ctx context.Context, key string, data []byte) error {
+	return ActiveStore.PutObject(ctx, key, data)
 }

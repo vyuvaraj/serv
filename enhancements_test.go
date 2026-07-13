@@ -64,8 +64,10 @@ func TestProvenanceAndUpstreamMirror(t *testing.T) {
 	registry.S3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = true
 	})
+	registry.ActiveStore = &registry.S3Store{Client: registry.S3Client}
 	defer func() {
 		registry.S3Client = nil
+		registry.ActiveStore = nil
 		registry.AclStore = nil
 	}()
 

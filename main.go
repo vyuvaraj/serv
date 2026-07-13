@@ -104,16 +104,22 @@ func startMockS3Server() string {
 var webAssets embed.FS
 
 func main() {
-	addr := flag.String("addr", ":8088", "Registry server listen address")
+	var addr string
+	portStr := flag.String("port", "8088", "Registry server listen address")
 	s3Endpoint := flag.String("s3-endpoint", "http://localhost:9000", "ServStore/S3 endpoint URL")
 	s3AccessKey := flag.String("s3-access-key", "admin", "S3 access key")
 	s3SecretKey := flag.String("s3-secret-key", "admin123", "S3 secret key")
+	ociEndpoint := flag.String("oci-endpoint", "", "OCI Registry endpoint URL (enables OCI backend)")
+	ociUser := flag.String("oci-username", "", "OCI Registry username")
+	ociPass := flag.String("oci-password", "", "OCI Registry password")
 	flag.Parse()
 
 	registry.AclStore = registry.NewACLStore("acls.json")
 
 	if envPort := os.Getenv("PORT"); envPort != "" {
-		*addr = ":" + envPort
+		addr = ":" + envPort
+	} else {
+		addr = ":" + *portStr
 	}
 	if envEndpoint := os.Getenv("SERV_STORE_ENDPOINT"); envEndpoint != "" {
 		*s3Endpoint = envEndpoint
@@ -125,36 +131,56 @@ func main() {
 		*s3SecretKey = envSecretKey
 	}
 
-	standalone := ServShared.IsStandalone()
-	if standalone {
-		mockEndpoint := startMockS3Server()
-		log.Printf("ServRegistry: Running in standalone mode. Redirecting package storage to local packages/ directory via mock S3 at %s.", mockEndpoint)
-		*s3Endpoint = mockEndpoint
+	envOciEndpoint := os.Getenv("OCI_REGISTRY_URL")
+	if envOciEndpoint == "" {
+		envOciEndpoint = *ociEndpoint
+	}
+	envOciUser := os.Getenv("OCI_REGISTRY_USERNAME")
+	if envOciUser == "" {
+		envOciUser = *ociUser
+	}
+	envOciPass := os.Getenv("OCI_REGISTRY_PASSWORD")
+	if envOciPass == "" {
+		envOciPass = *ociPass
+	}
+
+	if envOciEndpoint != "" {
+		log.Printf("OCI Package Registry Backend enabled at %s", envOciEndpoint)
+		registry.ActiveStore = registry.NewOCIRegistryStore(envOciEndpoint, envOciUser, envOciPass)
 	} else {
-		log.Printf("Connecting to ServStore S3 at %s...", *s3Endpoint)
+		standalone := ServShared.IsStandalone()
+		if standalone {
+			mockEndpoint := startMockS3Server()
+			log.Printf("ServRegistry: Running in standalone mode. Redirecting package storage to local packages/ directory via mock S3 at %s.", mockEndpoint)
+			*s3Endpoint = mockEndpoint
+		} else {
+			log.Printf("Connecting to ServStore S3 at %s...", *s3Endpoint)
+		}
+
+		customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+			return aws.Endpoint{
+				URL:               *s3Endpoint,
+				SigningRegion:     "us-east-1",
+				HostnameImmutable: true,
+			}, nil
+		})
+
+		cfg, err := config.LoadDefaultConfig(context.Background(),
+			config.WithEndpointResolverWithOptions(customResolver),
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(*s3AccessKey, *s3SecretKey, "")),
+		)
+		if err != nil {
+			log.Fatalf("Unable to load S3 SDK config: %v", err)
+		}
+
+		registry.S3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.UsePathStyle = true
+		})
+
+		registry.ActiveStore = &registry.S3Store{Client: registry.S3Client}
+		registry.EnsureBucketExists(context.Background())
 	}
 
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			URL:               *s3Endpoint,
-			SigningRegion:     "us-east-1",
-			HostnameImmutable: true,
-		}, nil
-	})
-
-	cfg, err := config.LoadDefaultConfig(context.Background(),
-		config.WithEndpointResolverWithOptions(customResolver),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(*s3AccessKey, *s3SecretKey, "")),
-	)
-	if err != nil {
-		log.Fatalf("Unable to load S3 SDK config: %v", err)
-	}
-
-	registry.S3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.UsePathStyle = true
-	})
-
-	registry.EnsureBucketExists(context.Background())
 	go registry.BuildPackageIndex(context.Background())
 
 	web.SetWebAssets(webAssets)
@@ -180,9 +206,9 @@ func main() {
 	mux.HandleFunc("/api/v1/marketplace/publish", web.HandleMarketplacePublish)
 	mux.HandleFunc("/", web.HandleWebDashboard)
 
-	log.Printf("ServRegistry running on http://localhost%s", *addr)
+	log.Printf("ServRegistry running on http://localhost%s", addr)
 	server := &http.Server{
-		Addr:    *addr,
+		Addr:    addr,
 		Handler: mux,
 	}
 
