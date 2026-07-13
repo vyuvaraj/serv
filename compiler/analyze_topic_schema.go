@@ -82,7 +82,7 @@ func analyzeTopicSchemas(program *Program) []Diagnostic {
 					// We found a schema! Let's validate the published value
 					// If value is a StructLiteral:
 					if valStruct, ok := s.Value.(*StructLiteral); ok {
-						diags = append(diags, validateStructLiteralAgainstSchema(valStruct, schema, structs)...)
+						diags = append(diags, validateStructLiteralAgainstSchema(valStruct, schema)...)
 					}
 				}
 			}
@@ -135,7 +135,7 @@ func analyzeTopicSchemas(program *Program) []Diagnostic {
 	return diags
 }
 
-func validateStructLiteralAgainstSchema(structLit *StructLiteral, schema map[string]interface{}, structs map[string]*StructDecl) []Diagnostic {
+func validateStructLiteralAgainstSchema(structLit *StructLiteral, schema map[string]interface{}) []Diagnostic {
 	var diags []Diagnostic
 	
 	// Get properties from schema
