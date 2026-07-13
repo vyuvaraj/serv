@@ -122,6 +122,11 @@ fn max[T: Ordered](a: T, b: T) -> T {
 // Arrow functions (closures)
 let double = x => x * 2
 let add = fn(a, b) { return a + b }
+
+// Cached function (automatically checks/populates the runtime cache using parameterized keys)
+cached fn getCachedConfig(key: string) -> string {
+    return db.query("SELECT val FROM config WHERE key = ?", key)
+}
 ```
 
 ### Generic Constraints
@@ -249,6 +254,12 @@ route "GET" "/api/data" (req) limit 100/minute {
 // With middleware
 route "GET" "/protected" (req) use [auth, logging] {
     return { "secret": "data" }
+}
+
+// With return contract validation (verifies response type matches User struct at build time)
+route "GET" "/user" (req) -> User {
+    let u = User { name: "Alice" }
+    return u
 }
 ```
 
