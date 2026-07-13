@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -85,6 +86,8 @@ type Registry struct {
 
 	// locks is the distributed lock store embedded in the registry.
 	locks *lock.Store
+
+	backend DiscoveryBackend
 }
 
 func NewRegistry(ttl time.Duration) *Registry {
@@ -100,6 +103,12 @@ func NewRegistry(ttl time.Duration) *Registry {
 	r.startMulticastListener()
 	go r.startEvictionLoop(2 * time.Second)
 	return r
+}
+
+func (r *Registry) SetDiscoveryBackend(backend DiscoveryBackend) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.backend = backend
 }
 
 func (r *Registry) generateRootCA() {
@@ -142,6 +151,11 @@ func (r *Registry) Register(inst Instance) {
 	inst.LastSeen = time.Now()
 	service := strings.ToLower(inst.Service)
 
+	if r.backend != nil {
+		_ = r.backend.Register(context.Background(), service, inst.Address, inst.Version, inst.Region)
+		return
+	}
+
 	list := r.instances[service]
 	found := false
 	for i, existing := range list {
@@ -162,6 +176,12 @@ func (r *Registry) Heartbeat(service, address string) bool {
 	defer r.mu.Unlock()
 
 	service = strings.ToLower(service)
+
+	if r.backend != nil {
+		_ = r.backend.Register(context.Background(), service, address, "", "")
+		return true
+	}
+
 	list, ok := r.instances[service]
 	if !ok {
 		return false
@@ -182,6 +202,14 @@ func (r *Registry) Resolve(service string) []Instance {
 	defer r.mu.RUnlock()
 
 	service = strings.ToLower(service)
+
+	if r.backend != nil {
+		list, err := r.backend.Resolve(context.Background(), service)
+		if err == nil {
+			return list
+		}
+	}
+
 	list := r.instances[service]
 	healthy := make([]Instance, len(list))
 	copy(healthy, list)
@@ -247,6 +275,10 @@ func (r *Registry) RecordHealthMetric(m HealthMetric) {
 func (r *Registry) Evict() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.backend != nil {
+		return
+	}
 
 	now := time.Now()
 	for service, list := range r.instances {
