@@ -1,0 +1,26 @@
+// Telemetry worker — processes stream of device metrics
+
+subscribe "telemetry.ingest" (msg) {
+    let payload = json.parse(msg)
+    let deviceId = payload.device_id
+    let metric = payload.metric
+    let value = payload.value
+
+    log.info(f"[Telemetry Worker] Processing {metric}={value} for Device #{deviceId}")
+
+    // Store in DB
+    db.query("INSERT INTO telemetry (device_id, metric, value) VALUES (?, ?, ?)", deviceId, metric, value)
+    db.query("UPDATE devices SET status = 'online', last_seen = datetime('now') WHERE id = ?", deviceId)
+
+    // Check thresholds and emit alert event if exceeded
+    let limit = getMetricLimit(metric)
+    if value > limit {
+        log.warn(f"[ALERT] Device #{deviceId} exceeded {metric} limit! Current: {value}, Limit: {limit}")
+        publish "telemetry.alert" json.stringify({
+            "device_id": deviceId,
+            "metric": metric,
+            "value": value,
+            "message": f"Critical limit exceeded: {value} > {limit}"
+        })
+    }
+}

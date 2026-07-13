@@ -92,3 +92,6 @@ export route "GET" "/api/dashboard" (req) {
         "pending_orders": pending[0].count
     }
 }
+
+// Serve interactive dashboard UI
+http.static("/dashboard", "./web")

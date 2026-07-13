@@ -1,0 +1,38 @@
+// IoT Fleet Management & Telemetry System Showcase
+// Demonstrates: Serv-lang, ServStore, ServQueue, ServMesh, ServCloud, and ServRegistry
+//
+// Run:   serv run main.srv --watch
+// Build: serv build main.srv -o fleet-manager.exe
+
+server "4500"
+database "sqlite://fleet.db"
+cache "in-memory"
+broker "in-memory"
+
+// --- Database Migrations ---
+
+migration "create_devices" {
+    db.query("CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, status TEXT DEFAULT 'offline', firmware_version TEXT DEFAULT '1.0.0', last_seen TEXT)")
+    db.query("CREATE TABLE IF NOT EXISTS telemetry (device_id TEXT, metric TEXT NOT NULL, value REAL NOT NULL, timestamp TEXT DEFAULT (datetime('now')))")
+}
+
+// --- Import Modules ---
+
+import "models/device.srv"
+import "handlers/api.srv"
+import "handlers/telemetry.srv"
+import "handlers/firmware.srv"
+
+// --- Scheduled Device Maintenance ---
+
+// Audit device connectivity status every minute
+every 1m {
+    log.info("[Fleet Scheduler] Auditing active IoT devices...")
+    db.query("UPDATE devices SET status = 'offline' WHERE last_seen < datetime('now', '-2 minutes')")
+}
+
+// Daily stats rollup at midnight
+cron "0 0 * * *" {
+    let rollups = db.query("SELECT device_id, AVG(value) as avg_val FROM telemetry GROUP BY device_id")
+    log.info("[Fleet Rollup] Daily telemetry averages: ", rollups)
+}

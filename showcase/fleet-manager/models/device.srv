@@ -1,0 +1,19 @@
+// Device structures and pricing model helpers
+
+struct DeviceDetails {
+    id: string
+    name: string
+    type: string
+    status: string
+    firmware_version: string
+}
+
+fn getMetricLimit(metricType) {
+    if metricType == "temperature" {
+        return 85.0
+    }
+    if metricType == "vibration" {
+        return 12.5
+    }
+    return 100.0
+}

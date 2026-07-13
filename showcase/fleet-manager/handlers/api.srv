@@ -1,0 +1,74 @@
+// API routes for fleet management
+
+// Register a new device
+// POST /api/devices  body: {"id": "dev1", "name": "Edge Controller A", "type": "gateway"}
+export route "POST" "/api/devices" (req) {
+    let body = json.parse(req.body)
+    let id = body.id
+    let name = body.name
+    let type = body.type
+
+    if id == nil {
+        return { "error": "id is required", "status": 400 }
+    }
+    if name == nil {
+        return { "error": "name is required", "status": 400 }
+    }
+    if type == nil {
+        return { "error": "type is required", "status": 400 }
+    }
+
+    db.query("INSERT INTO devices (id, name, type, status, last_seen) VALUES (?, ?, ?, 'online', datetime('now'))", id, name, type)
+
+    log.info(f"[API] Registered device: {name} (ID: {id})")
+    return { "success": true, "device_id": id }
+}
+
+// Get device state
+// GET /api/devices/:id
+export route "GET" "/api/devices/:id" (req) {
+    let id = req.params.id
+    let rows = db.query("SELECT * FROM devices WHERE id = ?", id)
+    if rows == nil {
+        return { "error": "Device not found", "status": 404 }
+    }
+
+    let telemetryRows = db.query("SELECT metric, value, timestamp FROM telemetry WHERE device_id = ? ORDER BY timestamp DESC LIMIT 20", id)
+    return {
+        "device": rows[0],
+        "telemetry": telemetryRows
+    }
+}
+
+// List all devices
+// GET /api/devices
+export route "GET" "/api/devices" (req) {
+    let cacheKey = "fleet_devices"
+    let cached = cache.get(cacheKey)
+    if cached != nil {
+        return cached
+    }
+
+    let rows = db.query("SELECT * FROM devices ORDER BY name ASC")
+    let result = { "devices": rows, "count": rows.length() }
+
+    cache.set(cacheKey, result, "5s")
+    return result
+}
+
+// Dashboard statistics
+// GET /api/fleet-stats
+export route "GET" "/api/fleet-stats" (req) {
+    let total = db.query("SELECT COUNT(*) as count FROM devices")
+    let online = db.query("SELECT COUNT(*) as count FROM devices WHERE status = 'online'")
+    let telemetryCount = db.query("SELECT COUNT(*) as count FROM telemetry")
+
+    return {
+        "total_devices": total[0].count,
+        "online_devices": online[0].count,
+        "total_telemetry_points": telemetryCount[0].count
+    }
+}
+
+// Serve interactive dashboard UI
+http.static("/dashboard", "./web")
