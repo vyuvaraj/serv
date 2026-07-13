@@ -62,6 +62,9 @@ func formatServSource(source string) string {
 		"subscribe": true, "test": true, "struct": true, "interface": true,
 		"middleware": true, "ws": true, "enum": true, "validate": true,
 		"type": true, "export": true, "beforeEach": true, "afterEach": true,
+		"auth": true, "mail": true, "search": true, "ai": true,
+		"actor": true, "workflow": true, "store": true, "migration": true,
+		"agent": true, "event_store": true,
 	}
 
 	for i, line := range lines {

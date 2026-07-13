@@ -649,6 +649,11 @@ func (s *Server) handleCompletion(msg JSONRPCMessage) {
 		"test", "assert", "enum", "await", "true", "false", "nil",
 		"self", "declare", "module", "from", "extern", "migration", "tool",
 		"ws", "use", "channel", "atomic", "break", "continue", "type",
+		"auth", "mail", "search", "ai", "and", "or", "limit", "as",
+		"cors", "rate_limit", "mock", "actor", "workflow", "stream", "yield",
+		"store", "version", "resilient", "retries", "circuit_breaker", "inject",
+		"graphql", "macro", "notify", "app", "agent", "table", "event_store",
+		"command", "emit", "cached",
 	}
 	for _, kw := range keywords {
 		items = append(items, CompletionItem{Label: kw, Kind: 14})
