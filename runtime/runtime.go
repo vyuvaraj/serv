@@ -557,7 +557,7 @@ func StartServer() interface{} {
 	})
 
 	srv := &http.Server{
-		Addr:    ":" + serverPort,
+		Addr:    "127.0.0.1:" + serverPort,
 		Handler: mux,
 	}
 
