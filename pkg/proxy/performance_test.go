@@ -40,7 +40,8 @@ func Benchmark10KConcurrentConnections(b *testing.B) {
 	client.Transport.(*http.Transport).MaxIdleConns = 10000
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	var runIdx int
+	for b.Loop() {
 		const total = 1000
 		const concurrency = 50
 		var wg sync.WaitGroup
@@ -77,8 +78,9 @@ func Benchmark10KConcurrentConnections(b *testing.B) {
 		}
 		wg.Wait()
 		if errorCount > 0 {
-			b.Logf("Warning: %d requests failed during concurrency benchmark run %d. First error: %v", errorCount, i, firstErr)
+			b.Logf("Warning: %d requests failed during concurrency benchmark run %d. First error: %v", errorCount, runIdx, firstErr)
 		}
+		runIdx++
 	}
 }
 
