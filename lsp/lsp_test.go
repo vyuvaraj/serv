@@ -474,7 +474,7 @@ func TestDefinitionCrossFileImport(t *testing.T) {
 		t.Fatalf("Failed to write imported file: %v", err)
 	}
 
-	importingContent := fmt.Sprintf("import \"imported.srv\"\nfn start() {\n\texternalHelper()\n}")
+	importingContent := "import \"imported.srv\"\nfn start() {\n\texternalHelper()\n}"
 	err = os.WriteFile(importingFile, []byte(importingContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to write importing file: %v", err)
