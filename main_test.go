@@ -284,11 +284,13 @@ func BenchmarkPackageIndexLookup(b *testing.B) {
 	registry.PackageIndexMu.Unlock()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		name := fmt.Sprintf("pkg-%d", i%500)
 		registry.PackageIndexMu.RLock()
 		_, _ = registry.PackageIndex[name]
 		registry.PackageIndexMu.RUnlock()
+		i++
 	}
 }
 

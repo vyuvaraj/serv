@@ -76,7 +76,7 @@ func startMockS3Server() string {
 					return nil
 				})
 
-				w.Write([]byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>serv-packages</Name><IsTruncated>false</IsTruncated>%s</ListBucketResult>`, strings.Join(contentsXml, ""))))
+				w.Write(fmt.Appendf(nil, `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>serv-packages</Name><IsTruncated>false</IsTruncated>%s</ListBucketResult>`, strings.Join(contentsXml, "")))
 				return
 			}
 

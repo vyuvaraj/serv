@@ -64,10 +64,7 @@ func (o *OCIRegistryStore) resolveRepoTag(key string) (string, string) {
 
 func (o *OCIRegistryStore) extractVersion(filename, repo string) string {
 	// e.g. "mypkg-1.0.0.tar.gz" -> "1.0.0"
-	base := filename
-	if strings.HasSuffix(base, ".tar.gz") {
-		base = strings.TrimSuffix(base, ".tar.gz")
-	}
+	base := strings.TrimSuffix(filename, ".tar.gz")
 	prefix := repo + "-"
 	if strings.HasPrefix(base, prefix) {
 		return strings.TrimPrefix(base, prefix)
