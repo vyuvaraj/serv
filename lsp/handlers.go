@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"serv/compiler"
@@ -135,6 +138,11 @@ func (s *Server) handleDefinition(msg JSONRPCMessage) {
 
 	s.mu.RLock()
 	text := s.documents[params.TextDocument.URI]
+	s.mu.RUnlock()
+
+	s.parseAndRegisterImports(params.TextDocument.URI, text)
+
+	s.mu.RLock()
 	syms := s.symbols[params.TextDocument.URI]
 	s.mu.RUnlock()
 
@@ -781,5 +789,58 @@ func extractSymbol(stmt compiler.Statement) symbolInfo {
 		return symbolInfo{Name: s.Name, Kind: "agent", Line: s.Token.Line - 1, Col: s.Token.Col - 1}
 	default:
 		return symbolInfo{}
+	}
+}
+
+func (s *Server) parseAndRegisterImports(currentURI string, text string) {
+	importPattern := regexp.MustCompile(`import\s+"([^"]+)"`)
+	matches := importPattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return
+	}
+
+	currentPath := strings.TrimPrefix(currentURI, "file://")
+	if strings.HasPrefix(currentPath, "/") && os.PathSeparator == '\\' {
+		currentPath = strings.TrimPrefix(currentPath, "/")
+	}
+	baseDir := filepath.Dir(currentPath)
+
+	for _, match := range matches {
+		impPath := match[1]
+		if !strings.HasSuffix(impPath, ".srv") {
+			continue
+		}
+		absImpPath := filepath.Join(baseDir, impPath)
+		importedURI := "file://" + filepath.ToSlash(absImpPath)
+
+		s.mu.RLock()
+		_, exists := s.symbols[importedURI]
+		s.mu.RUnlock()
+		if exists {
+			continue
+		}
+
+		data, err := os.ReadFile(absImpPath)
+		if err != nil {
+			continue
+		}
+
+		l := compiler.NewLexer(string(data))
+		p := compiler.NewParser(l)
+		prog := p.ParseProgram()
+
+		var fileSyms []symbolInfo
+		for _, stmt := range prog.Statements {
+			if sym := extractSymbol(stmt); sym.Name != "" {
+				fileSyms = append(fileSyms, sym)
+			}
+		}
+
+		s.mu.Lock()
+		s.symbols[importedURI] = fileSyms
+		s.documents[importedURI] = string(data)
+		s.mu.Unlock()
+
+		s.parseAndRegisterImports(importedURI, string(data))
 	}
 }

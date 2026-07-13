@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -458,6 +460,52 @@ func TestDiagnostics(t *testing.T) {
 	}
 	if !foundWarning {
 		t.Errorf("Expected unused variable diagnostic warning, got: %+v", params.Diagnostics)
+	}
+}
+
+func TestDefinitionCrossFileImport(t *testing.T) {
+	// Create two temporary .srv files representing imported module and importing module
+	tmpDir := t.TempDir()
+	importedFile := filepath.Join(tmpDir, "imported.srv")
+	importingFile := filepath.Join(tmpDir, "main.srv")
+
+	err := os.WriteFile(importedFile, []byte("fn externalHelper() {}"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write imported file: %v", err)
+	}
+
+	importingContent := fmt.Sprintf("import \"imported.srv\"\nfn start() {\n\texternalHelper()\n}")
+	err = os.WriteFile(importingFile, []byte(importingContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to write importing file: %v", err)
+	}
+
+	server := NewServer()
+	mainURI := "file://" + filepath.ToSlash(importingFile)
+	server.documents[mainURI] = importingContent
+
+	// Cursor positioned at the invocation of externalHelper
+	msg := JSONRPCMessage{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "textDocument/definition",
+		Params:  json.RawMessage(fmt.Sprintf(`{"textDocument":{"uri":%q},"position":{"line":2,"character":4}}`, mainURI)),
+	}
+
+	out := captureStdout(func() {
+		server.handleMessage(msg)
+	})
+
+	resp := parseLSPResponse(t, out)
+	var loc Location
+	resBytes, _ := json.Marshal(resp.Result)
+	if err := json.Unmarshal(resBytes, &loc); err != nil {
+		t.Fatalf("Failed to parse definition location: %v", err)
+	}
+
+	expectedURI := "file://" + filepath.ToSlash(importedFile)
+	if !strings.EqualFold(loc.URI, expectedURI) {
+		t.Errorf("Expected definition to point to imported file %q, got %q", expectedURI, loc.URI)
 	}
 }
 
