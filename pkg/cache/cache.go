@@ -44,6 +44,10 @@ func NewInMemoryCache(cleanupInterval time.Duration) *InMemoryCache {
 		}
 	}
 
+	if cleanupInterval < 10*time.Millisecond {
+		cleanupInterval = 100 * time.Millisecond
+	}
+
 	c := &InMemoryCache{
 		items:     make(map[string]*list.Element),
 		evictList: list.New(),

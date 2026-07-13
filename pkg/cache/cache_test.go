@@ -3,7 +3,9 @@ package cache
 import (
 	"context"
 	"container/list"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -191,23 +193,100 @@ func TestNewRedisCacheValid(t *testing.T) {
 
 func TestRedisCacheGetMiss(t *testing.T) {
 	rc := &RedisCache{
-		client: nil, // we will construct a client or mock context
-		ctx:    context.Background(),
+		client:    nil,
+		ctx:       context.Background(),
+		fallback:  NewInMemoryCache(10 * time.Millisecond),
+		isOffline: true,
 	}
-	// Verify that we gracefully handle nil client or error path
-	defer func() {
-		recover()
-	}()
-	_, _, _ = rc.Get("key")
+	// Offline mode should fallback to in-memory gracefully without nil pointer dereference
+	_, found, err := rc.Get("key")
+	if err != nil {
+		t.Fatalf("unexpected offline fallback error: %v", err)
+	}
+	if found {
+		t.Error("expected key to be absent in fallback")
+	}
 }
 
 func TestRedisCacheDeleteError(t *testing.T) {
 	rc := &RedisCache{
-		client: nil,
-		ctx:    context.Background(),
+		client:    nil,
+		ctx:       context.Background(),
+		fallback:  NewInMemoryCache(10 * time.Millisecond),
+		isOffline: true,
 	}
-	defer func() {
-		recover()
-	}()
-	_ = rc.Delete("key")
+	err := rc.Delete("key")
+	if err != nil {
+		t.Errorf("unexpected offline fallback delete error: %v", err)
+	}
 }
+
+func TestCacheTTLAccuraceTiming(t *testing.T) {
+	c := NewInMemoryCache(10 * time.Millisecond)
+	_ = c.Set("timing_key", "timing_val", 50*time.Millisecond)
+
+	// Get before expiration
+	val, found, err := c.Get("timing_key")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found || val != "timing_val" {
+		t.Errorf("expected value to exist, got: %v", val)
+	}
+
+	// Sleep past expiration (50ms + 100ms margin)
+	time.Sleep(150 * time.Millisecond)
+
+	val2, found2, err2 := c.Get("timing_key")
+	if err2 != nil {
+		t.Fatalf("unexpected error: %v", err2)
+	}
+	if found2 {
+		t.Errorf("expected value to have expired, got: %v", val2)
+	}
+}
+
+func TestRedisFailoverFallback(t *testing.T) {
+	rc, err := NewRedisCache("redis://localhost:6379")
+	if err != nil {
+		t.Fatalf("failed to init Redis cache: %v", err)
+	}
+
+	// Force offline state to simulate Redis connection failure
+	rc.mu.Lock()
+	rc.isOffline = true
+	rc.mu.Unlock()
+
+	// Set and Get should fall back to local memory cache
+	err = rc.Set("failover_key", "failover_val", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Set failed under failover fallback: %v", err)
+	}
+
+	val, found, err := rc.Get("failover_key")
+	if err != nil {
+		t.Fatalf("Get failed under failover fallback: %v", err)
+	}
+	if !found || val != "failover_val" {
+		t.Errorf("expected to retrieve fallback cached item, got %v", val)
+	}
+}
+
+func Test100GoroutineCacheStress(t *testing.T) {
+	c := NewInMemoryCache(50 * time.Millisecond)
+	var wg sync.WaitGroup
+
+	// Run 100 concurrent workers performing Set, Get, and Delete
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			key := fmt.Sprintf("stress_key_%d", id%10)
+			_ = c.Set(key, id, 10*time.Millisecond)
+			_, _, _ = c.Get(key)
+			_ = c.Delete(key)
+		}(i)
+	}
+	wg.Wait()
+}
+
