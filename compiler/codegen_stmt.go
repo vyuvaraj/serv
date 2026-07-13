@@ -1352,6 +1352,38 @@ func (c *Codegen) genFnDecl(s *FnDecl) (string, error) {
 			bodyStr, s.Name, s.Retries, s.Timeout, s.HasCircuitBreaker, castStr)
 	}
 
+	if s.IsCached {
+		keyExpr := fmt.Sprintf("%q", "fn:"+s.Name)
+		if len(s.Params) > 0 {
+			var formatParts []string
+			var argVars []string
+			formatParts = append(formatParts, "fn:"+s.Name)
+			for _, p := range s.Params {
+				formatParts = append(formatParts, "%v")
+				argVars = append(argVars, p)
+			}
+			keyExpr = fmt.Sprintf("fmt.Sprintf(%q, %s)", strings.Join(formatParts, ":"), strings.Join(argVars, ", "))
+		}
+
+		var castStr string
+		switch retType {
+		case "interface{}":
+			castStr = "_res"
+		case "int":
+			castStr = "toInt(_res)"
+		case "float64":
+			castStr = "toFloat64(_res)"
+		case "bool":
+			castStr = "toBool(_res)"
+		case "string":
+			castStr = "toString(_res)"
+		default:
+			castStr = fmt.Sprintf("_res.(%s)", retType)
+		}
+		bodyStr = fmt.Sprintf("{\n\t_cacheKey := %s\n\tif _cachedVal := runtime.CacheGet(_cacheKey); _cachedVal != nil {\n\t\t_res := _cachedVal\n\t\treturn %s\n\t}\n\t_inner := func() %s %s\n\t_res := _inner()\n\truntime.CacheSet(_cacheKey, _res, \"10m\")\n\treturn _res\n}",
+			keyExpr, castStr, retType, bodyStr)
+	}
+
 	typeParamStr := ""
 	if len(s.TypeParams) > 0 {
 		var tps []string

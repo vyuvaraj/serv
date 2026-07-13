@@ -225,9 +225,15 @@ func (p *Parser) parseRouteStatement() Statement {
 		}
 	}
 
-	if p.peekToken.Type == TOKEN_STREAM {
-		p.nextToken()
-		stmt.Stream = true
+	for p.peekToken.Type == TOKEN_STREAM || p.peekToken.Type == TOKEN_RET_ARROW {
+		if p.peekToken.Type == TOKEN_STREAM {
+			p.nextToken()
+			stmt.Stream = true
+		} else if p.peekToken.Type == TOKEN_RET_ARROW {
+			p.nextToken() // consume '->'
+			p.nextToken() // type identifier
+			stmt.ReturnType = p.parseTypeAnnotation()
+		}
 	}
 
 	if !p.expectPeek(TOKEN_LBRACE) {

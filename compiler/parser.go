@@ -218,6 +218,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseVersionBlock()
 	case TOKEN_RESILIENT:
 		return p.parseFnDeclaration()
+	case TOKEN_CACHED:
+		return p.parseFnDeclaration()
 	case TOKEN_FN:
 		return p.parseFnDeclaration()
 	case TOKEN_TRY:

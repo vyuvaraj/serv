@@ -91,7 +91,10 @@ func analyzeStatement(stmt Statement, program *Program) []Diagnostic {
 	case *ExportStmt:
 		return analyzeStatement(s.Inner, program)
 	case *RouteStmt:
-		return analyzeBlock(s.Body, nil)
+		var diags []Diagnostic
+		diags = append(diags, analyzeBlock(s.Body, nil)...)
+		diags = append(diags, analyzeRouteContract(s, program)...)
+		return diags
 	case *EveryStmt:
 		return analyzeBlock(s.Body, nil)
 	case *CronStmt:
@@ -325,4 +328,92 @@ func checkExprDomainBoundaries(expr Expression, contextName string, line, col in
 	}
 
 	return diags
+}
+
+func analyzeRouteContract(route *RouteStmt, program *Program) []Diagnostic {
+	var diags []Diagnostic
+	if route.ReturnType == "" {
+		return diags
+	}
+
+	localVars := make(map[string]string)
+
+	var walk func(stmt Statement)
+	walk = func(stmt Statement) {
+		if stmt == nil {
+			return
+		}
+		switch s := stmt.(type) {
+		case *BlockStmt:
+			for _, inner := range s.Statements {
+				walk(inner)
+			}
+		case *LetStmt:
+			t := resolveExpressionType(s.Value, program, localVars)
+			localVars[s.Name] = t
+		case *IfStmt:
+			if s.Body != nil {
+				walk(s.Body)
+			}
+			if s.ElseBody != nil {
+				walk(s.ElseBody)
+			}
+		case *ForStmt:
+			if s.Body != nil {
+				walk(s.Body)
+			}
+		case *ReturnStmt:
+			retType := resolveExpressionType(s.Value, program, localVars)
+			if retType != "interface{}" && retType != "nil" && retType != route.ReturnType {
+				diags = append(diags, Diagnostic{
+					Line:     s.Token.Line,
+					Col:      s.Token.Col,
+					Severity: "error",
+					Message:  fmt.Sprintf("route declares return type '%s' but returns value of type '%s'", route.ReturnType, retType),
+				})
+			}
+		}
+	}
+
+	walk(route.Body)
+	return diags
+}
+
+func resolveExpressionType(expr Expression, program *Program, localVars map[string]string) string {
+	if expr == nil {
+		return "nil"
+	}
+	switch e := expr.(type) {
+	case *IntegerLiteral:
+		return "int"
+	case *FloatLiteral:
+		return "float64"
+	case *StringLiteral, *FStringLiteral, *DurationLiteral:
+		return "string"
+	case *BooleanLiteral:
+		return "bool"
+	case *NilLiteral:
+		return "nil"
+	case *StructLiteral:
+		return e.TypeName
+	case *Identifier:
+		if t, ok := localVars[e.Value]; ok {
+			return t
+		}
+		return "interface{}"
+	case *CallExpr:
+		if ident, ok := e.Function.(*Identifier); ok {
+			for _, stmt := range program.Statements {
+				if f, ok := stmt.(*FnDecl); ok && f.Name == ident.Value {
+					return f.ReturnType
+				}
+				if exp, ok := stmt.(*ExportStmt); ok {
+					if f, ok := exp.Inner.(*FnDecl); ok && f.Name == ident.Value {
+						return f.ReturnType
+					}
+				}
+			}
+		}
+	}
+	return "interface{}"
 }

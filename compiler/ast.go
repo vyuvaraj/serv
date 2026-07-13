@@ -224,6 +224,7 @@ type RouteStmt struct {
 	LimitPeriod string
 	Middlewares []string // middleware names from "use [auth, logging]"
 	Stream      bool
+	ReturnType  string   // optional declared return type contract, e.g., "User"
 }
 
 func (r *RouteStmt) statementNode()       {}
@@ -582,6 +583,7 @@ type FnDecl struct {
 	Retries           int
 	Timeout           string
 	HasCircuitBreaker bool
+	IsCached          bool
 }
 
 func (f *FnDecl) statementNode()       {}

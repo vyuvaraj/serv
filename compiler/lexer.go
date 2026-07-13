@@ -83,6 +83,7 @@ const (
 	TOKEN_EVENT_STORE TokenType = "EVENT_STORE"
 	TOKEN_COMMAND     TokenType = "COMMAND"
 	TOKEN_EMIT        TokenType = "EMIT"
+	TOKEN_CACHED      TokenType = "CACHED"
 
 
 	// Operators & Delimiters
@@ -646,6 +647,7 @@ var keywords = map[string]TokenType{
 	"event_store":     TOKEN_EVENT_STORE,
 	"command":         TOKEN_COMMAND,
 	"emit":            TOKEN_EMIT,
+	"cached":          TOKEN_CACHED,
 }
 
 func lookupIdent(ident string) TokenType {

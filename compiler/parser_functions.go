@@ -6,11 +6,19 @@ import (
 
 func (p *Parser) parseFnDeclaration() Statement {
 	isResilient := false
-	if p.curToken.Type == TOKEN_RESILIENT {
-		isResilient = true
-		if !p.expectPeek(TOKEN_FN) {
-			return nil
+	isCached := false
+
+	for p.curToken.Type == TOKEN_RESILIENT || p.curToken.Type == TOKEN_CACHED {
+		if p.curToken.Type == TOKEN_RESILIENT {
+			isResilient = true
+		} else if p.curToken.Type == TOKEN_CACHED {
+			isCached = true
 		}
+		p.nextToken()
+	}
+
+	if p.curToken.Type != TOKEN_FN {
+		return nil
 	}
 	fnToken := p.curToken
 
@@ -30,7 +38,7 @@ func (p *Parser) parseFnDeclaration() Statement {
 	}
 
 	// Regular function declaration
-	stmt := &FnDecl{Token: fnToken, IsResilient: isResilient}
+	stmt := &FnDecl{Token: fnToken, IsResilient: isResilient, IsCached: isCached}
 	stmt.Name = firstName
 
 	// Optional type parameters: fn name[T, U](...) or fn name[T: Comparable, U: Numeric](...)
