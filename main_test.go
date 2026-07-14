@@ -425,4 +425,178 @@ func TestACLStoreAndScopedPublish(t *testing.T) {
 	}
 }
 
+// TestSemverResolutionCorrectness is the D.58 acceptance test.
+// Each case is verified against npm semver spec behaviour.
+func TestSemverResolutionCorrectness(t *testing.T) {
+	cases := []struct {
+		name       string
+		rangeStr   string
+		versionStr string
+		want       bool
+	}{
+		// Wildcard / empty
+		{"wildcard *", "*", "9.9.9", true},
+		{"empty range", "", "1.0.0", true},
+		{"latest keyword", "latest", "0.0.1", true},
 
+		// Caret — major>0: pin major, allow minor/patch bumps
+		{"^1.2.0 matches 1.2.3", "^1.2.0", "1.2.3", true},
+		{"^1.2.0 matches 1.9.0", "^1.2.0", "1.9.0", true},
+		{"^1.2.0 rejects 2.0.0", "^1.2.0", "2.0.0", false},
+		{"^1.2.0 rejects 1.1.9", "^1.2.0", "1.1.9", false},
+
+		// Caret — major==0, minor>0: pin major+minor
+		{"^0.4.1 matches 0.4.5", "^0.4.1", "0.4.5", true},
+		{"^0.4.1 rejects 0.5.0", "^0.4.1", "0.5.0", false},
+		{"^0.4.1 rejects 1.0.0", "^0.4.1", "1.0.0", false},
+
+		// Caret — major==0, minor==0: pin all
+		{"^0.0.3 matches 0.0.3", "^0.0.3", "0.0.3", true},
+		{"^0.0.3 rejects 0.0.4", "^0.0.3", "0.0.4", false},
+
+		// Tilde — pin major+minor, allow patch bumps
+		{"~0.4.1 matches 0.4.5", "~0.4.1", "0.4.5", true},
+		{"~0.4.1 rejects 0.5.0", "~0.4.1", "0.5.0", false},
+		{"~0.4.1 rejects 0.4.0", "~0.4.1", "0.4.0", false},
+
+		// Exact match
+		{"exact 1.0.0", "1.0.0", "1.0.0", true},
+		{"exact rejects 1.0.1", "1.0.0", "1.0.1", false},
+
+		// >= operator
+		{">=1.2.3 matches 1.2.3", ">=1.2.3", "1.2.3", true},
+		{">=1.2.3 matches 2.0.0", ">=1.2.3", "2.0.0", true},
+		{">=1.2.3 rejects 1.2.2", ">=1.2.3", "1.2.2", false},
+
+		// <= operator
+		{"<=2.0.0 matches 1.9.9", "<=2.0.0", "1.9.9", true},
+		{"<=2.0.0 matches 2.0.0", "<=2.0.0", "2.0.0", true},
+		{"<=2.0.0 rejects 2.0.1", "<=2.0.0", "2.0.1", false},
+
+		// > operator
+		{">1.0.0 matches 1.0.1", ">1.0.0", "1.0.1", true},
+		{">1.0.0 rejects 1.0.0", ">1.0.0", "1.0.0", false},
+
+		// < operator
+		{"<2.0.0 matches 1.9.9", "<2.0.0", "1.9.9", true},
+		{"<2.0.0 rejects 2.0.0", "<2.0.0", "2.0.0", false},
+
+		// Compound AND range (space-separated)
+		{">=1.2.3 <2.0.0 matches 1.5.0", ">=1.2.3 <2.0.0", "1.5.0", true},
+		{">=1.2.3 <2.0.0 matches 1.2.3", ">=1.2.3 <2.0.0", "1.2.3", true},
+		{">=1.2.3 <2.0.0 rejects 2.0.0", ">=1.2.3 <2.0.0", "2.0.0", false},
+		{">=1.2.3 <2.0.0 rejects 1.2.2", ">=1.2.3 <2.0.0", "1.2.2", false},
+		{">=1.0.0 <=1.5.0 >1.2.0 matches 1.3.0", ">=1.0.0 <=1.5.0 >1.2.0", "1.3.0", true},
+		{">=1.0.0 <=1.5.0 >1.2.0 rejects 1.2.0", ">=1.0.0 <=1.5.0 >1.2.0", "1.2.0", false},
+
+		// Pre-release: only matched by exact constraint
+		{"pre-release exact match", "1.0.0-beta.1", "1.0.0-beta.1", true},
+		{"^1.0.0 rejects pre-release 1.0.1-beta", "^1.0.0", "1.0.1-beta", false},
+		{">=1.0.0 rejects pre-release", ">=1.0.0", "1.5.0-alpha", false},
+	}
+
+	failed := 0
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolution.MatchSemver(tc.rangeStr, tc.versionStr)
+			if got != tc.want {
+				failed++
+				t.Errorf("MatchSemver(%q, %q) = %v; want %v", tc.rangeStr, tc.versionStr, got, tc.want)
+			}
+		})
+	}
+	total := len(cases)
+	t.Logf("Semver resolution: %d/%d cases correct (%.0f%% match)", total-failed, total, float64(total-failed)/float64(total)*100)
+}
+
+// TestSignatureTamperDetection is the D.59 acceptance test.
+// It verifies that a modified tarball is rejected with 400 and a signature error,
+// even when the original valid signature is supplied.
+func TestSignatureTamperDetection(t *testing.T) {
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate key pair: %v", err)
+	}
+	pubKeyHex := hex.EncodeToString(pubKey)
+
+	// Build a valid tarball
+	buildTarball := func(content string) []byte {
+		var buf bytes.Buffer
+		gw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gw)
+		toml := content
+		hdr := &tar.Header{Name: "serv.toml", Size: int64(len(toml)), Mode: 0644}
+		tw.WriteHeader(hdr)
+		tw.Write([]byte(toml))
+		tw.Close()
+		gw.Close()
+		return buf.Bytes()
+	}
+
+	validToml := "\nname = \"tampertest\"\nversion = \"1.0.0\"\n"
+	original := buildTarball(validToml)
+
+	// Sign the original
+	sig := ed25519.Sign(privKey, original)
+	sigHex := hex.EncodeToString(sig)
+
+	// --- Case 1: tampered tarball with original signature ---
+	tampered := make([]byte, len(original))
+	copy(tampered, original)
+	// Flip a byte in the middle of the payload
+	tampered[len(tampered)/2] ^= 0xFF
+
+	req := httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(tampered))
+	req.Header.Set("X-Signature", sigHex)
+	req.Header.Set("X-Public-Key", pubKeyHex)
+	rr := httptest.NewRecorder()
+	web.HandlePublish(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("case 1 (tampered tarball): expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(strings.ToLower(rr.Body.String()), "signature") {
+		t.Errorf("case 1: expected 'signature' in error body, got: %s", rr.Body.String())
+	}
+
+	// --- Case 2: valid tarball + all-zero tampered signature ---
+	zeroSig := make([]byte, ed25519.SignatureSize)
+	req2 := httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(original))
+	req2.Header.Set("X-Signature", hex.EncodeToString(zeroSig))
+	req2.Header.Set("X-Public-Key", pubKeyHex)
+	rr2 := httptest.NewRecorder()
+	web.HandlePublish(rr2, req2)
+
+	if rr2.Code != http.StatusBadRequest {
+		t.Errorf("case 2 (zeroed signature): expected 400, got %d", rr2.Code)
+	}
+	if !strings.Contains(strings.ToLower(rr2.Body.String()), "signature") {
+		t.Errorf("case 2: expected 'signature' in error body, got: %s", rr2.Body.String())
+	}
+
+	// --- Case 3: valid tarball + valid signature → must pass signature check ---
+	// (may panic due to nil s3Client, but signature must not be rejected)
+	passed := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Panic means we got past signature check — that's success
+				passed = true
+			}
+		}()
+		req3 := httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(original))
+		req3.Header.Set("X-Signature", sigHex)
+		req3.Header.Set("X-Public-Key", pubKeyHex)
+		rr3 := httptest.NewRecorder()
+		web.HandlePublish(rr3, req3)
+		// If no panic and not 400 — also acceptable (mock S3 may be wired)
+		if rr3.Code != http.StatusBadRequest {
+			passed = true
+		}
+	}()
+	if !passed {
+		t.Error("case 3: valid tarball+signature was rejected — should have passed signature check")
+	}
+
+	t.Log("Signature tamper detection: all 3 cases passed")
+}

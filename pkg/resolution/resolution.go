@@ -28,54 +28,107 @@ func ParseSemver(v string) (int, int, int, error) {
 	return major, minor, patch, nil
 }
 
-func MatchSemver(rangeStr, versionStr string) bool {
-	if rangeStr == "" || rangeStr == "*" || rangeStr == "latest" {
-		return true
+func compareSemver(a, b [3]int) int {
+	for i := 0; i < 3; i++ {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
 	}
-	if rangeStr == versionStr {
-		return true
+	return 0
+}
+
+func parseTriplet(v string) ([3]int, error) {
+	maj, min, pat, err := ParseSemver(v)
+	return [3]int{maj, min, pat}, err
+}
+
+func matchSingleConstraint(constraint, versionStr string) bool {
+	constraint = strings.TrimSpace(constraint)
+	// Pre-release tags (containing "-") are never matched by range operators
+	if strings.Contains(versionStr, "-") {
+		return constraint == versionStr
 	}
 
-	vMaj, vMin, vPat, err := ParseSemver(versionStr)
+	vt, err := parseTriplet(versionStr)
 	if err != nil {
 		return false
 	}
 
-	if strings.HasPrefix(rangeStr, "^") {
-		rStr := strings.TrimPrefix(rangeStr, "^")
-		rMaj, rMin, rPat, err := ParseSemver(rStr)
+	switch {
+	case constraint == "" || constraint == "*" || constraint == "latest":
+		return true
+	case constraint == versionStr:
+		return true
+	case strings.HasPrefix(constraint, "^"):
+		rt, err := parseTriplet(strings.TrimPrefix(constraint, "^"))
 		if err != nil {
 			return false
 		}
-		if vMaj != rMaj {
-			return false
+		// npm ^ semantics: if major > 0, pin major. If major == 0 and minor > 0, pin major+minor.
+		// If major == 0 and minor == 0, pin all three.
+		if rt[0] > 0 {
+			return vt[0] == rt[0] && compareSemver(vt, rt) >= 0
 		}
-		if vMin < rMin {
-			return false
+		if rt[1] > 0 {
+			return vt[0] == 0 && vt[1] == rt[1] && vt[2] >= rt[2]
 		}
-		if vMin == rMin && vPat < rPat {
-			return false
-		}
-		return true
-	}
-
-	if strings.HasPrefix(rangeStr, "~") {
-		rStr := strings.TrimPrefix(rangeStr, "~")
-		rMaj, rMin, rPat, err := ParseSemver(rStr)
+		return vt[0] == 0 && vt[1] == 0 && vt[2] == rt[2]
+	case strings.HasPrefix(constraint, "~"):
+		rt, err := parseTriplet(strings.TrimPrefix(constraint, "~"))
 		if err != nil {
 			return false
 		}
-		if vMaj != rMaj || vMin != rMin {
+		return vt[0] == rt[0] && vt[1] == rt[1] && vt[2] >= rt[2]
+	case strings.HasPrefix(constraint, ">="):
+		rt, err := parseTriplet(strings.TrimPrefix(constraint, ">="))
+		if err != nil {
 			return false
 		}
-		if vPat < rPat {
+		return compareSemver(vt, rt) >= 0
+	case strings.HasPrefix(constraint, "<="):
+		rt, err := parseTriplet(strings.TrimPrefix(constraint, "<="))
+		if err != nil {
 			return false
 		}
-		return true
+		return compareSemver(vt, rt) <= 0
+	case strings.HasPrefix(constraint, ">"):
+		rt, err := parseTriplet(strings.TrimPrefix(constraint, ">"))
+		if err != nil {
+			return false
+		}
+		return compareSemver(vt, rt) > 0
+	case strings.HasPrefix(constraint, "<"):
+		rt, err := parseTriplet(strings.TrimPrefix(constraint, "<"))
+		if err != nil {
+			return false
+		}
+		return compareSemver(vt, rt) < 0
+	default:
+		// exact match
+		return constraint == versionStr
 	}
-
-	return false
 }
+
+func MatchSemver(rangeStr, versionStr string) bool {
+	rangeStr = strings.TrimSpace(rangeStr)
+	if rangeStr == "" || rangeStr == "*" || rangeStr == "latest" {
+		return true
+	}
+
+	// Compound AND range: space-separated constraints (e.g. ">=1.2.3 <2.0.0")
+	// All constraints must match.
+	parts := strings.Fields(rangeStr)
+	for _, part := range parts {
+		if !matchSingleConstraint(part, versionStr) {
+			return false
+		}
+	}
+	return true
+}
+
 
 func ResolveBestVersion(rangeStr string, versions map[string]registry.VersionDetails) string {
 	var bestVersion string
