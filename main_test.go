@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -599,4 +600,84 @@ func TestSignatureTamperDetection(t *testing.T) {
 	}
 
 	t.Log("Signature tamper detection: all 3 cases passed")
+}
+
+// TestConcurrentPublishRace is the D.60 acceptance test.
+// Two clients attempt to publish the same name@version simultaneously.
+// Exactly one must receive 201 Created; the other must receive 409 Conflict.
+func TestConcurrentPublishRace(t *testing.T) {
+	// Wire up the mock S3 backend so HandlePublish can actually write metadata.
+	s3URL := startMockS3Server()
+	defer os.RemoveAll("./packages")
+
+	cfg, err := initS3(s3URL)
+	if err != nil {
+		t.Fatalf("failed to init mock S3: %v", err)
+	}
+	registry.S3Client = cfg
+
+	// Initialize AclStore with a temp file so HandlePublish doesn't nil-panic.
+	registry.AclStore = registry.NewACLStore(filepath.Join(t.TempDir(), "acls.json"))
+
+	pubKey, privKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 keypair: %v", err)
+	}
+	pubKeyHex := hex.EncodeToString(pubKey)
+
+	// Build a valid tarball for mypkg@1.0.0
+	buildTarball := func() []byte {
+		var buf bytes.Buffer
+		gw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gw)
+		toml := "\nname = \"racepkg\"\nversion = \"1.0.0\"\n"
+		hdr := &tar.Header{Name: "serv.toml", Size: int64(len(toml)), Mode: 0644}
+		tw.WriteHeader(hdr)
+		tw.Write([]byte(toml))
+		tw.Close()
+		gw.Close()
+		return buf.Bytes()
+	}
+
+	data := buildTarball()
+	sig := ed25519.Sign(privKey, data)
+	sigHex := hex.EncodeToString(sig)
+
+	results := make([]int, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	for i := 0; i < 2; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodPost, "/publish", bytes.NewReader(data))
+			req.Header.Set("X-Signature", sigHex)
+			req.Header.Set("X-Public-Key", pubKeyHex)
+			rr := httptest.NewRecorder()
+			web.HandlePublish(rr, req)
+			results[i] = rr.Code
+		}()
+	}
+	wg.Wait()
+
+	created := 0
+	conflict := 0
+	for _, code := range results {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusConflict:
+			conflict++
+		}
+	}
+
+	if created != 1 {
+		t.Errorf("expected exactly 1 x 201 Created, got %d (results: %v)", created, results)
+	}
+	if conflict != 1 {
+		t.Errorf("expected exactly 1 x 409 Conflict, got %d (results: %v)", conflict, results)
+	}
+
+	t.Logf("Concurrent publish race: results=%v (1 winner, 1 conflict — correct)", results)
 }

@@ -26,6 +26,30 @@ import (
 	"servregistry/pkg/web"
 )
 
+// initS3 wires the global registry.S3Client to the given endpoint URL.
+// Used in tests to point S3 at the local mock server.
+func initS3(endpoint string) (*s3.Client, error) {
+	resolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{
+			URL:               endpoint,
+			SigningRegion:     "us-east-1",
+			HostnameImmutable: true,
+		}, nil
+	})
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithEndpointResolverWithOptions(resolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
+	)
+	if err != nil {
+		return nil, err
+	}
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
+	registry.ActiveStore = &registry.S3Store{Client: client}
+	return client, nil
+}
+
 func startMockS3Server() string {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

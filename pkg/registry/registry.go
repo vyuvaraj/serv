@@ -99,7 +99,40 @@ var (
 
 	PackageIndexMu sync.RWMutex
 	PackageIndex   = make(map[string]*PackageIndexItem)
+
+	// publishLocksMu guards the per-version publish lock map.
+	publishLocksMu sync.Mutex
+	// publishLocks holds one mutex per "name@version" key to prevent concurrent publishes
+	// of the same version. The first caller acquires the lock; subsequent callers for
+	// the same key will block, then discover the version already exists and return 409.
+	publishLocks = make(map[string]*sync.Mutex)
 )
+
+// AcquirePublishLock acquires an exclusive per-version publish lock for "name@version".
+// The caller MUST call ReleasePublishLock when done.
+func AcquirePublishLock(name, version string) {
+	key := name + "@" + version
+	publishLocksMu.Lock()
+	mu, ok := publishLocks[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		publishLocks[key] = mu
+	}
+	publishLocksMu.Unlock()
+	mu.Lock()
+}
+
+// ReleasePublishLock releases the per-version publish lock for "name@version".
+func ReleasePublishLock(name, version string) {
+	key := name + "@" + version
+	publishLocksMu.Lock()
+	mu, ok := publishLocks[key]
+	publishLocksMu.Unlock()
+	if ok {
+		mu.Unlock()
+	}
+}
+
 
 type ACLStore struct {
 	mu       sync.Mutex

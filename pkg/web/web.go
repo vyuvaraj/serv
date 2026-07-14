@@ -173,6 +173,11 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Publishing package: %s @ %s", name, version)
 
+	// Acquire per-version lock to prevent concurrent publishes of the same name@version.
+	// The second concurrent caller will block here, then see the version already exists and get 409.
+	registry.AcquirePublishLock(name, version)
+	defer registry.ReleasePublishLock(name, version)
+
 	// 3. Update metadata.json on S3
 	metadataKey := fmt.Sprintf("%s/metadata.json", name)
 	var metadata registry.PackageMetadata
@@ -185,7 +190,14 @@ func HandlePublish(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(metaData, &metadata)
 	}
 
-	// Add/update version details
+	// Reject duplicate version publish (concurrent race — second caller loses)
+	if _, exists := metadata.Versions[version]; exists {
+		registry.WriteJSONError(w, r, fmt.Sprintf("Version %s of package %s already exists", version, name), "ERR_VERSION_CONFLICT", http.StatusConflict)
+		return
+	}
+
+	// Add version details
+
 	metadata.Versions[version] = registry.VersionDetails{
 		Version:      version,
 		Dependencies: deps,
