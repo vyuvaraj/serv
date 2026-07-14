@@ -63,7 +63,7 @@ github.com/mattn/go-isatty
 # github.com/mitchellh/go-homedir v1.1.0
 ## explicit
 github.com/mitchellh/go-homedir
-# github.com/vyuvaraj/ServShared v0.1.1-0.20260709055203-a69c44124438
+# github.com/vyuvaraj/ServShared v0.1.1-0.20260709055203-a69c44124438 => ../ServShared
 ## explicit; go 1.26.4
 github.com/vyuvaraj/ServShared
 github.com/vyuvaraj/ServShared/pkg/middleware
@@ -243,3 +243,4 @@ google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
 google.golang.org/protobuf/types/known/structpb
 google.golang.org/protobuf/types/known/timestamppb
+# github.com/vyuvaraj/ServShared => ../ServShared
