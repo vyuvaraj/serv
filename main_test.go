@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vyuvaraj/ServShared"
 	"servconsole/pkg/config"
 	"servconsole/pkg/tabs"
 	"servconsole/pkg/topology"
@@ -1353,9 +1354,59 @@ func TestAIObservabilityPipelines(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
+// TestConsoleV1Readiness verifies V1.1 (/api/v1 prefix), V1.2 (standard errors), and V1.6 (/api/version).
+func TestConsoleV1Readiness(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("servconsole", "1.0.0"))
+	mux.HandleFunc("/api/error-test", func(w http.ResponseWriter, r *http.Request) {
+		WriteJSONError(w, r, "Test Error Message", "ERR_TEST", http.StatusBadRequest)
+	})
 
+	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/v1/")
+		}
+		mux.ServeHTTP(w, r)
+	})
 
+	// 1. Verify V1.6 (/api/version)
+	req := httptest.NewRequest("GET", "/api/version", nil)
+	rr := httptest.NewRecorder()
+	v1Wrapper.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 for /api/version, got %d", rr.Code)
+	}
+	var ver map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &ver); err != nil {
+		t.Fatalf("failed to parse version JSON: %v", err)
+	}
+	if ver["service"] != "servconsole" || ver["version"] != "1.0.0" {
+		t.Errorf("unexpected version response: %+v", ver)
+	}
 
+	// 2. Verify V1.1 (prefix rewriting `/api/v1/version` -> `/api/version`)
+	reqV1 := httptest.NewRequest("GET", "/api/v1/version", nil)
+	rrV1 := httptest.NewRecorder()
+	v1Wrapper.ServeHTTP(rrV1, reqV1)
+	if rrV1.Code != http.StatusOK {
+		t.Errorf("expected 200 for /api/v1/version, got %d", rrV1.Code)
+	}
 
+	// 3. Verify V1.2 (standardized error format)
+	reqErr := httptest.NewRequest("GET", "/api/v1/error-test", nil)
+	reqErr.Header.Set("X-Trace-ID", "trace-12345")
+	rrErr := httptest.NewRecorder()
+	v1Wrapper.ServeHTTP(rrErr, reqErr)
+	if rrErr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for error test, got %d", rrErr.Code)
+	}
 
+	var errBody map[string]string
+	if err := json.Unmarshal(rrErr.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("failed to parse error JSON: %v", err)
+	}
+	if errBody["error"] != "Test Error Message" || errBody["code"] != "ERR_TEST" || errBody["trace_id"] != "trace-12345" {
+		t.Errorf("unexpected error format: %+v", errBody)
+	}
+}
 

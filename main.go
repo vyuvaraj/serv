@@ -23,6 +23,7 @@ import (
 	_ "github.com/lib/pq"
 	_ "github.com/sijms/go-ora/v2"
 
+	"github.com/vyuvaraj/ServShared"
 	pkgalerts "servconsole/pkg/alerts"
 	"servconsole/pkg/auth"
 	"servconsole/pkg/config"
@@ -205,6 +206,16 @@ func main() {
 	// Proxy Downstream Mappings
 	registerProxies(mux)
 
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("servconsole", "1.0.0"))
+
+	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
+	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/v1/")
+		}
+		mux.ServeHTTP(w, r)
+	})
+
 	// Static Web Assets
 	subFS, err := fs.Sub(webAssets, "web")
 	if err == nil {
@@ -213,7 +224,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", config.ActiveDiscovery.ConsolePort),
-		Handler: mux,
+		Handler: v1Wrapper,
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -271,14 +282,7 @@ func registerProxies(mux *http.ServeMux) {
 }
 
 func WriteJSONError(w http.ResponseWriter, r *http.Request, msg string, code string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	traceID := r.Header.Get("X-Trace-ID")
-	json.NewEncoder(w).Encode(map[string]any{
-		"error":    msg,
-		"code":     code,
-		"trace_id": traceID,
-	})
+	ServShared.WriteJSONError(w, r, msg, code, status)
 }
 
 func loadAuditLogs() {
