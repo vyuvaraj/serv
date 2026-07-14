@@ -150,6 +150,26 @@ func RunWorkflow(
 				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s paused pending manual approval.", task.Name))
 				inst.Mu.Unlock()
 				SaveCheckpoint(inst, store, instances, instancesMu)
+
+				if task.TimeoutMs > 0 {
+					go func(tName string, timeoutMs int) {
+						time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
+						inst.Mu.Lock()
+						tState := inst.TaskStates[tName]
+						if tState.Status == "pending_approval" && inst.Status == "paused" {
+							tState.Status = "failed"
+							tState.Error = fmt.Sprintf("approval timed out after %dms", timeoutMs)
+							inst.Status = "failed"
+							inst.FinishedAt = time.Now()
+							inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s approval timed out. Initiating Saga compensation...", tName))
+							inst.Mu.Unlock()
+							SaveCheckpoint(inst, store, instances, instancesMu)
+							TriggerRollbackSaga(inst, def, store, instances, instancesMu)
+							return
+						}
+						inst.Mu.Unlock()
+					}(task.Name, task.TimeoutMs)
+				}
 				return
 			}
 

@@ -1203,6 +1203,111 @@ func TestSagaCompensationOrdering(t *testing.T) {
 	_ = os.Remove(inst.ID + ".state")
 }
 
+func TestDAGCycleDetectionRejection(t *testing.T) {
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define workflow with a cycle (Task1 -> Task2 -> Task1)
+	defPayload := storage.WorkflowDef{
+		ID: "cyclic-flow-validation",
+		Tasks: []storage.Task{
+			{Name: "Task1", DependsOn: []string{"Task2"}, Action: "success"},
+			{Name: "Task2", DependsOn: []string{"Task1"}, Action: "success"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, err := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected StatusBadRequest for cyclic definition, got %d", resp.StatusCode)
+	}
+
+	var res map[string]string
+	json.NewDecoder(resp.Body).Decode(&res)
+	if res["error"] != "Cyclic dependency detected" {
+		t.Errorf("expected 'Cyclic dependency detected' error message, got %q", res["error"])
+	}
+}
+
+func TestApprovalTimeoutRaceCondition(t *testing.T) {
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/approve", handleApprove)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define workflow with an approval gate that has a 100ms timeout
+	defPayload := storage.WorkflowDef{
+		ID: "race-flow",
+		Tasks: []storage.Task{
+			{Name: "GateTask", Action: "approval", TimeoutMs: 100, CompensateAction: "success"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "race-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst storage.WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Sleep exactly until the timeout boundary (100ms) to trigger a race condition between approval and timeout
+	time.Sleep(100 * time.Millisecond)
+
+	// Try to approve it
+	approvePayload := map[string]string{
+		"instance_id": inst.ID,
+		"task_name":   "GateTask",
+		"decision":    "approve",
+	}
+	approveBody, _ := json.Marshal(approvePayload)
+	approveResp, err := http.Post(testServer.URL+"/api/workflows/approve", "application/json", bytes.NewReader(approveBody))
+	if err != nil {
+		t.Fatalf("approval call failed: %v", err)
+	}
+	
+	// Either 200 OK (approval got lock first) or 400 Bad Request (timeout got lock first) must happen deterministically
+	// It should never deadlock or return 500
+	if approveResp.StatusCode != http.StatusOK && approveResp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unexpected status code on race approval: %d", approveResp.StatusCode)
+	}
+	approveResp.Body.Close()
+
+	// Wait for any background operations to stabilize
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify status is final (either completed or failed, never stuck in paused/running/pending_approval)
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst storage.WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	t.Logf("Race final status: %s, logs: %v", finalInst.Status, finalInst.Logs)
+
+	if finalInst.Status != "completed" && finalInst.Status != "failed" {
+		t.Errorf("expected final status to be completed or failed, got %q", finalInst.Status)
+	}
+
+	_ = os.Remove(inst.ID + ".state")
+}
+
+
 
 
 

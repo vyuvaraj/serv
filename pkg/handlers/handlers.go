@@ -85,6 +85,13 @@ func (ctx *HandlerContext) HandleDefine(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if engine.HasCycle(def) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"Cyclic dependency detected"}`))
+		return
+	}
+
 	ctx.Mu.Lock()
 	ctx.Definitions[def.ID] = def
 	ctx.Mu.Unlock()
