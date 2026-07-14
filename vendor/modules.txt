@@ -17,8 +17,7 @@ github.com/redis/go-redis/v9/internal/pool
 github.com/redis/go-redis/v9/internal/proto
 github.com/redis/go-redis/v9/internal/rand
 github.com/redis/go-redis/v9/internal/util
-# github.com/vyuvaraj/ServShared v1.0.1 => ../ServShared
+# github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
 ## explicit; go 1.26.4
 github.com/vyuvaraj/ServShared
 github.com/vyuvaraj/ServShared/pkg/middleware
-# github.com/vyuvaraj/ServShared => ../ServShared
