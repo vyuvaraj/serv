@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.24
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.104.0
-	github.com/vyuvaraj/ServShared v1.0.1
+	github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
 )
 
 require (
@@ -27,6 +27,3 @@ require (
 	github.com/aws/smithy-go v1.27.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 )
-
-replace github.com/vyuvaraj/ServShared => ../ServShared
-
