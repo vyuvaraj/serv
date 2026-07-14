@@ -231,6 +231,15 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	UsersMu.Unlock()
 
+	// Timing attack prevention: always perform bcrypt check to ensure uniform response timing
+	var hashToCheck string
+	if exists {
+		hashToCheck = user.Password
+	} else {
+		hashToCheck = "$2a$10$S3XqY4QJ.y3R1/c/83X/ueQ56xQn4zO3x.Bv6u/56xQn4zO3x.Bv6"
+	}
+	passwordMatches := VerifyPassword(req.Password, hashToCheck)
+
 	if !exists {
 		_ = ServShared.EmitAuditEvent("ServAuth", "LOGIN_FAILED", req.Username, map[string]interface{}{
 			"ip":     r.RemoteAddr,
@@ -241,7 +250,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !VerifyPassword(req.Password, user.Password) {
+	if !passwordMatches {
 		// AI.32 track stuffing IP
 		ip := r.RemoteAddr
 		if idx := strings.Index(ip, ":"); idx > 0 {

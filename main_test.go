@@ -877,4 +877,68 @@ func TestPluggableStuffingDetector(t *testing.T) {
 	}
 }
 
+func TestTimingAttackResistance(t *testing.T) {
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/register", handlers.HandleRegister)
+	mux.HandleFunc("/api/auth/login", handlers.HandleLogin)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Register an existing user
+	regPayload := store.RegisterRequest{
+		Username: "timinguser",
+		Email:    "timing@example.com",
+		Password: "correctpassword",
+	}
+	body, _ := json.Marshal(regPayload)
+	resp, _ := http.Post(testServer.URL+"/api/auth/register", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// 2. Measure login time for EXISTING user with WRONG password
+	loginPayloadExistent := store.LoginRequest{
+		Username: "timinguser",
+		Password: "wrongpassword",
+	}
+	bodyExistent, _ := json.Marshal(loginPayloadExistent)
+
+	startExistent := time.Now()
+	respExistent, err := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(bodyExistent))
+	if err != nil {
+		t.Fatalf("failed existent login request: %v", err)
+	}
+	respExistent.Body.Close()
+	durExistent := time.Since(startExistent)
+
+	// 3. Measure login time for NON-EXISTENT user
+	loginPayloadNonExistent := store.LoginRequest{
+		Username: "nobody-exists-with-this-name",
+		Password: "wrongpassword",
+	}
+	bodyNonExistent, _ := json.Marshal(loginPayloadNonExistent)
+
+	startNonExistent := time.Now()
+	respNonExistent, err := http.Post(testServer.URL+"/api/auth/login", "application/json", bytes.NewReader(bodyNonExistent))
+	if err != nil {
+		t.Fatalf("failed non-existent login request: %v", err)
+	}
+	respNonExistent.Body.Close()
+	durNonExistent := time.Since(startNonExistent)
+
+	t.Logf("Existent user (wrong pass) dur: %v", durExistent)
+	t.Logf("Non-existent user dur: %v", durNonExistent)
+
+	// Difference should be very small (e.g. less than 20ms slack on modern CPUs)
+	diff := durExistent - durNonExistent
+	if diff < 0 {
+		diff = -diff
+	}
+
+	if diff > 30*time.Millisecond {
+		t.Errorf("potential timing attack: difference between existent and non-existent user login is too large (%v)", diff)
+	}
+}
+
+
 
