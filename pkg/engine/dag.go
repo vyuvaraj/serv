@@ -89,6 +89,15 @@ func RunWorkflow(
 		}
 	}()
 
+	inst.Mu.Lock()
+	for _, state := range inst.TaskStates {
+		if state.Status == "running" {
+			state.Status = "pending"
+			inst.Logs = append(inst.Logs, "Resetting running task to pending on startup/resume.")
+		}
+	}
+	inst.Mu.Unlock()
+
 	completedCount := 0
 	inst.Mu.RLock()
 	for _, state := range inst.TaskStates {
@@ -374,9 +383,37 @@ func RollbackSaga(
 	instances map[string]*storage.WorkflowInstance,
 	instancesMu *sync.RWMutex,
 ) {
-	for i := len(def.Tasks) - 1; i >= 0; i-- {
-		t := def.Tasks[i]
+	// 1. Gather all tasks that completed
+	type completedTask struct {
+		Task       storage.Task
+		FinishedAt time.Time
+	}
+	var completed []completedTask
 
+	inst.Mu.RLock()
+	for _, t := range def.Tasks {
+		tState, exists := inst.TaskStates[t.Name]
+		if exists && tState.Status == "completed" && t.CompensateAction != "" {
+			completed = append(completed, completedTask{
+				Task:       t,
+				FinishedAt: tState.FinishedAt,
+			})
+		}
+	}
+	inst.Mu.RUnlock()
+
+	// 2. Sort completed tasks by FinishedAt in descending order (reverse completion order)
+	for i := 0; i < len(completed); i++ {
+		for j := i + 1; j < len(completed); j++ {
+			if completed[i].FinishedAt.Before(completed[j].FinishedAt) {
+				completed[i], completed[j] = completed[j], completed[i]
+			}
+		}
+	}
+
+	// 3. Compensate them in that exact reverse completion order
+	for _, ct := range completed {
+		t := ct.Task
 		inst.Mu.Lock()
 		tState := inst.TaskStates[t.Name]
 
@@ -385,47 +422,43 @@ func RollbackSaga(
 			return
 		}
 
-		if tState.Status == "completed" && t.CompensateAction != "" {
-			tState.Status = "compensating"
-			inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
-			inst.Mu.Unlock()
-			SaveCheckpoint(inst, store, instances, instancesMu)
+		tState.Status = "compensating"
+		inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Executing compensation rollback for task %s: %s", t.Name, t.CompensateAction))
+		inst.Mu.Unlock()
+		SaveCheckpoint(inst, store, instances, instancesMu)
 
-			if strings.HasPrefix(t.CompensateAction, "event://") {
-				topic := "/topic/" + strings.TrimPrefix(t.CompensateAction, "event://")
-				brokerAddr := os.Getenv("SERVQUEUE_ADDR")
-				if brokerAddr == "" {
-					brokerAddr = "localhost:8082"
-				}
-				payload := fmt.Sprintf(`{"instance_id": "%s", "task_name": "%s"}`, inst.ID, t.Name)
+		if strings.HasPrefix(t.CompensateAction, "event://") {
+			topic := "/topic/" + strings.TrimPrefix(t.CompensateAction, "event://")
+			brokerAddr := os.Getenv("SERVQUEUE_ADDR")
+			if brokerAddr == "" {
+				brokerAddr = "localhost:8082"
+			}
+			payload := fmt.Sprintf(`{"instance_id": "%s", "task_name": "%s"}`, inst.ID, t.Name)
 
-				err := PublishStompMessage(brokerAddr, topic, []byte(payload))
-				if err != nil {
-					inst.Mu.Lock()
-					tState.Status = "failed"
-					tState.Error = "STOMP publish failed: " + err.Error()
-					inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed to publish for task %s: %v", t.Name, err))
-					inst.Mu.Unlock()
-					SaveCheckpoint(inst, store, instances, instancesMu)
-				}
-				return
-			} else {
-				err := ExecuteTaskAction(storage.Task{Name: t.Name, Action: t.CompensateAction})
-
+			err := PublishStompMessage(brokerAddr, topic, []byte(payload))
+			if err != nil {
 				inst.Mu.Lock()
-				if err != nil {
-					tState.Status = "failed"
-					tState.Error = "compensation failed: " + err.Error()
-					inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed for task %s: %v", t.Name, err))
-				} else {
-					tState.Status = "compensated"
-					inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation succeeded for task %s", t.Name))
-				}
+				tState.Status = "failed"
+				tState.Error = "STOMP publish failed: " + err.Error()
+				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed to publish for task %s: %v", t.Name, err))
 				inst.Mu.Unlock()
 				SaveCheckpoint(inst, store, instances, instancesMu)
 			}
+			return
 		} else {
+			err := ExecuteTaskAction(storage.Task{Name: t.Name, Action: t.CompensateAction})
+
+			inst.Mu.Lock()
+			if err != nil {
+				tState.Status = "failed"
+				tState.Error = "compensation failed: " + err.Error()
+				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation failed for task %s: %v", t.Name, err))
+			} else {
+				tState.Status = "compensated"
+				inst.Logs = append(inst.Logs, fmt.Sprintf("[SAGA] Compensation succeeded for task %s", t.Name))
+			}
 			inst.Mu.Unlock()
+			SaveCheckpoint(inst, store, instances, instancesMu)
 		}
 	}
 }

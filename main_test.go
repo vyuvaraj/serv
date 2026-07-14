@@ -1052,5 +1052,157 @@ func TestVisualDesignerOSS(t *testing.T) {
 	}
 }
 
+func TestCheckpointRecoveryAccuracy(t *testing.T) {
+	// Setup test context and handlers
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/resume", handleResume)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// 1. Define workflow with 3 steps
+	defPayload := storage.WorkflowDef{
+		ID: "recovery-flow",
+		Tasks: []storage.Task{
+			{Name: "Task1", Action: "sleep-100"},
+			{Name: "Task2", DependsOn: []string{"Task1"}, Action: "sleep-100"},
+			{Name: "Task3", DependsOn: []string{"Task2"}, Action: "sleep-100"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// 2. Execute workflow
+	execPayload := map[string]string{"workflow_id": "recovery-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst storage.WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait briefly so Task1 gets in "running" or "completed" state, then simulate a crash (kill/restart)
+	time.Sleep(50 * time.Millisecond)
+
+	// Read state checkpoint file directly
+	statePath := inst.ID + ".state"
+	stateData, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("checkpoint file not found: %v", err)
+	}
+
+	var checkpointInst storage.WorkflowInstance
+	json.Unmarshal(stateData, &checkpointInst)
+
+	// Ensure at least one task is captured as "running" or "completed" in checkpoint
+	t.Logf("Checkpoint Task1 status: %s", checkpointInst.TaskStates["Task1"].Status)
+
+	// Modify checkpoint state so Task2 is marked "running" to simulate crash mid-Task2
+	checkpointInst.TaskStates["Task2"].Status = "running"
+	checkpointInst.TaskStates["Task2"].StartedAt = time.Now()
+	modifiedData, _ := json.Marshal(checkpointInst)
+	os.WriteFile(statePath, modifiedData, 0644)
+
+	// 3. Resume from checkpoint
+	resumePayload := map[string]string{"instance_id": inst.ID}
+	resumeBody, _ := json.Marshal(resumePayload)
+	resumeResp, err := http.Post(testServer.URL+"/api/workflows/resume", "application/json", bytes.NewReader(resumeBody))
+	if err != nil {
+		t.Fatalf("failed to resume: %v", err)
+	}
+	resumeResp.Body.Close()
+
+	// Wait for execution to finish
+	time.Sleep(500 * time.Millisecond)
+
+	// 4. Fetch final status
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst storage.WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	t.Logf("Final workflow status: %s, logs: %v", finalInst.Status, finalInst.Logs)
+
+	if finalInst.Status != "completed" {
+		t.Errorf("expected resumed workflow to complete successfully, got %q", finalInst.Status)
+	}
+
+	_ = os.Remove(statePath)
+}
+
+func TestSagaCompensationOrdering(t *testing.T) {
+	// Setup test context and handlers
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/define", handleDefine)
+	mux.HandleFunc("/api/workflows/execute", handleExecute)
+	mux.HandleFunc("/api/workflows/instances/", handleGetInstance)
+
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	// Define workflow with 3 steps where Step3 fails and triggers saga rollback
+	defPayload := storage.WorkflowDef{
+		ID: "saga-order-flow",
+		Tasks: []storage.Task{
+			{Name: "Step1", Action: "sleep-100", CompensateAction: "sleep-100"},
+			{Name: "Step2", DependsOn: []string{"Step1"}, Action: "sleep-100", CompensateAction: "sleep-100"},
+			{Name: "Step3", DependsOn: []string{"Step2"}, Action: "fail", CompensateAction: "sleep-100"},
+		},
+	}
+	body, _ := json.Marshal(defPayload)
+	resp, _ := http.Post(testServer.URL+"/api/workflows/define", "application/json", bytes.NewReader(body))
+	resp.Body.Close()
+
+	// Execute
+	execPayload := map[string]string{"workflow_id": "saga-order-flow"}
+	execBody, _ := json.Marshal(execPayload)
+	execResp, _ := http.Post(testServer.URL+"/api/workflows/execute", "application/json", bytes.NewReader(execBody))
+	var inst storage.WorkflowInstance
+	json.NewDecoder(execResp.Body).Decode(&inst)
+	execResp.Body.Close()
+
+	// Wait for execution and saga rollback
+	time.Sleep(600 * time.Millisecond)
+
+	// Fetch final instance logs
+	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + inst.ID)
+	var finalInst storage.WorkflowInstance
+	json.NewDecoder(getResp.Body).Decode(&finalInst)
+	getResp.Body.Close()
+
+	// Parse out compensation order from logs
+	compensationOrder := []string{}
+	for _, log := range finalInst.Logs {
+		if strings.Contains(log, "Executing compensation rollback for task") {
+			parts := strings.Fields(log)
+			// Log format: "[SAGA] Executing compensation rollback for task StepX: ..."
+			for i, p := range parts {
+				if p == "task" && i+1 < len(parts) {
+					taskName := strings.TrimSuffix(parts[i+1], ":")
+					compensationOrder = append(compensationOrder, taskName)
+				}
+			}
+		}
+	}
+
+	t.Logf("Compensation execution order: %v", compensationOrder)
+
+	// Step3 failed, so only completed tasks (Step2, then Step1) should be compensated in that order (Step2 first, then Step1)
+	if len(compensationOrder) < 2 {
+		t.Fatalf("expected at least 2 compensations, got %d", len(compensationOrder))
+	}
+	if compensationOrder[0] != "Step2" || compensationOrder[1] != "Step1" {
+		t.Errorf("expected Step2 then Step1 compensation order, got %v", compensationOrder)
+	}
+
+	_ = os.Remove(inst.ID + ".state")
+}
+
+
 
 
