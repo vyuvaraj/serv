@@ -212,6 +212,7 @@ func (s *Store) AddSpans(newSpans []Span) {
 			}
 
 			s.spans[traceID] = append(s.spans[traceID], span)
+			s.propagateBaggageToChildren(traceID, span)
 			
 			// Tail-based sampling override: always keep traces with errors or slow query alerts!
 			isError := span.Status == 2
@@ -227,6 +228,29 @@ func (s *Store) AddSpans(newSpans []Span) {
 
 			// Span metrics calculation!
 			s.recordSpanMetrics(span)
+		}
+	}
+}
+
+func (s *Store) propagateBaggageToChildren(traceID string, parentSpan Span) {
+	for i := range s.spans[traceID] {
+		child := &s.spans[traceID][i]
+		if child.ParentSpanID == parentSpan.SpanID {
+			if child.Attributes == nil {
+				child.Attributes = make(map[string]interface{})
+			}
+			updated := false
+			for k, v := range parentSpan.Attributes {
+				if strings.HasPrefix(k, "baggage.") {
+					if _, exists := child.Attributes[k]; !exists {
+						child.Attributes[k] = v
+						updated = true
+					}
+				}
+			}
+			if updated {
+				s.propagateBaggageToChildren(traceID, *child)
+			}
 		}
 	}
 }

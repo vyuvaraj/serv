@@ -460,3 +460,158 @@ func TestAdaptiveSampling(t *testing.T) {
 		t.Errorf("Expected sampling rate to spike to 100, got %d", rate)
 	}
 }
+
+func TestSpanIngestionThroughput(t *testing.T) {
+	ts := store.NewStore(50000)
+	
+	// Create 20,000 spans
+	spans := make([]store.Span, 20000)
+	for i := 0; i < 20000; i++ {
+		spans[i] = store.Span{
+			TraceID:   fmt.Sprintf("trace-%d", i/5),
+			SpanID:    fmt.Sprintf("span-%d", i),
+			Name:      "GET /items",
+			Service:   "perf-service",
+			StartTime: time.Now().UnixNano(),
+			EndTime:   time.Now().UnixNano() + 1000000,
+		}
+	}
+
+	start := time.Now()
+	// Add spans in batches of 100
+	batchSize := 100
+	for i := 0; i < len(spans); i += batchSize {
+		end := i + batchSize
+		if end > len(spans) {
+			end = len(spans)
+		}
+		ts.AddSpans(spans[i:end])
+	}
+	duration := time.Since(start)
+
+	spansPerSec := float64(len(spans)) / duration.Seconds()
+	t.Logf("Ingestion performance: %d spans in %v (%.2f spans/sec)", len(spans), duration, spansPerSec)
+
+	// Target: 10K/sec single node
+	if spansPerSec < 10000 {
+		t.Errorf("Ingestion throughput too low: %.2f spans/sec (target: >= 10,000/sec)", spansPerSec)
+	}
+}
+
+func TestOutOfOrderTraceReconstruction(t *testing.T) {
+	ts := store.NewStore(100)
+	traceID := "ooo-trace-987"
+
+	// 1. Define 20 spans of a single trace in parent-child relationship:
+	// Span 0 is root. Span i depends on i-1.
+	spans := make([]store.Span, 20)
+	for i := 0; i < 20; i++ {
+		pID := ""
+		if i > 0 {
+			pID = fmt.Sprintf("span-%d", i-1)
+		}
+		attrs := make(map[string]interface{})
+		if i == 0 {
+			attrs["baggage.request_id"] = "req-12345"
+		}
+		spans[i] = store.Span{
+			TraceID:      traceID,
+			SpanID:       fmt.Sprintf("span-%d", i),
+			ParentSpanID: pID,
+			Name:         fmt.Sprintf("Step-%d", i),
+			Service:      "test-service",
+			StartTime:    time.Now().UnixNano() + int64(i)*1000,
+			EndTime:      time.Now().UnixNano() + int64(i)*1000 + 500,
+			Attributes:   attrs,
+		}
+	}
+
+	// 2. Ingest out-of-order (reverse: children first, then parent, then root)
+	for i := 19; i >= 0; i-- {
+		ts.AddSpans([]store.Span{spans[i]})
+	}
+
+	// 3. Get reconstructed tree
+	tree, ok := ts.GetTraceTree(traceID)
+	if !ok {
+		t.Fatalf("failed to retrieve trace tree")
+	}
+
+	// 4. Verify tree depth/size
+	count := 0
+	var checkNode func(n *store.SpanNode)
+	checkNode = func(n *store.SpanNode) {
+		if n == nil {
+			return
+		}
+		count++
+		
+		// Verify baggage propagation succeeded recursively for all nodes
+		val, exists := n.Span.Attributes["baggage.request_id"]
+		if !exists || val != "req-12345" {
+			t.Errorf("missing baggage on task %s", n.Span.Name)
+		}
+		
+		for _, child := range n.Children {
+			checkNode(child)
+		}
+	}
+	checkNode(tree)
+
+	if count != 20 {
+		t.Errorf("expected 20 spans in tree, got %d", count)
+	}
+}
+
+func TestColdTierRetrievalLatency(t *testing.T) {
+	ts := store.NewStore(100)
+	srv := server.NewServer(ts)
+
+	traceID := "cold-trace-456"
+
+	// Mock S3 Cold Tier Server
+	s3Mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]store.Span{
+			{TraceID: traceID, SpanID: "span1", Name: "RootSpan", Service: "gateway", StartTime: 1000, EndTime: 2000},
+			{TraceID: traceID, SpanID: "span2", ParentSpanID: "span1", Name: "ChildSpan", Service: "auth", StartTime: 1100, EndTime: 1800},
+		})
+	}))
+	defer s3Mock.Close()
+
+	os.Setenv("SERV_CONFIG_S3_ENDPOINT", s3Mock.URL)
+	defer os.Unsetenv("SERV_CONFIG_S3_ENDPOINT")
+
+	// Call handleGetTraceTree over HTTP via srv.Handler()
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	start := time.Now()
+	getResp, err := http.Get(testServer.URL + "/api/traces/" + traceID)
+	if err != nil {
+		t.Fatalf("failed request: %v", err)
+	}
+	defer getResp.Body.Close()
+	duration := time.Since(start)
+
+	t.Logf("Cold tier retrieval took %v", duration)
+
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", getResp.StatusCode)
+	}
+
+	var tree store.SpanNode
+	if err := json.NewDecoder(getResp.Body).Decode(&tree); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if tree.Span.Name != "RootSpan" || len(tree.Children) != 1 || tree.Children[0].Span.Name != "ChildSpan" {
+		t.Errorf("incorrect tree reconstructed: %+v", tree)
+	}
+
+	// Target: Query latency < 500ms
+	if duration > 500*time.Millisecond {
+		t.Errorf("cold tier query latency exceeded 500ms limit: %v", duration)
+	}
+}
+
