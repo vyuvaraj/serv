@@ -201,20 +201,24 @@ func main() {
 	}
 	resp.Body.Close()
 
-	// Wait for the async goroutine execution
-	time.Sleep(1500 * time.Millisecond)
-
-	logMu.Lock()
+	// Wait for the async goroutine execution (up to 5 seconds, polling)
 	matchedFired := false
 	var captured []string
-	captured = append(captured, logs...)
-	for _, l := range logs {
-		if strings.Contains(l, "TRIGGER_FIRED") || strings.Contains(l, "trigger-bucket") && strings.Contains(l, "uploads/test.txt") {
-			matchedFired = true
+	for i := 0; i < 100; i++ {
+		logMu.Lock()
+		captured = append([]string(nil), logs...)
+		for _, l := range logs {
+			if strings.Contains(l, "TRIGGER_FIRED") && strings.Contains(l, "key=uploads/test.txt") {
+				matchedFired = true
+				break
+			}
+		}
+		logMu.Unlock()
+		if matchedFired {
 			break
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	logMu.Unlock()
 
 	if !matchedFired {
 		t.Errorf("expected matching trigger to fire, captured logs: %v", captured)
@@ -236,18 +240,27 @@ func main() {
 	}
 	resp2.Body.Close()
 
-	time.Sleep(200 * time.Millisecond)
-
-	logMu.Lock()
+	// Wait up to 1 second to see if unmatched triggers fire
 	unmatchedFired := false
-	for _, l := range logs {
-		if strings.Contains(l, "TRIGGER_FIRED") {
-			unmatchedFired = true
+	for i := 0; i < 20; i++ {
+		logMu.Lock()
+		for _, l := range logs {
+			if strings.Contains(l, "TRIGGER_FIRED") && strings.Contains(l, "key=other/test.txt") {
+				unmatchedFired = true
+				break
+			}
 		}
+		logMu.Unlock()
+		if unmatchedFired {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	logMu.Unlock()
 
 	if unmatchedFired {
-		t.Errorf("did not expect unmatched trigger to fire, captured logs: %v", logs)
+		logMu.Lock()
+		capturedLogs := append([]string(nil), logs...)
+		logMu.Unlock()
+		t.Errorf("did not expect unmatched trigger to fire, captured logs: %v", capturedLogs)
 	}
 }
