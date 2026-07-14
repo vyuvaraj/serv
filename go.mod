@@ -7,7 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/lib/pq v1.12.3
 	github.com/sijms/go-ora/v2 v2.9.0
-	github.com/vyuvaraj/ServShared v0.1.1-0.20260707060806-c546de0a6015
+	github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
 )
 
 require (
@@ -24,6 +24,3 @@ require (
 	modernc.org/memory v1.7.2 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
 )
-
-replace github.com/vyuvaraj/ServShared => ../ServShared
-
