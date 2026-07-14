@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vyuvaraj/ServShared/pkg/middleware"
@@ -177,6 +182,8 @@ var (
 	IsolateTopicHook func(ctx context.Context, topic string) string
 	// IsolateDBPoolHook is dynamically injected by the Enterprise Edition module.
 	IsolateDBPoolHook func(ctx context.Context, dbName string) string
+	// IsolateBucketHook is dynamically injected by the Enterprise Edition module.
+	IsolateBucketHook func(ctx context.Context, bucket string) string
 )
 
 // IsolateTopic prefixes a topic name with the tenant ID from context.
@@ -197,6 +204,16 @@ func IsolateDBPool(ctx context.Context, dbName string) string {
 		return IsolateDBPoolHook(ctx, dbName)
 	}
 	return dbName
+}
+
+// IsolateBucket prefixes a storage bucket name with the tenant ID from context.
+// In OSS: returns the bucket unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant S3 storage isolation.
+func IsolateBucket(ctx context.Context, bucket string) string {
+	if IsolateBucketHook != nil {
+		return IsolateBucketHook(ctx, bucket)
+	}
+	return bucket
 }
 
 // VersionHandler returns a JSON version response.
@@ -224,6 +241,117 @@ func DeprecationMiddleware(sunsetDate string) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// ChaosMiddleware injects random latencies and/or service dropouts for development testing.
+func ChaosMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Check for Latency Chaos
+		latencyMs := 0
+		if latencyEnv := os.Getenv("SERV_CHAOS_LATENCY_MS"); latencyEnv != "" {
+			if val, err := strconv.Atoi(latencyEnv); err == nil {
+				latencyMs = val
+			}
+		}
+		if latencyHeader := r.Header.Get("X-Chaos-Latency"); latencyHeader != "" {
+			if val, err := strconv.Atoi(latencyHeader); err == nil {
+				latencyMs = val
+			}
+		}
+
+		if latencyMs > 0 {
+			time.Sleep(time.Duration(latencyMs) * time.Millisecond)
+		}
+
+		// 2. Check for Drop/Failure Chaos
+		dropRate := 0.0
+		if dropEnv := os.Getenv("SERV_CHAOS_DROP_RATE"); dropEnv != "" {
+			if val, err := strconv.ParseFloat(dropEnv, 64); err == nil {
+				dropRate = val
+			}
+		}
+		if dropHeader := r.Header.Get("X-Chaos-Drop-Rate"); dropHeader != "" {
+			if val, err := strconv.ParseFloat(dropHeader, 64); err == nil {
+				dropRate = val
+			}
+		} else if r.Header.Get("X-Chaos-Drop") == "true" {
+			dropRate = 1.0
+		}
+
+		if dropRate > 0.0 {
+			// Seed random source if needed
+			if rand.Float64() < dropRate {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"Chaos fault injected: request dropped","code":"ERR_CHAOS_DROPPED"}`))
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// CORSMiddleware adds Access-Control-Allow-Origin and other CORS headers.
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := os.Getenv("SERV_CORS_ORIGIN")
+		if origin == "" {
+			origin = "*"
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-ID, X-Tenant-ID, X-Signature, X-Public-Key, X-Provenance")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type ipRateLimiter struct {
+	mu     sync.Mutex
+	limits map[string][]time.Time
+}
+
+var globalIPLimiter = &ipRateLimiter{
+	limits: make(map[string][]time.Time),
+}
+
+// RateLimitMiddleware enforces a sliding window limit of 100 requests per minute per IP.
+func RateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+		
+		globalIPLimiter.mu.Lock()
+		now := time.Now()
+		cutoff := now.Add(-1 * time.Minute)
+		
+		var active []time.Time
+		for _, t := range globalIPLimiter.limits[ip] {
+			if t.After(cutoff) {
+				active = append(active, t)
+			}
+		}
+		
+		if len(active) >= 100 {
+			globalIPLimiter.mu.Unlock()
+			WriteJSONError(w, r, "Rate limit exceeded. Max 100 requests per minute.", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
+			return
+		}
+		
+		active = append(active, now)
+		globalIPLimiter.limits[ip] = active
+		globalIPLimiter.mu.Unlock()
+		
+		next.ServeHTTP(w, r)
+	})
+}
+
+
 
 
 
