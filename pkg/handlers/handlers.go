@@ -47,6 +47,10 @@ type HandlerContext struct {
 	// SleepFn is the sleep implementation used between retries.
 	// Defaults to time.Sleep; override in tests to capture intervals without blocking.
 	SleepFn func(d time.Duration)
+
+	// RateLimitPerMinute is the max emails allowed per recipient per minute.
+	// Defaults to 10 in production. Override in tests for fast verification.
+	RateLimitPerMinute int
 }
 
 type SendResponse struct {
@@ -84,11 +88,15 @@ func (ctx *HandlerContext) HandleSend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if len(active) >= 5 {
+	limit := ctx.RateLimitPerMinute
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(active) >= limit {
 		ctx.RateLimitsMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":"rate_limit_exceeded","message":"Recipient rate limit exceeded. Max 5 messages per minute."}`))
+		w.Write([]byte(`{"error":"rate_limit_exceeded","message":"Recipient rate limit exceeded. Max 10 messages per minute."}`))
 		return
 	}
 

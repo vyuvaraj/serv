@@ -148,8 +148,8 @@ func TestServMailRateLimiting(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 
-	// Send 5 successful quick messages
-	for i := 0; i < 5; i++ {
+	// Send 10 successful messages (default limit is 10/min)
+	for i := 0; i < 10; i++ {
 		resp, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
@@ -157,7 +157,7 @@ func TestServMailRateLimiting(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	// 6th message should be rate limited (Too Many Requests - 429)
+	// 11th message should be rate limited (Too Many Requests - 429)
 	resp, err := http.Post(testServer.URL+"/api/mail/send", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -165,7 +165,7 @@ func TestServMailRateLimiting(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("expected StatusTooManyRequests (429) on 6th request, got %d", resp.StatusCode)
+		t.Errorf("expected StatusTooManyRequests (429) on 11th request, got %d", resp.StatusCode)
 	}
 }
 
@@ -708,4 +708,65 @@ func TestDLQRetryExponentialBackoff(t *testing.T) {
 	t.Logf("DLQ retry backoff sequence: %v", capturedSleeps)
 }
 
+// TestPerRecipientRateLimiter is the D.57 acceptance test.
+// It verifies that exactly 10 emails are delivered per minute per recipient,
+// and the 11th request is rejected with 429 Too Many Requests.
+func TestPerRecipientRateLimiter(t *testing.T) {
+	const limit = 10
 
+	mockedEmails := []storage.MockEmail{}
+	var mockedEmailsMu sync.RWMutex
+
+	ctx := &handlers.HandlerContext{
+		RateLimits:         make(map[string][]time.Time),
+		RateLimitsMu:       &sync.Mutex{},
+		TemplateRepo:       make(map[string]map[string]string),
+		TemplateRepoMu:     &sync.RWMutex{},
+		TrackingRepo:       make(map[string]*storage.TrackingInfo),
+		TrackingMu:         &sync.RWMutex{},
+		Preferences:        make(map[string]*storage.Preferences),
+		PreferencesMu:      &sync.RWMutex{},
+		AttachmentsRepo:    make(map[string]*storage.Attachment),
+		AttachmentsMu:      &sync.RWMutex{},
+		MockedEmails:       &mockedEmails,
+		MockedEmailsMu:     &mockedEmailsMu,
+		RetryBackoffBase:   1 * time.Millisecond,
+		SleepFn:            func(d time.Duration) {},
+		RateLimitPerMinute: limit,
+	}
+
+	payload := storage.SendRequest{
+		Channel:  "email",
+		Target:   "limited-user@example.com",
+		Template: "Hello",
+	}
+	body, _ := json.Marshal(payload)
+
+	// Send exactly 10 — all must succeed
+	for i := 0; i < limit; i++ {
+		req := httptest.NewRequest("POST", "/api/mail/send", bytes.NewReader(body))
+		rr := httptest.NewRecorder()
+		ctx.HandleSend(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("request %d: expected 200 OK, got %d", i+1, rr.Code)
+		}
+	}
+
+	// 11th must be rejected
+	req := httptest.NewRequest("POST", "/api/mail/send", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	ctx.HandleSend(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("request 11: expected 429 Too Many Requests, got %d", rr.Code)
+	}
+
+	// Verify error body
+	var errResp map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&errResp); err == nil {
+		if errResp["error"] != "rate_limit_exceeded" {
+			t.Errorf("expected error=rate_limit_exceeded, got %q", errResp["error"])
+		}
+	}
+
+	t.Logf("Per-recipient rate limiter: %d/min limit enforced correctly", limit)
+}
