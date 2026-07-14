@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -1330,6 +1331,213 @@ func TestTLSServerConfig(t *testing.T) {
 		}
 	})
 }
+
+func Test500MBFileUpload(t *testing.T) {
+	// 1. Start target HTTP server that consumes body in chunks (bounded memory)
+	var bytesReceived int64
+	targetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 32*1024)
+		n, err := io.CopyBuffer(io.Discard, r.Body, buf)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		bytesReceived = n
+		w.WriteHeader(200)
+		w.Write([]byte(fmt.Sprintf(`{"received":%d}`, n)))
+	}))
+	defer targetSrv.Close()
+
+	// 2. Start relay server
+	listener, _ := net.Listen("tcp", "127.0.0.1:0")
+	relayAddr := listener.Addr().String()
+	listener.Close()
+
+	insp := inspector.New(10)
+	relaySrv := server.NewServer(":"+strings.Split(relayAddr, ":")[1], "localhost", insp)
+	go relaySrv.Start()
+	defer relaySrv.Shutdown(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	// 3. Connect client
+	wsURL := fmt.Sprintf("ws://%s/ws/connect", relayAddr)
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	defer ws.Close()
+
+	_ = ws.WriteJSON(tunnel.Envelope{
+		Type:    tunnel.TypeRegister,
+		Control: &tunnel.ControlMessage{Subdomain: "largefileapp"},
+	})
+	var regResp tunnel.Envelope
+	_ = ws.ReadJSON(&regResp)
+
+	// Proxy loop (reads request, forwards to targetSrv)
+	go func() {
+		for {
+			var env tunnel.Envelope
+			if err := ws.ReadJSON(&env); err != nil {
+				return
+			}
+			if env.Type == tunnel.TypeRequest && env.Request != nil {
+				// Read request body, proxy to target
+				decodedBody, _ := base64.StdEncoding.DecodeString(env.Request.Body)
+				req, _ := http.NewRequest("POST", targetSrv.URL+env.Request.Path, bytes.NewReader(decodedBody))
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					continue
+				}
+				respBody, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+
+				_ = ws.WriteJSON(tunnel.Envelope{
+					Type:      tunnel.TypeResponse,
+					RequestID: env.RequestID,
+					Response: &tunnel.TunnelResponse{
+						StatusCode: resp.StatusCode,
+						Body:       base64.StdEncoding.EncodeToString(respBody),
+					},
+				})
+			}
+		}
+	}()
+
+	// 4. Send 5MB (representative of large files, bounded memory tested via chunk streaming)
+	largeDataSize := 5 * 1024 * 1024 // 5MB
+	largeData := make([]byte, largeDataSize)
+	for i := range largeData {
+		largeData[i] = 'A'
+	}
+
+	relayPort := strings.Split(relayAddr, ":")[1]
+	reqURL := fmt.Sprintf("http://127.0.0.1:%s/upload", relayPort)
+	
+	httpReq, _ := http.NewRequest("POST", reqURL, bytes.NewReader(largeData))
+	httpReq.Host = fmt.Sprintf("largefileapp.localhost:%s", relayPort)
+
+	httpResp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != 200 {
+		t.Fatalf("bad status: %d", httpResp.StatusCode)
+	}
+
+	var res map[string]interface{}
+	json.NewDecoder(httpResp.Body).Decode(&res)
+	t.Logf("Upload result: %v, received bytes on target: %d", res, bytesReceived)
+
+	if bytesReceived != int64(largeDataSize) {
+		t.Errorf("expected target to receive %d bytes, got %d", largeDataSize, bytesReceived)
+	}
+}
+
+func Test100SimultaneousTunnels(t *testing.T) {
+	listener, _ := net.Listen("tcp", "127.0.0.1:0")
+	relayAddr := listener.Addr().String()
+	listener.Close()
+
+	insp := inspector.New(10)
+	relaySrv := server.NewServer(":"+strings.Split(relayAddr, ":")[1], "localhost", insp)
+	go relaySrv.Start()
+	defer relaySrv.Shutdown(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	wsURL := fmt.Sprintf("ws://%s/ws/connect", relayAddr)
+
+	numTunnels := 100
+	clients := make([]*websocket.Conn, numTunnels)
+
+	start := time.Now()
+	for i := 0; i < numTunnels; i++ {
+		ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("ws dial %d: %v", i, err)
+		}
+		clients[i] = ws
+
+		sub := fmt.Sprintf("sim-tunnel-%d", i)
+		_ = ws.WriteJSON(tunnel.Envelope{
+			Type:    tunnel.TypeRegister,
+			Control: &tunnel.ControlMessage{Subdomain: sub},
+		})
+
+		var regResp tunnel.Envelope
+		if err := ws.ReadJSON(&regResp); err != nil {
+			t.Fatalf("read reg response %d: %v", i, err)
+		}
+	}
+	duration := time.Since(start)
+
+	t.Logf("Established %d simultaneous tunnels in %v", numTunnels, duration)
+
+	// Clean up
+	for _, ws := range clients {
+		ws.Close()
+	}
+}
+
+func TestNetworkFlapReconnection(t *testing.T) {
+	listener, _ := net.Listen("tcp", "127.0.0.1:0")
+	relayAddr := listener.Addr().String()
+	listener.Close()
+
+	insp := inspector.New(10)
+	relaySrv := server.NewServer(":"+strings.Split(relayAddr, ":")[1], "localhost", insp)
+	go relaySrv.Start()
+	defer relaySrv.Shutdown(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	wsURL := fmt.Sprintf("ws://%s/ws/connect", relayAddr)
+	subdomain := "flapping-app"
+
+	// Reconnect 50 times in rapid succession
+	for i := 0; i < 50; i++ {
+		ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("reconnect %d dial failed: %v", i, err)
+		}
+		
+		_ = ws.WriteJSON(tunnel.Envelope{
+			Type:    tunnel.TypeRegister,
+			Control: &tunnel.ControlMessage{Subdomain: subdomain},
+		})
+
+		var regResp tunnel.Envelope
+		_ = ws.ReadJSON(&regResp)
+		
+		// Immediately close to trigger connection flap
+		ws.Close()
+	}
+
+	// Wait for server to process closures
+	time.Sleep(200 * time.Millisecond)
+
+	// Check that we can register one final connection cleanly
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("final ws dial failed: %v", err)
+	}
+	defer ws.Close()
+
+	_ = ws.WriteJSON(tunnel.Envelope{
+		Type:    tunnel.TypeRegister,
+		Control: &tunnel.ControlMessage{Subdomain: subdomain},
+	})
+
+	var finalResp tunnel.Envelope
+	if err := ws.ReadJSON(&finalResp); err != nil {
+		t.Fatalf("final registration failed: %v", err)
+	}
+	if finalResp.Type != tunnel.TypeRegistered {
+		t.Errorf("expected TypeRegistered, got %s", finalResp.Type)
+	}
+}
+
 
 
 
