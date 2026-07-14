@@ -12,6 +12,8 @@ import (
 
 	"servcache/pkg/cache"
 	"servcache/pkg/server"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 func TestInMemoryCacheOperations(t *testing.T) {
@@ -376,4 +378,78 @@ func TestCacheLRUEviction(t *testing.T) {
 		t.Error("expected k4 to be retained")
 	}
 }
+
+func TestNamespaceIsolation(t *testing.T) {
+	secret := "my-jwt-test-secret-123"
+	os.Setenv("SERV_JWT_SECRET", secret)
+	defer os.Unsetenv("SERV_JWT_SECRET")
+
+	c := cache.NewInMemoryCache(10 * time.Second)
+	s := server.NewServer(c)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	// Generate tokens for Tenant A and Tenant B
+	tokenA, err := ServShared.GenerateUserToken(secret, "alice", []string{"user"}, "tenant-a", time.Hour)
+	if err != nil {
+		t.Fatalf("failed to generate token A: %v", err)
+	}
+	tokenB, err := ServShared.GenerateUserToken(secret, "bob", []string{"user"}, "tenant-b", time.Hour)
+	if err != nil {
+		t.Fatalf("failed to generate token B: %v", err)
+	}
+
+	// 1. Tenant A sets key "shared-key" -> should succeed
+	body := `{"key":"shared-key","value":"tenant-a-private-data"}`
+	reqSet, _ := http.NewRequest("POST", ts.URL+"/api/cache", bytes.NewReader([]byte(body)))
+	reqSet.Header.Set("Authorization", "Bearer "+tokenA)
+	reqSet.Header.Set("X-Tenant-ID", "tenant-a")
+	reqSet.Header.Set("Content-Type", "application/json")
+
+	respSet, err := http.DefaultClient.Do(reqSet)
+	if err != nil {
+		t.Fatalf("Tenant A SET request failed: %v", err)
+	}
+	respSet.Body.Close()
+	if respSet.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", respSet.StatusCode)
+	}
+
+	// 2. Tenant B attempts to read "shared-key" -> should return 404 (isolated!)
+	reqGetB, _ := http.NewRequest("GET", ts.URL+"/api/cache/shared-key", nil)
+	reqGetB.Header.Set("Authorization", "Bearer "+tokenB)
+	reqGetB.Header.Set("X-Tenant-ID", "tenant-b")
+
+	respGetB, err := http.DefaultClient.Do(reqGetB)
+	if err != nil {
+		t.Fatalf("Tenant B GET request failed: %v", err)
+	}
+	respGetB.Body.Close()
+	if respGetB.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found for Tenant B, got %d", respGetB.StatusCode)
+	}
+
+	// 3. Tenant A reads "shared-key" -> should succeed and get "tenant-a-private-data"
+	reqGetA, _ := http.NewRequest("GET", ts.URL+"/api/cache/shared-key", nil)
+	reqGetA.Header.Set("Authorization", "Bearer "+tokenA)
+	reqGetA.Header.Set("X-Tenant-ID", "tenant-a")
+
+	respGetA, err := http.DefaultClient.Do(reqGetA)
+	if err != nil {
+		t.Fatalf("Tenant A GET request failed: %v", err)
+	}
+	defer respGetA.Body.Close()
+	if respGetA.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", respGetA.StatusCode)
+	}
+
+	var getResult map[string]interface{}
+	if err := json.NewDecoder(respGetA.Body).Decode(&getResult); err != nil {
+		t.Fatalf("failed decoding GET response: %v", err)
+	}
+	if getResult["value"] != "tenant-a-private-data" {
+		t.Errorf("expected 'tenant-a-private-data', got %v", getResult["value"])
+	}
+}
+
 

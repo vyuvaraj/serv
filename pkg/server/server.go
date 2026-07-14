@@ -108,10 +108,11 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 
-	return ServShared.AuthMiddleware(mux)
+	return ServShared.AuthMiddleware(ServShared.TenantMiddleware(mux))
 }
 
 func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string) {
+	key = s.isolateKey(req, key)
 	traceparent := req.Header.Get("traceparent")
 	span := otel.StartSpan(fmt.Sprintf("servcache:GET %s", key), traceparent)
 
@@ -180,6 +181,9 @@ func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 		ttl = parsed
 	}
 
+	body.Key = s.isolateKey(req, body.Key)
+	bodyBytes, _ = json.Marshal(body)
+
 	traceparent := req.Header.Get("traceparent")
 	span := otel.StartSpan(fmt.Sprintf("servcache:SET %s", body.Key), traceparent)
 
@@ -209,6 +213,7 @@ func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, req *http.Request, key string) {
+	key = s.isolateKey(req, key)
 	traceparent := req.Header.Get("traceparent")
 	span := otel.StartSpan(fmt.Sprintf("servcache:DELETE %s", key), traceparent)
 
@@ -242,6 +247,7 @@ func (s *Server) handleClear(w http.ResponseWriter, req *http.Request) {
 	traceparent := req.Header.Get("traceparent")
 	
 	if pattern != "" {
+		pattern = s.isolateKey(req, pattern)
 		span := otel.StartSpan(fmt.Sprintf("servcache:DELETE_PATTERN %s", pattern), traceparent)
 		err = s.cache.DeletePattern(pattern)
 		if span != nil {
@@ -483,4 +489,12 @@ func (s *Server) gossipInvalidate(key string, path string) {
 			}
 		}(peer)
 	}
+}
+
+func (s *Server) isolateKey(req *http.Request, key string) string {
+	tid := ServShared.GetTenantID(req)
+	if tid != "" && tid != "default" {
+		return tid + ":" + key
+	}
+	return key
 }
