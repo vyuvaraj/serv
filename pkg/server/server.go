@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcache", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servcache", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -69,7 +70,7 @@ func (s *Server) Handler() http.Handler {
 		if req.Method == http.MethodPost {
 			s.handleGossipInvalidate(w, req)
 		} else {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			s.writeJSONError(w, req, "Method Not Allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		}
 	})
 
@@ -80,7 +81,7 @@ func (s *Server) Handler() http.Handler {
 		case http.MethodDelete:
 			s.handleClear(w, req)
 		default:
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			s.writeJSONError(w, req, "Method Not Allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		}
 	})
 
@@ -88,7 +89,7 @@ func (s *Server) Handler() http.Handler {
 		path := req.URL.Path
 		parts := strings.Split(strings.Trim(path, "/"), "/")
 		if len(parts) < 3 {
-			http.Error(w, "Cache key required", http.StatusBadRequest)
+			s.writeJSONError(w, req, "Cache key required", "ERR_BAD_REQUEST", http.StatusBadRequest)
 			return
 		}
 		key := parts[2]
@@ -104,11 +105,28 @@ func (s *Server) Handler() http.Handler {
 		case http.MethodDelete:
 			s.handleDelete(w, req, key)
 		default:
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			s.writeJSONError(w, req, "Method Not Allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		}
 	})
 
-	return ServShared.AuthMiddleware(ServShared.TenantMiddleware(mux))
+	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
+	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/v1/")
+		}
+		mux.ServeHTTP(w, r)
+	})
+
+	// Wrap in ServShared middleware: RateLimit → CORS → MaxBytes → JWT auth → tenant enforcement → handlers
+	return ServShared.RateLimitMiddleware(
+		ServShared.CORSMiddleware(
+			ServShared.MaxBytesMiddleware(10*1024*1024)(
+				ServShared.AuthMiddleware(
+					ServShared.TenantMiddleware(v1Wrapper),
+				),
+			),
+		),
+	)
 }
 
 func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string) {
@@ -135,12 +153,12 @@ func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string)
 	}
 
 	if err != nil {
-		http.Error(w, "Cache Read Error: "+err.Error(), http.StatusInternalServerError)
+		s.writeJSONError(w, req, "Cache Read Error: "+err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
 	}
 
 	if !found {
-		http.Error(w, "Key not found", http.StatusNotFound)
+		s.writeJSONError(w, req, "Key not found", "ERR_NOT_FOUND", http.StatusNotFound)
 		return
 	}
 
@@ -155,19 +173,19 @@ func (s *Server) handleGet(w http.ResponseWriter, req *http.Request, key string)
 func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
-		http.Error(w, "Read Body Error", http.StatusBadRequest)
+		s.writeJSONError(w, req, "Read Body Error", "ERR_BAD_REQUEST", http.StatusBadRequest)
 		return
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	var body SetRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, "Malformed JSON", http.StatusBadRequest)
+		s.writeJSONError(w, req, "Malformed JSON", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
 		return
 	}
 
 	if body.Key == "" || body.Value == nil {
-		http.Error(w, "Key and Value are required", http.StatusBadRequest)
+		s.writeJSONError(w, req, "Key and Value are required", "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
 		return
 	}
 
@@ -175,7 +193,7 @@ func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 	if body.TTL != "" {
 		parsed, err := time.ParseDuration(body.TTL)
 		if err != nil {
-			http.Error(w, "Invalid TTL format: "+err.Error(), http.StatusBadRequest)
+			s.writeJSONError(w, req, "Invalid TTL format: "+err.Error(), "ERR_BAD_REQUEST_BODY", http.StatusBadRequest)
 			return
 		}
 		ttl = parsed
@@ -198,7 +216,7 @@ func (s *Server) handleSet(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err != nil {
-		http.Error(w, "Cache Write Error: "+err.Error(), http.StatusInternalServerError)
+		s.writeJSONError(w, req, "Cache Write Error: "+err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
 	}
 
@@ -227,7 +245,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, req *http.Request, key stri
 	}
 
 	if err != nil {
-		http.Error(w, "Cache Delete Error: "+err.Error(), http.StatusInternalServerError)
+		s.writeJSONError(w, req, "Cache Delete Error: "+err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
 	}
 
@@ -267,7 +285,7 @@ func (s *Server) handleClear(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err != nil {
-		http.Error(w, "Cache Clear/DeletePattern Error: "+err.Error(), http.StatusInternalServerError)
+		s.writeJSONError(w, req, "Cache Clear/DeletePattern Error: "+err.Error(), "ERR_INTERNAL_SERVER_ERROR", http.StatusInternalServerError)
 		return
 	}
 
@@ -413,7 +431,7 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, _ *http.Request)
 func (s *Server) handleGossipInvalidate(w http.ResponseWriter, req *http.Request) {
 	key := req.URL.Query().Get("key")
 	if key == "" {
-		http.Error(w, "Key required", http.StatusBadRequest)
+		s.writeJSONError(w, req, "Key required", "ERR_BAD_REQUEST", http.StatusBadRequest)
 		return
 	}
 
@@ -497,4 +515,8 @@ func (s *Server) isolateKey(req *http.Request, key string) string {
 		return tid + ":" + key
 	}
 	return key
+}
+
+func (s *Server) writeJSONError(w http.ResponseWriter, r *http.Request, msg string, code string, status int) {
+	ServShared.WriteJSONError(w, r, msg, code, status)
 }
