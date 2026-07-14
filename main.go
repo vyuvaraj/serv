@@ -222,9 +222,18 @@ func main() {
 		mux.Handle("/", http.FileServer(http.FS(subFS)))
 	}
 
+	// Middlewares chain: Trace -> RateLimit -> CORS -> MaxBytes -> v1Wrapper
+	handlerChain := ServShared.TraceMiddleware("servconsole",
+		ServShared.RateLimitMiddleware(
+			ServShared.CORSMiddleware(
+				ServShared.MaxBytesMiddleware(10*1024*1024)(v1Wrapper),
+			),
+		),
+	)
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", config.ActiveDiscovery.ConsolePort),
-		Handler: v1Wrapper,
+		Handler: handlerChain,
 	}
 
 	stop := make(chan os.Signal, 1)
