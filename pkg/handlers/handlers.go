@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"servlock/pkg/storage"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 type LockRequest struct {
@@ -24,18 +26,18 @@ var Store storage.LockBackend
 
 func HandleAcquireLock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req LockRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
 	if req.Key == "" || req.Owner == "" {
-		http.Error(w, "Key and Owner are required fields", http.StatusBadRequest)
+		httpError(w, r, "Key and Owner are required fields", http.StatusBadRequest)
 		return
 	}
 
@@ -65,19 +67,19 @@ func HandleAcquireLock(w http.ResponseWriter, r *http.Request) {
 
 func HandleReleaseLock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req LockRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
 	released, err := Store.Release(req.Key, req.Owner)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpError(w, r, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -98,13 +100,13 @@ func HandleReleaseLock(w http.ResponseWriter, r *http.Request) {
 
 func HandleRenewLock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req LockRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -137,4 +139,27 @@ func HandleRenewLock(w http.ResponseWriter, r *http.Request) {
 			Message: "Lock lease could not be renewed",
 		})
 	}
+}
+
+func httpError(w http.ResponseWriter, r *http.Request, msg string, status int) {
+	var errorCode string
+	switch status {
+	case http.StatusMethodNotAllowed:
+		errorCode = "ERR_METHOD_NOT_ALLOWED"
+	case http.StatusBadRequest:
+		errorCode = "ERR_BAD_REQUEST"
+	case http.StatusUnauthorized:
+		errorCode = "ERR_UNAUTHORIZED"
+	case http.StatusForbidden:
+		errorCode = "ERR_FORBIDDEN"
+	case http.StatusNotFound:
+		errorCode = "ERR_NOT_FOUND"
+	case http.StatusConflict:
+		errorCode = "ERR_CONFLICT"
+	case http.StatusNotImplemented:
+		errorCode = "ERR_NOT_IMPLEMENTED"
+	default:
+		errorCode = "ERR_INTERNAL_SERVER_ERROR"
+	}
+	ServShared.WriteJSONError(w, r, msg, errorCode, status)
 }

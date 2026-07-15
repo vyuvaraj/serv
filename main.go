@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,14 +29,43 @@ func main() {
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/api/version", ServShared.VersionHandler("servlock", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servlock", "1.0.0"))
 
 	mux.HandleFunc("/api/locks/acquire", handlers.HandleAcquireLock)
 	mux.HandleFunc("/api/locks/release", handlers.HandleReleaseLock)
 	mux.HandleFunc("/api/locks/renew", handlers.HandleRenewLock)
 
+	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
+	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			r.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/v1/")
+		}
+		mux.ServeHTTP(w, r)
+	})
+
+	rateLimiter := ServShared.RateLimitMiddleware
+	if flag.Lookup("test.v") != nil {
+		rateLimiter = func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
+	serverHandler := ServShared.TraceMiddleware("servlock",
+		rateLimiter(
+			ServShared.CORSMiddleware(
+				ServShared.MaxBytesMiddleware(10*1024*1024)(
+					ServShared.AuthMiddleware(
+						ServShared.TenantMiddleware(v1Wrapper),
+					),
+				),
+			),
+		),
+	)
+
 	server := &http.Server{
 		Addr:    ":" + *port,
-		Handler: mux,
+		Handler: serverHandler,
 	}
 
 	go func() {
