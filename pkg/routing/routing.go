@@ -159,12 +159,12 @@ func (srv *Server) saveMigrationsToStore() {
 // HandleQuery serves POST /api/db/query.
 func (srv *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var req QueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		srv.writeJSONError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 	start := time.Now()
@@ -208,7 +208,7 @@ func (srv *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := targetPool.Acquire()
 	if err != nil {
-		http.Error(w, "Database unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		srv.writeJSONError(w, r, "Database unavailable: "+err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	defer targetPool.Release(conn)
@@ -286,7 +286,7 @@ func (srv *Server) replicateQuery(query string) {
 // HandleStats serves GET /api/db/stats.
 func (srv *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	res := StatsResponse{
@@ -301,7 +301,7 @@ func (srv *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 // HandleAnalytics serves GET /api/db/analytics.
 func (srv *Server) HandleAnalytics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	srv.analyticsMu.RLock()
@@ -314,7 +314,7 @@ func (srv *Server) HandleAnalytics(w http.ResponseWriter, r *http.Request) {
 // HandleMigrate serves POST /api/db/migrate.
 func (srv *Server) HandleMigrate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var req struct {
@@ -325,7 +325,7 @@ func (srv *Server) HandleMigrate(w http.ResponseWriter, r *http.Request) {
 		Action   string `json:"action"` // "migrate" or "rollback"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+		srv.writeJSONError(w, r, "Invalid payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -428,7 +428,7 @@ func (srv *Server) HandleMigrate(w http.ResponseWriter, r *http.Request) {
 // HandleClearCache serves POST /api/db/cache/clear.
 func (srv *Server) HandleClearCache(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	if ActiveQueryOptimizer != nil {
@@ -442,7 +442,7 @@ func (srv *Server) HandleClearCache(w http.ResponseWriter, r *http.Request) {
 // HandleDbHealth serves GET /api/db/health.
 func (srv *Server) HandleDbHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	primaryStats := srv.primaryPool.Stats()
@@ -465,7 +465,7 @@ func (srv *Server) HandleDbHealth(w http.ResponseWriter, r *http.Request) {
 // HandlePrometheusMetrics serves GET /metrics in Prometheus text format.
 func (srv *Server) HandlePrometheusMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		srv.writeJSONError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -504,4 +504,29 @@ func (srv *Server) HandlePrometheusMetrics(w http.ResponseWriter, r *http.Reques
 		fmt.Fprintf(w, "# TYPE servdb_pool_total_queries_total counter\n")
 		fmt.Fprintf(w, "servdb_pool_total_queries_total{%s} %d\n\n", lbl, p.stats.TotalQueries)
 	}
+}
+
+func (srv *Server) writeJSONError(w http.ResponseWriter, r *http.Request, msg string, status int) {
+	var errorCode string
+	switch status {
+	case http.StatusMethodNotAllowed:
+		errorCode = "ERR_METHOD_NOT_ALLOWED"
+	case http.StatusBadRequest:
+		errorCode = "ERR_BAD_REQUEST"
+	case http.StatusUnauthorized:
+		errorCode = "ERR_UNAUTHORIZED"
+	case http.StatusForbidden:
+		errorCode = "ERR_FORBIDDEN"
+	case http.StatusNotFound:
+		errorCode = "ERR_NOT_FOUND"
+	case http.StatusConflict:
+		errorCode = "ERR_CONFLICT"
+	case http.StatusNotImplemented:
+		errorCode = "ERR_NOT_IMPLEMENTED"
+	case http.StatusServiceUnavailable:
+		errorCode = "ERR_SERVICE_UNAVAILABLE"
+	default:
+		errorCode = "ERR_INTERNAL_SERVER_ERROR"
+	}
+	ServShared.WriteJSONError(w, r, msg, errorCode, status)
 }
