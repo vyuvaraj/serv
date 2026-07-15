@@ -11,6 +11,8 @@ import (
 
 	"servflow/pkg/engine"
 	"servflow/pkg/storage"
+
+	"github.com/vyuvaraj/ServShared"
 )
 
 type HandlerContext struct {
@@ -70,18 +72,18 @@ func (ctx *HandlerContext) SaveInstancesToStore() {
 
 func (ctx *HandlerContext) HandleDefine(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var def storage.WorkflowDef
 	if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
 	if def.ID == "" || len(def.Tasks) == 0 {
-		http.Error(w, "Workflow ID and tasks are required", http.StatusBadRequest)
+		httpError(w, r, "Workflow ID and tasks are required", http.StatusBadRequest)
 		return
 	}
 
@@ -104,7 +106,7 @@ func (ctx *HandlerContext) HandleDefine(w http.ResponseWriter, r *http.Request) 
 
 func (ctx *HandlerContext) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -112,7 +114,7 @@ func (ctx *HandlerContext) HandleExecute(w http.ResponseWriter, r *http.Request)
 		WorkflowID string `json:"workflow_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -121,7 +123,7 @@ func (ctx *HandlerContext) HandleExecute(w http.ResponseWriter, r *http.Request)
 	ctx.Mu.RUnlock()
 
 	if !exists {
-		http.Error(w, "Workflow definition not found", http.StatusNotFound)
+		httpError(w, r, "Workflow definition not found", http.StatusNotFound)
 		return
 	}
 
@@ -164,7 +166,7 @@ var (
 
 func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -172,7 +174,7 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 		InstanceID string `json:"instance_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -191,13 +193,13 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if err != nil {
-		http.Error(w, "State checkpoint not found: "+err.Error(), http.StatusNotFound)
+		httpError(w, r, "State checkpoint not found: "+err.Error(), http.StatusNotFound)
 		return
 	}
 
 	var inst storage.WorkflowInstance
 	if err := json.Unmarshal(data, &inst); err != nil {
-		http.Error(w, "Failed to unmarshal state checkpoint: "+err.Error(), http.StatusInternalServerError)
+		httpError(w, r, "Failed to unmarshal state checkpoint: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -206,7 +208,7 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 	ctx.Mu.RUnlock()
 
 	if !defExists {
-		http.Error(w, "Workflow definition not found", http.StatusNotFound)
+		httpError(w, r, "Workflow definition not found", http.StatusNotFound)
 		return
 	}
 
@@ -251,7 +253,7 @@ func (ctx *HandlerContext) HandleResume(w http.ResponseWriter, r *http.Request) 
 
 func (ctx *HandlerContext) HandleApprove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -261,7 +263,7 @@ func (ctx *HandlerContext) HandleApprove(w http.ResponseWriter, r *http.Request)
 		Decision   string `json:"decision"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -270,7 +272,7 @@ func (ctx *HandlerContext) HandleApprove(w http.ResponseWriter, r *http.Request)
 	ctx.Mu.Unlock()
 
 	if !exists {
-		http.Error(w, "Instance not found", http.StatusNotFound)
+		httpError(w, r, "Instance not found", http.StatusNotFound)
 		return
 	}
 
@@ -278,7 +280,7 @@ func (ctx *HandlerContext) HandleApprove(w http.ResponseWriter, r *http.Request)
 	state, taskExists := inst.TaskStates[req.TaskName]
 	if !taskExists || state.Status != "pending_approval" {
 		inst.Mu.Unlock()
-		http.Error(w, "Task is not pending approval", http.StatusBadRequest)
+		httpError(w, r, "Task is not pending approval", http.StatusBadRequest)
 		return
 	}
 
@@ -323,7 +325,7 @@ func (ctx *HandlerContext) HandleApprove(w http.ResponseWriter, r *http.Request)
 
 func (ctx *HandlerContext) HandleGetInstance(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -331,7 +333,7 @@ func (ctx *HandlerContext) HandleGetInstance(w http.ResponseWriter, r *http.Requ
 	var id string
 	fmt.Sscanf(path, "/api/workflows/instances/%s", &id)
 	if id == "" {
-		http.Error(w, "Instance ID required", http.StatusBadRequest)
+		httpError(w, r, "Instance ID required", http.StatusBadRequest)
 		return
 	}
 
@@ -340,7 +342,7 @@ func (ctx *HandlerContext) HandleGetInstance(w http.ResponseWriter, r *http.Requ
 	ctx.Mu.RUnlock()
 
 	if !exists {
-		http.Error(w, "Instance not found", http.StatusNotFound)
+		httpError(w, r, "Instance not found", http.StatusNotFound)
 		return
 	}
 
@@ -353,7 +355,7 @@ func (ctx *HandlerContext) HandleGetInstance(w http.ResponseWriter, r *http.Requ
 
 func (ctx *HandlerContext) HandleHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -376,7 +378,7 @@ func (ctx *HandlerContext) HandleHistory(w http.ResponseWriter, r *http.Request)
 
 func (ctx *HandlerContext) HandleReplay(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -384,7 +386,7 @@ func (ctx *HandlerContext) HandleReplay(w http.ResponseWriter, r *http.Request) 
 		InstanceID string `json:"instance_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -393,7 +395,7 @@ func (ctx *HandlerContext) HandleReplay(w http.ResponseWriter, r *http.Request) 
 	ctx.Mu.Unlock()
 
 	if !exists {
-		http.Error(w, "Original instance not found", http.StatusNotFound)
+		httpError(w, r, "Original instance not found", http.StatusNotFound)
 		return
 	}
 
@@ -402,7 +404,7 @@ func (ctx *HandlerContext) HandleReplay(w http.ResponseWriter, r *http.Request) 
 	ctx.Mu.RUnlock()
 
 	if !defExists {
-		http.Error(w, "Workflow definition not found", http.StatusNotFound)
+		httpError(w, r, "Workflow definition not found", http.StatusNotFound)
 		return
 	}
 
@@ -436,13 +438,13 @@ func (ctx *HandlerContext) HandleReplay(w http.ResponseWriter, r *http.Request) 
 
 func (ctx *HandlerContext) HandleValidate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var def storage.WorkflowDef
 	if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -460,13 +462,13 @@ func (ctx *HandlerContext) HandleValidate(w http.ResponseWriter, r *http.Request
 
 func (ctx *HandlerContext) HandleVisualize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var def storage.WorkflowDef
 	if err := json.NewDecoder(r.Body).Decode(&def); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -491,7 +493,7 @@ func (ctx *HandlerContext) HandleVisualize(w http.ResponseWriter, r *http.Reques
 
 func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -502,7 +504,7 @@ func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *ht
 		Error      string `json:"error,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
@@ -511,7 +513,7 @@ func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *ht
 	ctx.Mu.Unlock()
 
 	if !exists {
-		http.Error(w, "Instance not found", http.StatusNotFound)
+		httpError(w, r, "Instance not found", http.StatusNotFound)
 		return
 	}
 
@@ -519,7 +521,7 @@ func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *ht
 	tState, taskExists := inst.TaskStates[req.TaskName]
 	if !taskExists || tState.Status != "compensating" {
 		inst.Mu.Unlock()
-		http.Error(w, "Task is not in compensating state", http.StatusBadRequest)
+		httpError(w, r, "Task is not in compensating state", http.StatusBadRequest)
 		return
 	}
 
@@ -550,7 +552,7 @@ func (ctx *HandlerContext) HandleCompensateComplete(w http.ResponseWriter, r *ht
 // Optional query param: ?step=N — return state at step N only.
 func (ctx *HandlerContext) HandleTimeTravelReplay(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -564,7 +566,7 @@ func (ctx *HandlerContext) HandleTimeTravelReplay(w http.ResponseWriter, r *http
 		}
 	}
 	if instID == "" {
-		http.Error(w, "instance ID required", http.StatusBadRequest)
+		httpError(w, r, "instance ID required", http.StatusBadRequest)
 		return
 	}
 
@@ -572,7 +574,7 @@ func (ctx *HandlerContext) HandleTimeTravelReplay(w http.ResponseWriter, r *http
 	inst, exists := ctx.Instances[instID]
 	ctx.Mu.RUnlock()
 	if !exists {
-		http.Error(w, "instance not found", http.StatusNotFound)
+		httpError(w, r, "instance not found", http.StatusNotFound)
 		return
 	}
 
@@ -585,7 +587,7 @@ func (ctx *HandlerContext) HandleTimeTravelReplay(w http.ResponseWriter, r *http
 		var stepIdx int
 		fmt.Sscanf(stepParam, "%d", &stepIdx)
 		if stepIdx < 0 || stepIdx >= len(inst.ReplayLog) {
-			http.Error(w, fmt.Sprintf("step %d out of range (total: %d)", stepIdx, len(inst.ReplayLog)), http.StatusBadRequest)
+			httpError(w, r, fmt.Sprintf("step %d out of range (total: %d)", stepIdx, len(inst.ReplayLog)), http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -603,4 +605,27 @@ func (ctx *HandlerContext) HandleTimeTravelReplay(w http.ResponseWriter, r *http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+func httpError(w http.ResponseWriter, r *http.Request, msg string, status int) {
+	var errorCode string
+	switch status {
+	case http.StatusMethodNotAllowed:
+		errorCode = "ERR_METHOD_NOT_ALLOWED"
+	case http.StatusBadRequest:
+		errorCode = "ERR_BAD_REQUEST"
+	case http.StatusUnauthorized:
+		errorCode = "ERR_UNAUTHORIZED"
+	case http.StatusForbidden:
+		errorCode = "ERR_FORBIDDEN"
+	case http.StatusNotFound:
+		errorCode = "ERR_NOT_FOUND"
+	case http.StatusConflict:
+		errorCode = "ERR_CONFLICT"
+	case http.StatusNotImplemented:
+		errorCode = "ERR_NOT_IMPLEMENTED"
+	default:
+		errorCode = "ERR_INTERNAL_SERVER_ERROR"
+	}
+	ServShared.WriteJSONError(w, r, msg, errorCode, status)
 }
