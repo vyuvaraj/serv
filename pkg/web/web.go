@@ -832,7 +832,7 @@ func HandleSchemaValidationAPI(w http.ResponseWriter, r *http.Request) {
 
 func HandleMarketplaceList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		registry.WriteJSONError(w, r, "Method Not Allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return
 	}
 	MarketplaceMu.RLock()
@@ -843,16 +843,16 @@ func HandleMarketplaceList(w http.ResponseWriter, r *http.Request) {
 
 func HandleMarketplacePublish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		registry.WriteJSONError(w, r, "Method Not Allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 		return
 	}
 	var item MarketplaceItem
 	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		registry.WriteJSONError(w, r, err.Error(), "ERR_BAD_REQUEST", http.StatusBadRequest)
 		return
 	}
 	if item.Name == "" || item.Version == "" || item.Type == "" {
-		http.Error(w, "name, version, and type are required", http.StatusBadRequest)
+		registry.WriteJSONError(w, r, "name, version, and type are required", "ERR_BAD_REQUEST", http.StatusBadRequest)
 		return
 	}
 	item.CreatedAt = time.Now()

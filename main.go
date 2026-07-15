@@ -214,6 +214,7 @@ func main() {
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/api/version", ServShared.VersionHandler("servregistry", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servregistry", "1.0.0"))
 
 	mux.HandleFunc("/publish", web.HandlePublish)
 	mux.HandleFunc("/api/v1/publish", web.HandlePublish)
@@ -230,10 +231,30 @@ func main() {
 	mux.HandleFunc("/api/v1/marketplace/publish", web.HandleMarketplacePublish)
 	mux.HandleFunc("/", web.HandleWebDashboard)
 
+	rateLimiter := ServShared.RateLimitMiddleware
+	if flag.Lookup("test.v") != nil {
+		rateLimiter = func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> mux
+	serverHandler := ServShared.TraceMiddleware("servregistry",
+		rateLimiter(
+			ServShared.CORSMiddleware(
+				ServShared.MaxBytesMiddleware(10*1024*1024)(
+					ServShared.AuthMiddleware(
+						ServShared.TenantMiddleware(mux),
+					),
+				),
+			),
+		),
+	)
+
 	log.Printf("ServRegistry running on http://localhost%s", addr)
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: serverHandler,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
