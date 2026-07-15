@@ -14,6 +14,7 @@ type LockRequest struct {
 	Key      string `json:"key"`
 	Owner    string `json:"owner"`
 	Duration int    `json:"duration_ms"` // Lease TTL in milliseconds
+	WaitTime int    `json:"wait_ms"`     // Optional block/wait timeout in milliseconds
 }
 
 type LockResponse struct {
@@ -46,7 +47,15 @@ func HandleAcquireLock(w http.ResponseWriter, r *http.Request) {
 		ttl = time.Duration(req.Duration) * time.Millisecond
 	}
 
-	lock, err := Store.Acquire(req.Key, req.Owner, ttl)
+	var lock *storage.Lock
+	var err error
+	if req.WaitTime > 0 {
+		waitTimeout := time.Duration(req.WaitTime) * time.Millisecond
+		lock, err = Store.AcquireWithWait(req.Key, req.Owner, ttl, waitTimeout)
+	} else {
+		lock, err = Store.Acquire(req.Key, req.Owner, ttl)
+	}
+
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
