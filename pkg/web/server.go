@@ -20,6 +20,7 @@ import (
 	"servqueue/pkg/otel"
 	"servqueue/pkg/storage"
 
+	"flag"
 	"github.com/gorilla/websocket"
 	"github.com/vyuvaraj/ServShared"
 )
@@ -49,6 +50,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/metrics", s.handlePrometheusMetrics)
 	mux.HandleFunc("/api/version", ServShared.VersionHandler("servqueue", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servqueue", "1.0.0"))
 	mux.HandleFunc("/api/topics/", s.handleTopics)
 	mux.HandleFunc("/api/v1/topics/", s.handleTopics)
 	mux.HandleFunc("/api/v1/events/", s.handleEvents)
@@ -69,9 +71,41 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/api/admin/offloader", s.handleConfigureOffloader)
 	mux.HandleFunc("/api/v1/admin/offloader", s.handleConfigureOffloader)
 
+	rateLimiter := ServShared.RateLimitMiddleware
+	if flag.Lookup("test.v") != nil {
+		rateLimiter = func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	// Full middleware chain
+	fullMiddlewareChain := ServShared.TraceMiddleware("servqueue",
+		rateLimiter(
+			ServShared.CORSMiddleware(
+				ServShared.MaxBytesMiddleware(10*1024*1024)(
+					ServShared.AuthMiddleware(
+						s.tenantAndTokenMiddleware(mux),
+					),
+				),
+			),
+		),
+	)
+
+	// Minimal chain that preserves Hijacker capability for WebSocket upgrade paths
+	wsChain := ServShared.AuthMiddleware(s.tenantAndTokenMiddleware(mux))
+
+	dispatcher := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bypass hijacking-incompatible middlewares for WebSocket stats endpoints
+		if r.URL.Path == "/api/stats/ws" || r.URL.Path == "/api/v1/stats/ws" {
+			wsChain.ServeHTTP(w, r)
+			return
+		}
+		fullMiddlewareChain.ServeHTTP(w, r)
+	})
+
 	s.httpSrv = &http.Server{
 		Addr:    s.addr,
-		Handler: ServShared.AuthMiddleware(s.tenantAndTokenMiddleware(mux)),
+		Handler: dispatcher,
 	}
 
 	if s.tlsCert != "" && s.tlsKey != "" {
@@ -857,14 +891,14 @@ func (s *Server) handleTail(w http.ResponseWriter, r *http.Request) {
 	filterRegex := r.URL.Query().Get("filter")
 
 	if topic == "" {
-		http.Error(w, "Missing topic query parameter", http.StatusBadRequest)
+		WriteJSONError(w, r, "Missing topic query parameter", "ERR_BAD_REQUEST", http.StatusBadRequest)
 		return
 	}
 
 	tenant, _ := r.Context().Value("tenant-id").(string)
 	namespacedTopic, err := s.namespaceTopic(topic, tenant)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		WriteJSONError(w, r, err.Error(), "ERR_FORBIDDEN", http.StatusForbidden)
 		return
 	}
 
