@@ -1313,6 +1313,50 @@ func TestApprovalTimeoutRaceCondition(t *testing.T) {
 	_ = os.Remove(inst.ID + ".state")
 }
 
+func TestWorkflowGeneration(t *testing.T) {
+	setupTest()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/workflows/generate", handleGenerate)
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	promptPayload := map[string]string{
+		"prompt": "validate_cart -> check_fraud -> charge_customer -> fulfill",
+	}
+	body, _ := json.Marshal(promptPayload)
+	resp, err := http.Post(testServer.URL+"/api/workflows/generate", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to request workflow generation: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var def storage.WorkflowDef
+	json.NewDecoder(resp.Body).Decode(&def)
+
+	if len(def.Tasks) != 4 {
+		t.Fatalf("expected 4 tasks, got %d", len(def.Tasks))
+	}
+
+	if def.Tasks[0].Name != "validate_cart" || len(def.Tasks[0].DependsOn) != 0 {
+		t.Errorf("task 0 mismatch: %+v", def.Tasks[0])
+	}
+
+	if def.Tasks[1].Name != "check_fraud" || def.Tasks[1].DependsOn[0] != "validate_cart" {
+		t.Errorf("task 1 mismatch: %+v", def.Tasks[1])
+	}
+	if !strings.HasPrefix(def.Tasks[1].Action, "ai.classify") {
+		t.Errorf("expected AI action for check_fraud, got %q", def.Tasks[1].Action)
+	}
+
+	if def.Tasks[2].Name != "charge_customer" || def.Tasks[2].DependsOn[0] != "check_fraud" {
+		t.Errorf("task 2 mismatch: %+v", def.Tasks[2])
+	}
+}
+
 
 
 

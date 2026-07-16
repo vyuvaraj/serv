@@ -629,3 +629,76 @@ func httpError(w http.ResponseWriter, r *http.Request, msg string, status int) {
 	}
 	ServShared.WriteJSONError(w, r, msg, errorCode, status)
 }
+
+type GenerateWorkflowRequest struct {
+	Prompt string `json:"prompt"`
+}
+
+func (ctx *HandlerContext) HandleGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req GenerateWorkflowRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, r, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if req.Prompt == "" {
+		httpError(w, r, "Prompt is required", http.StatusBadRequest)
+		return
+	}
+
+	promptClean := req.Prompt
+	if idx := strings.Index(promptClean, ":"); idx > -1 {
+		promptClean = promptClean[idx+1:]
+	}
+
+	var tasks []storage.Task
+	parts := strings.Split(promptClean, "->")
+	for i, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		var deps []string
+		if i > 0 {
+			prevName := strings.TrimSpace(parts[i-1])
+			if prevName != "" {
+				deps = []string{prevName}
+			}
+		}
+		action := "mock-success"
+		if strings.Contains(strings.ToLower(name), "classify") || strings.Contains(strings.ToLower(name), "check") {
+			action = `ai.classify("input context", ["approve", "review", "reject"])`
+		}
+
+		tasks = append(tasks, storage.Task{
+			Name:      name,
+			DependsOn: deps,
+			Action:    action,
+		})
+	}
+
+	if len(tasks) == 0 {
+		httpError(w, r, "Could not extract any tasks from prompt", http.StatusBadRequest)
+		return
+	}
+
+	workflowID := "generated-workflow"
+	def := storage.WorkflowDef{
+		ID:    workflowID,
+		Tasks: tasks,
+	}
+
+	ctx.Mu.Lock()
+	ctx.Definitions[workflowID] = def
+	ctx.Mu.Unlock()
+	ctx.SaveDefinitionsToStore()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(def)
+}

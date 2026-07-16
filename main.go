@@ -114,6 +114,10 @@ func handleDesignerSave(w http.ResponseWriter, r *http.Request) {
 	getContext().HandleDesignerSave(w, r)
 }
 
+func handleGenerate(w http.ResponseWriter, r *http.Request) {
+	getContext().HandleGenerate(w, r)
+}
+
 func main() {
 	portStr := flag.String("port", "8096", "ServFlow server port")
 	dbDriverStr := flag.String("database-driver", "", "Database driver (sqlite, postgres, mysql)")
@@ -166,6 +170,7 @@ func main() {
 	mux.HandleFunc("/api/workflows/visualize", handleVisualize)
 	mux.HandleFunc("/api/workflows/compensate/complete", handleCompensateComplete)
 	mux.HandleFunc("/api/workflows/designer/save", handleDesignerSave)
+	mux.HandleFunc("/api/workflows/generate", handleGenerate)
 
 	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
 	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
