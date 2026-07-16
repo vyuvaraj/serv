@@ -2,7 +2,7 @@
   "name": "serv-vscode",
   "displayName": "Serv Programming Language Support",
   "description": "Full language support for the Serv programming language (.srv files) — syntax highlighting, diagnostics, autocomplete, hover, go-to-definition, and LSP.",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "publisher": "vyuvaraj",
   "engines": {
     "vscode": "^1.75.0"
@@ -230,6 +230,22 @@
       {
         "command": "serv.organizeImports",
         "title": "Serv: Add Missing Imports"
+      },
+      {
+        "command": "serv.initProject",
+        "title": "Serv: New Project from Template"
+      },
+      {
+        "command": "serv.deploy",
+        "title": "Serv: Deploy to ServCloud"
+      },
+      {
+        "command": "serv.runCoverage",
+        "title": "Serv: Run Tests with Coverage Highlights"
+      },
+      {
+        "command": "serv.clearCoverage",
+        "title": "Serv: Clear Coverage Highlights"
       }
     ],
     "keybindings": [

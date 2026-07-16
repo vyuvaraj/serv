@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.7
+
+### Added
+- **Project Scaffolding** (CD.117) — `Serv: New Project from Template` opens a 3-step flow: (1) Quick Pick from 5 templates (API Service, Worker, Scheduled, Full Stack, Minimal); (2) Input project name with validation; (3) Folder picker. Generates `main.srv`, `tests/`, `serv.toml`, `.gitignore`, and `README.md` ready to run. Opens the new project immediately.
+- **One-Click Deploy** (CD.118) — `Serv: Deploy to ServCloud` opens an environment picker (Production / Staging / Preview), then shows a dark Webview panel with live build log: compile → test → package → upload → provision → health check → deployed URL. Calls ServCloud API at `:8084`; animates a mock flow when offline.
+- **Coverage Line Highlights** (CD.122) — `Serv: Run Tests with Coverage Highlights` runs `serv test --coverage`, then paints green-tinted lines for covered code and red-highlighted lines with `✗ uncovered` annotations for uncovered code. Results appear in both the editor and the overview ruler. Falls back to realistic mock coverage when the binary isn’t available. `Serv: Clear Coverage Highlights` resets all decorations.
+
 ## 3.0.6
 
 ### Added
