@@ -77,5 +77,25 @@ scoops:
     description: "Management console and dashboard for the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servconsole-pkg
+    package_name: servconsole
+    builds: [servconsole]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServConsole
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Admin console and observability dashboard from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servconsole/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
