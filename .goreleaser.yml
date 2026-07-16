@@ -75,5 +75,25 @@ scoops:
     description: "Service mesh and sidecar proxy from the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servmesh-pkg
+    package_name: servmesh
+    builds: [servmesh]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServMesh
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Service mesh and traffic management from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servmesh/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
