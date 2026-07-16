@@ -237,22 +237,35 @@ function openWorkflowVisualizer(context) {
     );
 
     const editor = vscode.window.activeTextEditor;
-    let mermaidCode = 'graph TD\n    Start --> A[Parse Error]\n';
+    let mermaidCode = 'graph TD\n    Start --> A[No steps found]\n';
     if (editor) {
         const text = editor.document.getText();
         const steps = [];
-        const regex = /step\s+"([^"]+)"/g;
+        const stepRegex = /step\s+"([^"]+)"\s*(?:\{([^}]+)\})?/g;
         let match;
-        while ((match = regex.exec(text)) !== null) {
-            steps.push(match[1]);
+        while ((match = stepRegex.exec(text)) !== null) {
+            const stepName = match[1];
+            let deps = [];
+            if (match[2]) {
+                const depMatch = /depends_on\s*=\s*(?:\[([^\]]+)\]|"([^"]+)")/.exec(match[2]);
+                if (depMatch) {
+                    const depContent = depMatch[1] || depMatch[2];
+                    deps = depContent.split(',').map(d => d.replace(/["\s]/g, '')).filter(d => d);
+                }
+            }
+            steps.push({ name: stepName, deps });
         }
         if (steps.length > 0) {
             mermaidCode = 'graph TD\n';
-            for (let i = 0; i < steps.length; i++) {
-                if (i < steps.length - 1) {
-                    mermaidCode += `    ${steps[i]} --> ${steps[i+1]}\n`;
+            steps.forEach(s => {
+                if (s.deps.length === 0) {
+                    mermaidCode += `    Start --> ${s.name}\n`;
+                } else {
+                    s.deps.forEach(dep => {
+                        mermaidCode += `    ${dep} --> ${s.name}\n`;
+                    });
                 }
-            }
+            });
         }
     }
 
@@ -286,26 +299,51 @@ function openQueueExplorer(context) {
         <html>
         <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
             <h2>ServQueue Broker Explorer</h2>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServQueue...</div>
             <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
-                <tr style="background: #313244;">
-                    <th>Topic</th>
-                    <th>Partitions</th>
-                    <th>Consumers</th>
-                    <th>Message Rate</th>
-                </tr>
-                <tr>
-                    <td>orders-topic</td>
-                    <td>4</td>
-                    <td>order-processor-group (active)</td>
-                    <td>125 msg/s</td>
-                </tr>
-                <tr>
-                    <td>billing-topic</td>
-                    <td>2</td>
-                    <td>invoice-generator-group (idle)</td>
-                    <td>0 msg/s</td>
-                </tr>
+                <thead>
+                    <tr style="background: #313244;">
+                        <th>Topic</th>
+                        <th>Partitions</th>
+                        <th>Consumers</th>
+                    </tr>
+                </thead>
+                <tbody id="topics-body"></tbody>
             </table>
+            <script>
+                async function loadTopics() {
+                    const status = document.getElementById('status');
+                    const body = document.getElementById('topics-body');
+                    try {
+                        const res = await fetch("http://localhost:8082/api/topics");
+                        const data = await res.json();
+                        status.innerText = "🟢 Connected (Live data)";
+                        body.innerHTML = data.map(t => \`
+                            <tr>
+                                <td>\${t.name || t.topic}</td>
+                                <td>\${t.partitions || 1}</td>
+                                <td>\${t.consumers ? t.consumers.join(', ') : 'None'}</td>
+                            </tr>
+                        \`).join('');
+                    } catch(e) {
+                        status.innerText = "⚠️ Offline (Showing mock fallback)";
+                        body.innerHTML = \`
+                            <tr>
+                                <td>orders-topic</td>
+                                <td>4</td>
+                                <td>order-processor-group</td>
+                            </tr>
+                            <tr>
+                                <td>billing-topic</td>
+                                <td>2</td>
+                                <td>invoice-generator-group</td>
+                            </tr>
+                        \`;
+                    }
+                }
+                loadTopics();
+                setInterval(loadTopics, 3000);
+            </script>
         </body>
         </html>
     `;
@@ -324,10 +362,27 @@ function openStoreExplorer(context) {
         <html>
         <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
             <h2>ServStore Bucket Explorer</h2>
-            <ul>
-                <li>📁 <b>user-uploads-bucket</b> (23 files)</li>
-                <li>📁 <b>static-assets-bucket</b> (142 files)</li>
-            </ul>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServStore...</div>
+            <ul id="buckets-list"></ul>
+            <script>
+                async function loadBuckets() {
+                    const status = document.getElementById('status');
+                    const list = document.getElementById('buckets-list');
+                    try {
+                        const res = await fetch("http://localhost:8081/api/buckets");
+                        const data = await res.json();
+                        status.innerText = "🟢 Connected (Live data)";
+                        list.innerHTML = data.map(b => \`<li>📁 <b>\${b.name || b}</b></li>\`).join('');
+                    } catch(e) {
+                        status.innerText = "⚠️ Offline (Showing mock fallback)";
+                        list.innerHTML = \`
+                            <li>📁 <b>user-uploads-bucket</b></li>
+                            <li>📁 <b>static-assets-bucket</b></li>
+                        \`;
+                    }
+                }
+                loadBuckets();
+            </script>
         </body>
         </html>
     `;
@@ -346,20 +401,46 @@ function openLocksExplorer(context) {
         <html>
         <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
             <h2>ServLock Contention Dashboard</h2>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServLock...</div>
             <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
-                <tr style="background: #313244;">
-                    <th>Lock Key</th>
-                    <th>Owner</th>
-                    <th>Waiters</th>
-                    <th>Status</th>
-                </tr>
-                <tr>
-                    <td>user-lock-123</td>
-                    <td>session-handler-A</td>
-                    <td>session-handler-B (waiting)</td>
-                    <td>⚠️ Contended</td>
-                </tr>
+                <thead>
+                    <tr style="background: #313244;">
+                        <th>Lock Key</th>
+                        <th>Owner</th>
+                        <th>Waiters</th>
+                    </tr>
+                </thead>
+                <tbody id="locks-body"></tbody>
             </table>
+            <script>
+                async function loadLocks() {
+                    const status = document.getElementById('status');
+                    const body = document.getElementById('locks-body');
+                    try {
+                        const res = await fetch("http://localhost:8089/api/locks/observability");
+                        const data = await res.json();
+                        status.innerText = "🟢 Connected (Live data)";
+                        body.innerHTML = data.map(l => \`
+                            <tr>
+                                <td>\${l.key}</td>
+                                <td>\${l.owner}</td>
+                                <td>\${l.waiters ? l.waiters.join(', ') : 'None'}</td>
+                            </tr>
+                        \`).join('');
+                    } catch(e) {
+                        status.innerText = "⚠️ Offline (Showing mock fallback)";
+                        body.innerHTML = \`
+                            <tr>
+                                <td>user-lock-123</td>
+                                <td>session-handler-A</td>
+                                <td>session-handler-B (waiting)</td>
+                            </tr>
+                        \`;
+                    }
+                }
+                loadLocks();
+                setInterval(loadLocks, 2000);
+            </script>
         </body>
         </html>
     `;
@@ -373,14 +454,43 @@ function openRouteSimulator(context) {
         { enableScripts: true }
     );
 
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    let gateConfig = "{}";
+    if (workspaceFolders) {
+        const root = workspaceFolders[0].uri.fsPath;
+        const configPath = path.join(root, 'ServGate', 'config.json');
+        if (fs.existsSync(configPath)) {
+            gateConfig = fs.readFileSync(configPath, 'utf8');
+        }
+    }
+
     panel.webview.html = `
         <!DOCTYPE html>
         <html>
         <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
             <h2>ServGate Route Simulator</h2>
             <p>Enter path to test route mapping:</p>
-            <input type="text" value="/api/v1/users" style="padding: 5px; width: 300px;">
-            <button onclick="alert('Matches: ServAuth microservice on http://localhost:8098')">Simulate</button>
+            <input type="text" id="route-path" value="/api/v1/users" style="padding: 8px; width: 300px; background: #313244; color: #cdd6f4; border: 1px solid #444; border-radius: 4px;">
+            <button onclick="simulate()" style="padding: 8px 16px; background: #89b4fa; color: #11111b; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Simulate</button>
+            <div id="result" style="margin-top: 20px; font-family: monospace; white-space: pre-wrap; padding: 10px; background: #313244; border-radius: 4px;"></div>
+            <script>
+                const config = ${gateConfig};
+                function simulate() {
+                    const pathVal = document.getElementById('route-path').value;
+                    const result = document.getElementById('result');
+                    if (!config || !config.routes) {
+                        result.innerHTML = "No configuration found at ServGate/config.json";
+                        return;
+                    }
+                    const route = config.routes.find(r => pathVal.startsWith(r.prefix));
+                    if (route) {
+                        result.innerHTML = \`✅ Route Match Found:\\n\\nPrefix: \${route.prefix}\\nTarget: \${route.target || 'None'}\\nRate Limit: \${route.rate_limit_rpm || 'Unlimited'} RPM\\nPii Redaction: \${route.pii_redact ? 'Enabled' : 'Disabled'}\`;
+                    } else {
+                        result.innerHTML = "❌ No matching route prefix in gateway config";
+                    }
+                }
+                simulate();
+            </script>
         </body>
         </html>
     `;
