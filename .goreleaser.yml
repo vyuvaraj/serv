@@ -49,5 +49,25 @@ changelog:
 # goreleaser is used here purely for consistent binary naming, checksums,
 # and a clean GitHub Releases page.
 
+
+nfpms:
+  - id: serv-pkg
+    package_name: serv
+    builds: [serv]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/Serv-lang
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Serv programming language compiler and runtime
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/serv/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
