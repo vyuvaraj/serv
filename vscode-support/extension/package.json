@@ -121,6 +121,14 @@
       {
         "command": "serv.simulateRoute",
         "title": "Serv: Simulate Route Gateway"
+      },
+      {
+        "command": "serv.exploreCron",
+        "title": "Serv: Inspect Cron Jobs"
+      },
+      {
+        "command": "serv.inspectCache",
+        "title": "Serv: Inspect Cache Stats"
       }
     ],
     "keybindings": [
