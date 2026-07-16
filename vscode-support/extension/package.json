@@ -1,6 +1,6 @@
 {
   "name": "serv-vscode",
-  "displayName": "Serv Language Support",
+  "displayName": "Serv Programming Language Support",
   "description": "Full language support for the Serv programming language (.srv files) — syntax highlighting, diagnostics, autocomplete, hover, go-to-definition, and LSP.",
   "version": "3.0.0",
   "publisher": "vyuvaraj",

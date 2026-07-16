@@ -26,16 +26,18 @@ function activate(context) {
     const codeLensProvider = vscode.languages.registerCodeLensProvider('serv', {
         provideCodeLenses(document) {
             let lenses = [];
+            const testRegex = /^\s*(test\s+|test\s*")/i;
+            const routeRegex = /^\s*(route\s+)/i;
             for (let i = 0; i < document.lineCount; i++) {
-                let line = document.lineAt(i).text.trim();
-                if (line.startsWith('test ') || line.startsWith('test"')) {
+                let line = document.lineAt(i).text;
+                if (testRegex.test(line)) {
                     let range = new vscode.Range(i, 0, i, line.length);
                     lenses.push(new vscode.CodeLens(range, {
                         title: "▶ Run Test Block",
                         command: "serv.test"
                     }));
                 }
-                if (line.startsWith('route ')) {
+                if (routeRegex.test(line)) {
                     let range = new vscode.Range(i, 0, i, line.length);
                     lenses.push(new vscode.CodeLens(range, {
                         title: "⚡ Start Web Service",
@@ -79,10 +81,17 @@ function runServCommand(command, extraArgs = []) {
         args = [command, `"${filePath}"`, '-o', outputName];
     }
 
-    // Run in integrated terminal — use & for PowerShell to invoke commands with spaces
+    // Run in integrated terminal — check if the active shell is PowerShell to apply call operator '&'
+    const shellPath = vscode.env.shell ? vscode.env.shell.toLowerCase() : '';
+    const isPowerShell = shellPath.includes('powershell') || shellPath.includes('pwsh') || shellPath === '';
+    
     const terminal = vscode.window.createTerminal({ name: `Serv: ${command}` });
     terminal.show();
-    terminal.sendText(`& "${servPath}" ${args.join(' ')}`);
+    if (isPowerShell) {
+        terminal.sendText(`& "${servPath}" ${args.join(' ')}`);
+    } else {
+        terminal.sendText(`"${servPath}" ${args.join(' ')}`);
+    }
 }
 
 function findServBinary() {
@@ -109,6 +118,16 @@ function findLspBinary() {
     const configPath = vscode.workspace.getConfiguration('serv').get('lspPath');
     if (configPath && fs.existsSync(configPath)) {
         return configPath;
+    }
+
+    // 1.5. Check colocated with compiler path
+    const servPath = findServBinary();
+    if (servPath && servPath !== 'serv') {
+        const compilerDir = path.dirname(servPath);
+        for (const name of ['serv-lsp.exe', 'serv-lsp']) {
+            const p = path.join(compilerDir, name);
+            if (fs.existsSync(p)) return p;
+        }
     }
 
     // 2. Check workspace root
@@ -191,6 +210,9 @@ function activateBasicMode(context) {
     vscode.workspace.textDocuments.forEach(triggerLint);
     context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(triggerLint));
     context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(triggerLint));
+    context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(doc => {
+        diagnosticCollection.delete(doc.uri);
+    }));
 }
 
 function deactivate() {
