@@ -74,7 +74,10 @@ function activate(context) {
         vscode.commands.registerCommand('serv.inspectMail', () => openMailInspector(context)),
         vscode.commands.registerCommand('serv.refreshTests', () => testExplorerProvider.refresh()),
         vscode.commands.registerCommand('serv.runTestsWithGutter', () => runTestsWithGutter(gutterManager)),
-        vscode.commands.registerCommand('serv.clearTestDecorations', () => gutterManager.clearAll())
+        vscode.commands.registerCommand('serv.clearTestDecorations', () => gutterManager.clearAll()),
+        vscode.commands.registerCommand('serv.viewTunnels', () => openTunnelViewer(context)),
+        vscode.commands.registerCommand('serv.refreshServices', () => servicesPanelProvider.refresh()),
+        vscode.commands.registerCommand('serv.organizeImports', () => organizeImports())
     );
 
     // Status bar integration
@@ -105,7 +108,27 @@ function activate(context) {
             gutterManager.restoreForDocument(editor.document);
         }
     });
+
+    // CD.116 — Import auto-organization (completion + code actions)
+    context.subscriptions.push(
+        vscode.languages.registerCompletionItemProvider(
+            { language: 'serv' },
+            new ServImportCompletionProvider(),
+            ' '  // trigger on space after "use"
+        ),
+        vscode.languages.registerCodeActionsProvider(
+            { language: 'serv' },
+            new ServImportCodeActionProvider(),
+            { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+        )
+    );
+
+    // CD.119 — ServVerse Services Activity Bar panel
+    const servicesPanelProvider = new ServServicesPanelProvider();
+    vscode.window.registerTreeDataProvider('serv-services-panel', servicesPanelProvider);
+    servicesPanelProvider.startPolling(context);
 }
+
 
 function runServCommand(command, extraArgs = []) {
     const editor = vscode.window.activeTextEditor;
@@ -1616,4 +1639,341 @@ function runTestsWithGutter(gutterManager) {
         outputChannel.appendLine(`\u274c Could not start serv: ${err.message}`);
         gutterManager.clearAll();
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CD.120 — ServTunnel Session Viewer
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function openTunnelViewer(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'tunnelViewer',
+        'Serv: Tunnel Sessions',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background:#1e1e2e; color:#cdd6f4; font-family:sans-serif; padding:20px;">
+            <h2>ServTunnel — Active Sessions</h2>
+            <div id="status" style="margin-bottom:10px; color:#a6e3a1;">Connecting to ServTunnel...</div>
+            <div style="display:flex; gap:16px; margin-bottom:20px;">
+                <div style="padding:15px; background:#313244; border-radius:6px; flex:1; text-align:center;">
+                    <div style="font-size:11px; color:#bac2de; margin-bottom:4px;">Active Tunnels</div>
+                    <div id="total" style="font-size:26px; font-weight:bold; color:#89b4fa;">—</div>
+                </div>
+                <div style="padding:15px; background:#313244; border-radius:6px; flex:1; text-align:center;">
+                    <div style="font-size:11px; color:#bac2de; margin-bottom:4px;">Bytes In</div>
+                    <div id="bytes-in" style="font-size:26px; font-weight:bold; color:#a6e3a1;">—</div>
+                </div>
+                <div style="padding:15px; background:#313244; border-radius:6px; flex:1; text-align:center;">
+                    <div style="font-size:11px; color:#bac2de; margin-bottom:4px;">Bytes Out</div>
+                    <div id="bytes-out" style="font-size:26px; font-weight:bold; color:#f9e2af;">—</div>
+                </div>
+            </div>
+            <table border="1" cellpadding="8" style="border-collapse:collapse; width:100%; border-color:#444;">
+                <thead>
+                    <tr style="background:#313244;">
+                        <th>Tunnel ID</th><th>Client IP</th><th>Target</th><th>Protocol</th><th>Duration</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tunnel-body"></tbody>
+            </table>
+            <script>
+                function fmt(bytes) {
+                    if (!bytes) return '0 B';
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1048576) return (bytes/1024).toFixed(1) + ' KB';
+                    return (bytes/1048576).toFixed(1) + ' MB';
+                }
+                async function loadTunnels() {
+                    const status = document.getElementById('status');
+                    const body = document.getElementById('tunnel-body');
+                    try {
+                        const res = await fetch('http://localhost:8094/api/tunnels');
+                        const data = await res.json();
+                        status.innerText = '\u{1F7E2} Connected (Live sessions)';
+                        document.getElementById('total').innerText = data.length || 0;
+                        const totalIn  = data.reduce((s,t) => s + (t.bytes_in  || 0), 0);
+                        const totalOut = data.reduce((s,t) => s + (t.bytes_out || 0), 0);
+                        document.getElementById('bytes-in').innerText  = fmt(totalIn);
+                        document.getElementById('bytes-out').innerText = fmt(totalOut);
+                        body.innerHTML = data.map(t => \`
+                            <tr>
+                                <td style="font-family:monospace;font-size:12px;">\${t.id}</td>
+                                <td>\${t.client_ip}</td>
+                                <td style="font-family:monospace;">\${t.target}</td>
+                                <td>\${t.protocol || 'TCP'}</td>
+                                <td>\${t.duration || 'N/A'}</td>
+                                <td style="color:\${t.status==='active'?'#a6e3a1':'#f38ba8'};font-weight:bold;">\${t.status}</td>
+                            </tr>
+                        \`).join('');
+                    } catch(e) {
+                        status.innerText = '\u26A0\uFE0F Offline (Showing mock sessions)';
+                        document.getElementById('total').innerText = '3';
+                        document.getElementById('bytes-in').innerText  = '14.2 MB';
+                        document.getElementById('bytes-out').innerText = '8.7 MB';
+                        body.innerHTML = \`
+                            <tr><td style="font-family:monospace;font-size:12px;">tun-a1b2</td><td>203.0.113.42</td><td style="font-family:monospace;">localhost:3000</td><td>TCP</td><td>2h 14m</td><td style="color:#a6e3a1;font-weight:bold;">active</td></tr>
+                            <tr><td style="font-family:monospace;font-size:12px;">tun-c3d4</td><td>198.51.100.17</td><td style="font-family:monospace;">localhost:8080</td><td>HTTP</td><td>47m</td><td style="color:#a6e3a1;font-weight:bold;">active</td></tr>
+                            <tr><td style="font-family:monospace;font-size:12px;">tun-e5f6</td><td>192.0.2.88</td><td style="font-family:monospace;">localhost:5432</td><td>TCP</td><td>8m</td><td style="color:#f9e2af;font-weight:bold;">idle</td></tr>
+                        \`;
+                    }
+                }
+                loadTunnels();
+                setInterval(loadTunnels, 4000);
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CD.119 — ServVerse Services Activity Bar Panel
+// Live-polling TreeDataProvider showing all 16 services with health status
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const SERV_MOCK_SERVICES = [
+    { name:'ServAuth',     port:8098, healthy:true,  uptime:'14h 32m' },
+    { name:'ServCache',    port:8086, healthy:true,  uptime:'14h 32m' },
+    { name:'ServCloud',    port:8084, healthy:true,  uptime:'14h 31m' },
+    { name:'ServConsole',  port:8085, healthy:true,  uptime:'14h 31m' },
+    { name:'ServCron',     port:8087, healthy:true,  uptime:'14h 30m' },
+    { name:'ServDocs',     port:8096, healthy:true,  uptime:'14h 30m' },
+    { name:'ServFlow',     port:8083, healthy:false, uptime:'restarting' },
+    { name:'ServGate',     port:8088, healthy:true,  uptime:'14h 32m' },
+    { name:'ServLock',     port:8089, healthy:true,  uptime:'14h 29m' },
+    { name:'ServMail',     port:8092, healthy:true,  uptime:'14h 28m' },
+    { name:'ServMesh',     port:8095, healthy:true,  uptime:'14h 32m' },
+    { name:'ServPool',     port:8093, healthy:true,  uptime:'14h 32m' },
+    { name:'ServQueue',    port:8082, healthy:true,  uptime:'14h 31m' },
+    { name:'ServRegistry', port:8090, healthy:true,  uptime:'14h 32m' },
+    { name:'ServStore',    port:8081, healthy:true,  uptime:'14h 32m' },
+    { name:'ServTrace',    port:8091, healthy:true,  uptime:'14h 32m' },
+    { name:'ServTunnel',   port:8094, healthy:true,  uptime:'14h 30m' },
+];
+
+class ServServicesPanelProvider {
+    constructor() {
+        this._onDidChangeTreeData = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+        this._services = [];
+        this._loading = true;
+        this._offline = false;
+    }
+
+    refresh() {
+        this._poll().catch(() => {});
+    }
+
+    getTreeItem(el) { return el; }
+
+    getChildren(el) {
+        if (el) return [];
+
+        if (this._loading) {
+            const item = new vscode.TreeItem('Connecting to ServRegistry...');
+            item.iconPath = new vscode.ThemeIcon('loading~spin');
+            return [item];
+        }
+
+        const header = new vscode.TreeItem(
+            this._offline
+                ? `ServVerse  [${this._services.filter(s => s.healthy).length}/${this._services.length} healthy] — offline`
+                : `ServVerse  [${this._services.filter(s => s.healthy).length}/${this._services.length} healthy]`
+        );
+        header.iconPath = new vscode.ThemeIcon('server-environment');
+        header.collapsibleState = vscode.TreeItemCollapsibleState.None;
+        header.description = this._offline ? 'mock data' : 'live';
+
+        const items = this._services.map(svc => {
+            const item = new vscode.TreeItem(svc.name, vscode.TreeItemCollapsibleState.None);
+            item.iconPath = new vscode.ThemeIcon(
+                svc.healthy ? 'circle-filled' : 'error',
+                new vscode.ThemeColor(
+                    svc.healthy ? 'testing.iconPassed' : 'testing.iconFailed'
+                )
+            );
+            item.description = svc.healthy
+                ? `localhost:${svc.port}  ${svc.uptime}`
+                : `localhost:${svc.port}  DOWN`;
+            item.tooltip = new vscode.MarkdownString(
+                `**${svc.name}**\n\n` +
+                `- Port: \`${svc.port}\`\n` +
+                `- Status: ${svc.healthy ? '🟢 Healthy' : '🔴 Down'}\n` +
+                `- Uptime: ${svc.uptime}`
+            );
+            item.contextValue = svc.healthy ? 'servHealthy' : 'servDown';
+            return item;
+        });
+
+        return [header, ...items];
+    }
+
+    startPolling(context) {
+        this._poll().catch(() => {});
+        const interval = setInterval(() => this._poll().catch(() => {}), 6000);
+        context.subscriptions.push({ dispose: () => clearInterval(interval) });
+    }
+
+    async _poll() {
+        try {
+            const http = require('http');
+            const data = await new Promise((resolve, reject) => {
+                const req = http.get('http://localhost:8090/api/registry/services', res => {
+                    let body = '';
+                    res.on('data', chunk => body += chunk);
+                    res.on('end', () => {
+                        try { resolve(JSON.parse(body)); }
+                        catch (e) { reject(e); }
+                    });
+                });
+                req.setTimeout(3000, () => { req.destroy(); reject(new Error('timeout')); });
+                req.on('error', reject);
+            });
+            this._services = data;
+            this._offline = false;
+            this._loading = false;
+        } catch (_) {
+            if (this._loading) {
+                // First load — use mock so panel isn't blank
+                this._services = SERV_MOCK_SERVICES;
+                this._offline = true;
+                this._loading = false;
+            }
+        }
+        this._onDidChangeTreeData.fire();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CD.116 — Import Auto-Organization
+// CompletionItemProvider: "use <Tab>" shows all stdlib modules
+// CodeActionsProvider: quick-fix to add missing "use <module>" at top of file
+// organizeImports(): command to add ALL missing imports at once
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const SERV_STDLIB_MODULES = [
+    { name: 'db',     detail: 'Database queries and transactions',      doc: '`db.query()`, `db.exec()`, `db.transaction()`' },
+    { name: 'cache',  detail: 'Distributed caching via ServCache',      doc: '`cache.get()`, `cache.set()`, `cache.del()`, `cache.ttl()`' },
+    { name: 'http',   detail: 'HTTP client requests',                   doc: '`http.get()`, `http.post()`, `http.put()`, `http.delete()`' },
+    { name: 'queue',  detail: 'Message publishing via ServQueue',       doc: '`queue.publish()`, `queue.subscribe()`, `queue.ack()`' },
+    { name: 'store',  detail: 'Object storage via ServStore',           doc: '`store.put()`, `store.get()`, `store.delete()`, `store.list()`' },
+    { name: 'lock',   detail: 'Distributed locks via ServLock',         doc: '`lock.acquire()`, `lock.release()`, `lock.tryAcquire()`' },
+    { name: 'cron',   detail: 'Scheduled jobs via ServCron',            doc: '`cron.register()`, `cron.list()`' },
+    { name: 'mail',   detail: 'Email sending via ServMail',             doc: '`mail.send()`, `mail.template()`' },
+    { name: 'flow',   detail: 'Workflow orchestration via ServFlow',    doc: '`flow.start()`, `flow.step()`, `flow.compensate()`' },
+    { name: 'json',   detail: 'JSON encode/decode',                     doc: '`json.encode()`, `json.decode()`, `json.pretty()`' },
+    { name: 'log',    detail: 'Structured logging',                     doc: '`log.info()`, `log.warn()`, `log.error()`, `log.debug()`' },
+    { name: 'env',    detail: 'Environment variables',                  doc: '`env.get()`, `env.require()`' },
+    { name: 'crypto', detail: 'Cryptographic utilities',                doc: '`crypto.hash()`, `crypto.sign()`, `crypto.verify()`' },
+    { name: 'time',   detail: 'Time and duration utilities',            doc: '`time.now()`, `time.parse()`, `time.format()`' },
+    { name: 'uuid',   detail: 'UUID generation',                        doc: '`uuid.v4()`, `uuid.v7()`' },
+    { name: 'path',   detail: 'File path utilities',                    doc: '`path.join()`, `path.ext()`, `path.base()`' },
+    { name: 'fs',     detail: 'File system access',                     doc: '`fs.read()`, `fs.write()`, `fs.exists()`, `fs.delete()`' },
+    { name: 'math',   detail: 'Math utilities',                         doc: '`math.abs()`, `math.ceil()`, `math.floor()`, `math.min()`, `math.max()`' },
+];
+
+class ServImportCompletionProvider {
+    provideCompletionItems(document, position, token, context) {
+        const lineText = document.lineAt(position).text;
+        const prefix   = lineText.substr(0, position.character);
+
+        // Only trigger on lines that look like: "use <partial>"
+        if (!/^\s*use\s+\w*$/.test(prefix)) return [];
+
+        return SERV_STDLIB_MODULES.map(mod => {
+            const item = new vscode.CompletionItem(mod.name, vscode.CompletionItemKind.Module);
+            item.detail        = mod.detail;
+            item.documentation = new vscode.MarkdownString(mod.doc);
+            item.insertText    = mod.name;
+            item.sortText      = '0' + mod.name;
+            return item;
+        });
+    }
+}
+
+class ServImportCodeActionProvider {
+    provideCodeActions(document, range, context, token) {
+        const lines   = document.getText().split('\n');
+        const used    = this._findUsedModules(lines);
+        const present = this._findImportedModules(lines);
+        const missing = used.filter(m => !present.has(m));
+
+        if (missing.length === 0) return [];
+
+        const actions = missing.map(mod => {
+            const action = new vscode.CodeAction(
+                `Add "use ${mod}"`,
+                vscode.CodeActionKind.QuickFix
+            );
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(document.uri, new vscode.Position(0, 0), `use ${mod}\n`);
+            action.edit = edit;
+            action.isPreferred = missing.length === 1;
+            return action;
+        });
+
+        if (missing.length > 1) {
+            const bulk = new vscode.CodeAction(
+                `Add all missing imports (${missing.join(', ')})`,
+                vscode.CodeActionKind.QuickFix
+            );
+            const edit = new vscode.WorkspaceEdit();
+            edit.insert(document.uri, new vscode.Position(0, 0), missing.map(m => `use ${m}`).join('\n') + '\n');
+            bulk.edit = edit;
+            bulk.isPreferred = true;
+            actions.push(bulk);
+        }
+
+        return actions;
+    }
+
+    _findUsedModules(lines) {
+        const known = new Set(SERV_STDLIB_MODULES.map(m => m.name));
+        const used  = new Set();
+        for (const line of lines) {
+            const t = line.trim();
+            if (t.startsWith('use ') || t.startsWith('//') || t.startsWith('*')) continue;
+            for (const mod of known) {
+                if (new RegExp(`\\b${mod}\\.`).test(line)) used.add(mod);
+            }
+        }
+        return [...used];
+    }
+
+    _findImportedModules(lines) {
+        const present = new Set();
+        for (const line of lines) {
+            const m = /^\s*use\s+(\w+)/.exec(line);
+            if (m) present.add(m[1]);
+        }
+        return present;
+    }
+}
+
+async function organizeImports() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'serv') {
+        vscode.window.showWarningMessage('Open a .srv file to organize imports.');
+        return;
+    }
+    const provider = new ServImportCodeActionProvider();
+    const doc      = editor.document;
+    const lines    = doc.getText().split('\n');
+    const missing  = provider._findUsedModules(lines).filter(
+        m => !provider._findImportedModules(lines).has(m)
+    );
+
+    if (missing.length === 0) {
+        vscode.window.showInformationMessage('Serv: All imports are already present.');
+        return;
+    }
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(doc.uri, new vscode.Position(0, 0), missing.map(m => `use ${m}`).join('\n') + '\n');
+    await vscode.workspace.applyEdit(edit);
+    vscode.window.showInformationMessage(`Serv: Added ${missing.length} import(s): ${missing.join(', ')}`);
 }

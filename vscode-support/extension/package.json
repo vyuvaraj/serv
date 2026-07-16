@@ -2,7 +2,7 @@
   "name": "serv-vscode",
   "displayName": "Serv Programming Language Support",
   "description": "Full language support for the Serv programming language (.srv files) — syntax highlighting, diagnostics, autocomplete, hover, go-to-definition, and LSP.",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "publisher": "vyuvaraj",
   "engines": {
     "vscode": "^1.75.0"
@@ -86,12 +86,36 @@
         }
       }
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "serv-services",
+          "title": "ServVerse",
+          "icon": "images/serv-panel.svg"
+        }
+      ]
+    },
     "views": {
+      "serv-services": [
+        {
+          "id": "serv-services-panel",
+          "name": "Services"
+        }
+      ],
       "explorer": [
         {
           "id": "serv-test-explorer",
           "name": "Serv Tests",
           "when": "workspaceContains:**/*.srv"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "serv.refreshServices",
+          "when": "view == serv-services-panel",
+          "group": "navigation"
         }
       ]
     },
@@ -193,6 +217,19 @@
       {
         "command": "serv.clearTestDecorations",
         "title": "Serv: Clear Test Gutter Markers"
+      },
+      {
+        "command": "serv.viewTunnels",
+        "title": "Serv: View Tunnel Sessions"
+      },
+      {
+        "command": "serv.refreshServices",
+        "title": "Serv: Refresh Services Panel",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "serv.organizeImports",
+        "title": "Serv: Add Missing Imports"
       }
     ],
     "keybindings": [

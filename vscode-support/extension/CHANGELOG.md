@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.6
+
+### Added
+- **ServVerse Activity Bar Panel** (CD.119) — Dedicated sidebar icon in VS Code's Activity Bar showing all 17 services with live 🟢/🔴 health icons, port numbers, and uptime. Polls ServRegistry every 6s. Shows mock data with `offline` badge when registry is unreachable. Refresh button in panel title bar.
+- **ServTunnel Session Viewer** (CD.120) — `serv.viewTunnels` Webview dashboard showing active tunnel sessions with client IP, target host:port, protocol, duration, bytes in/out totals. Completes 17/17 service dashboard coverage.
+- **Import Auto-Organization** (CD.116) — Three-part feature: (1) Completion provider on `use <Tab>` shows all 18 stdlib modules with description and API signature docs; (2) CodeActions quick-fix lightbulb adds missing `use <module>` when `db.`, `cache.`, `http.` etc. are used without import; (3) `Serv: Add Missing Imports` command adds all missing imports at once.
+
 ## 3.0.5
 
 ### Added
