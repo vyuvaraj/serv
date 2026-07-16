@@ -79,7 +79,7 @@ scoops:
 nfpms:
   - id: servpool-pkg
     package_name: servpool
-    builds: [servpool]
+    builds: [servdb]
     vendor: Yuvaraj
     homepage: https://github.com/vyuvaraj/ServPool
     maintainer: Yuvaraj <vyuvaraj@github.com>
