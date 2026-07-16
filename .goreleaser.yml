@@ -135,5 +135,25 @@ scoops:
     description: "Distributed object and block storage service from the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servstore-pkg
+    package_name: servstore
+    builds: [servstore]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServStore
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Object storage service from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servstore/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
