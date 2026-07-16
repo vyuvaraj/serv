@@ -80,5 +80,25 @@ scoops:
     description: "High-performance API gateway and reverse proxy from the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servgate-pkg
+    package_name: servgate
+    builds: [servgate]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServGate
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: High-performance API gateway and reverse proxy from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servgate/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
