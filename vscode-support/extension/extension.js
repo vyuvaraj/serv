@@ -72,10 +72,12 @@ function activate(context) {
         vscode.commands.registerCommand('serv.viewDeployments', () => openDeploymentsPanel(context)),
         vscode.commands.registerCommand('serv.inspectPool', () => openPoolInspector(context)),
         vscode.commands.registerCommand('serv.inspectMail', () => openMailInspector(context)),
-        vscode.commands.registerCommand('serv.refreshTests', () => testExplorerProvider.refresh())
+        vscode.commands.registerCommand('serv.refreshTests', () => testExplorerProvider.refresh()),
+        vscode.commands.registerCommand('serv.runTestsWithGutter', () => runTestsWithGutter(gutterManager)),
+        vscode.commands.registerCommand('serv.clearTestDecorations', () => gutterManager.clearAll())
     );
 
-    // Status bar integration — always-visible ecosystem health indicator
+    // Status bar integration
     setupStatusBar(context);
 
     // Test Explorer sidebar tree view
@@ -83,6 +85,25 @@ function activate(context) {
     vscode.window.registerTreeDataProvider('serv-test-explorer', testExplorerProvider);
     vscode.workspace.onDidSaveTextDocument(doc => {
         if (doc.languageId === 'serv') testExplorerProvider.refresh();
+    });
+
+    // CD.113 — Inlay type hints
+    const config = vscode.workspace.getConfiguration('serv');
+    if (config.get('enableInlayHints', true)) {
+        context.subscriptions.push(
+            vscode.languages.registerInlayHintsProvider(
+                { language: 'serv' },
+                new ServInlayHintsProvider()
+            )
+        );
+    }
+
+    // CD.115 — Test gutter decorations manager
+    const gutterManager = new ServTestGutterManager(context);
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+        if (editor && editor.document.languageId === 'serv') {
+            gutterManager.restoreForDocument(editor.document);
+        }
     });
 }
 
@@ -1321,4 +1342,278 @@ function openMailInspector(context) {
         </body>
         </html>
     `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CD.113 — Inlay Type Hints Provider
+// Shows inferred return types on fn declarations and variable types on let bindings
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class ServInlayHintsProvider {
+    provideInlayHints(document, range, token) {
+        const hints = [];
+        const lines = document.getText().split('\n');
+
+        for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+            if (token.isCancellationRequested) break;
+            const line = lines[lineIdx];
+
+            // ── fn declarations without explicit return type ───────────────
+            // Matches: fn Name(...) { or fn Struct.Method(...) {
+            const fnMatch = /^(fn\s+[\w.]+\s*\([^)]*\))\s*\{/.exec(line);
+            if (fnMatch) {
+                const returnType = this._inferReturnType(lines, lineIdx);
+                if (returnType) {
+                    const pos = new vscode.Position(lineIdx, fnMatch[1].length);
+                    const hint = new vscode.InlayHint(pos, ` \u2192 ${returnType}`);
+                    hint.kind = vscode.InlayHintKind.Type;
+                    hint.paddingLeft = true;
+                    hints.push(hint);
+                }
+            }
+
+            // ── let bindings without explicit type annotation ─────────────
+            // Matches: let name = value  (no colon in assignment)
+            const letMatch = /^(\s*let\s+([\w]+))\s*=\s*(.+)/.exec(line);
+            if (letMatch && !line.includes(':')) {
+                const varName = letMatch[2];
+                const valueExpr = letMatch[3].trim();
+                const inferredType = this._inferExprType(valueExpr);
+                if (inferredType) {
+                    const varEnd = line.indexOf(varName) + varName.length;
+                    const hint = new vscode.InlayHint(
+                        new vscode.Position(lineIdx, varEnd),
+                        `: ${inferredType}`
+                    );
+                    hint.kind = vscode.InlayHintKind.Type;
+                    hints.push(hint);
+                }
+            }
+        }
+        return hints;
+    }
+
+    resolveInlayHint(hint, token) { return hint; }
+
+    _inferReturnType(lines, fnLine) {
+        for (let i = fnLine + 1; i < Math.min(fnLine + 40, lines.length); i++) {
+            const t = lines[i].trim();
+            if (t === '}') break; // end of function body
+            if (!t.startsWith('return ')) continue;
+            return this._inferExprType(t.slice(7).trim()) || 'any';
+        }
+        return null;
+    }
+
+    _inferExprType(expr) {
+        if (!expr) return null;
+        const e = expr.trim();
+        if (e === 'nil')                       return 'nil';
+        if (e === 'true' || e === 'false')     return 'bool';
+        if (/^f?"/.test(e))                    return 'string';
+        if (/^\d+\.\d+/.test(e))               return 'float';
+        if (/^\d+$/.test(e))                   return 'int';
+        if (e.startsWith('['))                 return '[]any';
+        if (e.startsWith('{') || e === '{}')   return 'map';
+        if (e.includes('db.query('))           return 'Result';
+        if (e.includes('db.exec('))            return 'Result';
+        if (e.includes('cache.get('))          return 'string?';
+        if (e.includes('cache.set('))          return 'bool';
+        if (e.includes('http.get('))           return 'Response';
+        if (e.includes('http.post('))          return 'Response';
+        if (e.includes('json.encode('))        return 'string';
+        if (e.includes('json.decode('))        return 'map';
+        if (e.endsWith('?'))                   return 'any?';
+        return null;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CD.115 — Test Gutter Decorations Manager
+// Shows 🟢/🔴/🟡 dot icons in the gutter next to each test "..." block
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class ServTestGutterManager {
+    constructor(context) {
+        // Inline SVG data URIs — no external icon files required
+        const svg = (fill) => vscode.Uri.parse(
+            `data:image/svg+xml;base64,${Buffer.from(
+                `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">` +
+                `<circle cx="8" cy="8" r="5" fill="${fill}"/>` +
+                `</svg>`
+            ).toString('base64')}`
+        );
+
+        this._passDecoration = vscode.window.createTextEditorDecorationType({
+            gutterIconPath: svg('#a6e3a1'),
+            gutterIconSize: 'contain',
+            overviewRulerColor: '#a6e3a1',
+            overviewRulerLane: vscode.OverviewRulerLane.Left
+        });
+        this._failDecoration = vscode.window.createTextEditorDecorationType({
+            gutterIconPath: svg('#f38ba8'),
+            gutterIconSize: 'contain',
+            overviewRulerColor: '#f38ba8',
+            overviewRulerLane: vscode.OverviewRulerLane.Left
+        });
+        this._pendingDecoration = vscode.window.createTextEditorDecorationType({
+            gutterIconPath: svg('#f9e2af'),
+            gutterIconSize: 'contain',
+            overviewRulerColor: '#f9e2af',
+            overviewRulerLane: vscode.OverviewRulerLane.Left
+        });
+
+        // Store last results per file path so we can restore on tab switch
+        this._lastResults = new Map(); // filePath -> {pass: Range[], fail: Range[]}
+
+        context.subscriptions.push(
+            this._passDecoration,
+            this._failDecoration,
+            this._pendingDecoration
+        );
+    }
+
+    markAllPending(document) {
+        const editor = vscode.window.visibleTextEditors.find(e => e.document === document);
+        if (!editor) return;
+        const ranges = this._findTestRanges(document);
+        editor.setDecorations(this._passDecoration, []);
+        editor.setDecorations(this._failDecoration, []);
+        editor.setDecorations(this._pendingDecoration, ranges);
+    }
+
+    applyResults(document, testResults) {
+        // testResults: Array<{name: string, passed: boolean}>
+        const editor = vscode.window.visibleTextEditors.find(e => e.document === document);
+        if (!editor) return;
+
+        const lines = document.getText().split('\n');
+        const passRanges = [];
+        const failRanges = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const m = /test\s+"([^"]+)"/.exec(lines[i]);
+            if (!m) continue;
+            const result = testResults.find(r => r.name === m[1]);
+            if (!result) continue;
+            const range = new vscode.Range(i, 0, i, 0);
+            if (result.passed) passRanges.push(range);
+            else failRanges.push(range);
+        }
+
+        editor.setDecorations(this._pendingDecoration, []);
+        editor.setDecorations(this._passDecoration, passRanges);
+        editor.setDecorations(this._failDecoration, failRanges);
+
+        this._lastResults.set(document.fileName, { pass: passRanges, fail: failRanges });
+    }
+
+    restoreForDocument(document) {
+        const cached = this._lastResults.get(document.fileName);
+        if (!cached) return;
+        const editor = vscode.window.visibleTextEditors.find(e => e.document === document);
+        if (!editor) return;
+        editor.setDecorations(this._passDecoration, cached.pass);
+        editor.setDecorations(this._failDecoration, cached.fail);
+        editor.setDecorations(this._pendingDecoration, []);
+    }
+
+    clearAll() {
+        this._lastResults.clear();
+        for (const editor of vscode.window.visibleTextEditors) {
+            editor.setDecorations(this._passDecoration, []);
+            editor.setDecorations(this._failDecoration, []);
+            editor.setDecorations(this._pendingDecoration, []);
+        }
+        vscode.window.showInformationMessage('Serv: Test gutter markers cleared.');
+    }
+
+    parseTestOutput(output) {
+        // Parse structured test output: "PASS: test name" / "FAIL: test name"
+        const results = [];
+        for (const line of output.split('\n')) {
+            const t = line.trim();
+            const passM = /^(?:PASS|ok|✓|pass)[\s:]+(.+)/i.exec(t);
+            const failM = /^(?:FAIL|error|✗|fail)[\s:]+(.+)/i.exec(t);
+            if (passM) results.push({ name: passM[1].trim(), passed: true });
+            if (failM) results.push({ name: failM[1].trim(), passed: false });
+        }
+        return results;
+    }
+
+    _findTestRanges(document) {
+        return document.getText().split('\n').reduce((acc, line, i) => {
+            if (/test\s+"[^"]+"/.test(line)) acc.push(new vscode.Range(i, 0, i, 0));
+            return acc;
+        }, []);
+    }
+}
+
+// ─── CD.115: Test runner with gutter decoration integration ──────────────────
+
+function runTestsWithGutter(gutterManager) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'serv') {
+        vscode.window.showWarningMessage('Open a .srv file to run tests with gutter decorations.');
+        return;
+    }
+
+    const document = editor.document;
+    const filePath = document.fileName;
+    const servPath = findServBinary();
+    const { spawn } = require('child_process');
+
+    // Mark all tests yellow (pending)
+    gutterManager.markAllPending(document);
+
+    const outputChannel = vscode.window.createOutputChannel('Serv Tests');
+    outputChannel.show(true);
+    outputChannel.appendLine(`\u25b6 serv test "${path.basename(filePath)}"`);
+    outputChannel.appendLine('─'.repeat(60));
+
+    const proc = spawn(servPath, ['test', filePath], {
+        cwd: path.dirname(filePath)
+    });
+
+    let fullOutput = '';
+    proc.stdout.on('data', chunk => { fullOutput += chunk; outputChannel.append(chunk.toString()); });
+    proc.stderr.on('data', chunk => { fullOutput += chunk; outputChannel.append(chunk.toString()); });
+
+    proc.on('close', code => {
+        outputChannel.appendLine('─'.repeat(60));
+
+        let results = gutterManager.parseTestOutput(fullOutput);
+
+        // If the runner didn't emit structured PASS/FAIL lines, infer from exit code
+        if (results.length === 0) {
+            const testNames = document.getText().split('\n').reduce((acc, line) => {
+                const m = /test\s+"([^"]+)"/.exec(line);
+                if (m) acc.push(m[1]);
+                return acc;
+            }, []);
+            results = testNames.map(name => ({ name, passed: code === 0 }));
+        }
+
+        gutterManager.applyResults(document, results);
+
+        const passed = results.filter(r => r.passed).length;
+        const failed = results.filter(r => !r.passed).length;
+        const summary = `${passed} passed, ${failed} failed`;
+
+        outputChannel.appendLine(
+            code === 0
+                ? `\u2705 All tests passed (${summary})`
+                : `\u274c Tests failed (${summary})`
+        );
+
+        vscode.window.showInformationMessage(
+            code === 0 ? `\u2705 Serv: ${summary}` : `\u274c Serv: ${summary}`,
+            code !== 0 ? 'Show Output' : undefined
+        ).then(sel => { if (sel === 'Show Output') outputChannel.show(); });
+    });
+
+    proc.on('error', err => {
+        outputChannel.appendLine(`\u274c Could not start serv: ${err.message}`);
+        gutterManager.clearAll();
+    });
 }

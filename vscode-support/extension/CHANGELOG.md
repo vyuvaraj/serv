@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.5
+
+### Added
+- **Inlay Type Hints** (CD.113) — Always-on inline type hints in the editor for `fn` return types (`→ string`) and `let` bindings (`: int`). Infers from return expression patterns: `db.query()` → `Result`, `http.get()` → `Response`, literals → `string`/`int`/`bool`/`float`. Togglable via `serv.enableInlayHints` setting.
+- **Test Gutter Decorations** (CD.115) — Run `serv test` via the new `Serv: Run Tests (with Gutter Decorations)` command to paint 🟡 yellow dots on all test blocks before running, then 🟢 green or 🔴 red based on results. Results persist when switching tabs. Parses PASS/FAIL output lines; falls back to exit-code if unstructured. Includes `Serv: Clear Test Gutter Markers` to reset all decorations.
+
 ## 3.0.4
 
 ### Added

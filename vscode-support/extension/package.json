@@ -2,7 +2,7 @@
   "name": "serv-vscode",
   "displayName": "Serv Programming Language Support",
   "description": "Full language support for the Serv programming language (.srv files) — syntax highlighting, diagnostics, autocomplete, hover, go-to-definition, and LSP.",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "publisher": "vyuvaraj",
   "engines": {
     "vscode": "^1.75.0"
@@ -78,6 +78,11 @@
           "type": "string",
           "default": "",
           "description": "Path to the serv compiler binary. If empty, looks for 'serv' or 'serv.exe' in workspace root or PATH."
+        },
+        "serv.enableInlayHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inferred return type and variable type hints inline in the editor."
         }
       }
     },
@@ -179,6 +184,15 @@
         "command": "serv.refreshTests",
         "title": "Serv: Refresh Test Explorer",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "serv.runTestsWithGutter",
+        "title": "Serv: Run Tests (with Gutter Decorations)",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "serv.clearTestDecorations",
+        "title": "Serv: Clear Test Gutter Markers"
       }
     ],
     "keybindings": [
