@@ -76,5 +76,25 @@ scoops:
     description: "Distributed message queue and event streaming service from the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servqueue-pkg
+    package_name: servqueue
+    builds: [servqueue]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServQueue
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Distributed message queue and event streaming from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servqueue/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
