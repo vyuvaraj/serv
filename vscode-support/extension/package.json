@@ -2,7 +2,7 @@
   "name": "serv-vscode",
   "displayName": "Serv Programming Language Support",
   "description": "Full language support for the Serv programming language (.srv files) — syntax highlighting, diagnostics, autocomplete, hover, go-to-definition, and LSP.",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "publisher": "vyuvaraj",
   "engines": {
     "vscode": "^1.75.0"
@@ -81,6 +81,15 @@
         }
       }
     },
+    "views": {
+      "explorer": [
+        {
+          "id": "serv-test-explorer",
+          "name": "Serv Tests",
+          "when": "workspaceContains:**/*.srv"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "serv.run",
@@ -149,6 +158,27 @@
       {
         "command": "serv.viewRegistry",
         "title": "Serv: View Service Registry Health"
+      },
+      {
+        "command": "serv.runBench",
+        "title": "Serv: Benchmark Current File"
+      },
+      {
+        "command": "serv.viewDeployments",
+        "title": "Serv: View Cloud Deployments"
+      },
+      {
+        "command": "serv.inspectPool",
+        "title": "Serv: Inspect Connection Pool"
+      },
+      {
+        "command": "serv.inspectMail",
+        "title": "Serv: Inspect Mail Queue"
+      },
+      {
+        "command": "serv.refreshTests",
+        "title": "Serv: Refresh Test Explorer",
+        "icon": "$(refresh)"
       }
     ],
     "keybindings": [

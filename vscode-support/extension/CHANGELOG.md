@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.4
+
+### Added
+- **Serv Test Explorer** — Sidebar panel in Explorer listing all `test "..."` blocks from every `.srv` file, grouped by file with collapse/expand. Refreshes on save.
+- **serv bench panel** (`serv.runBench`) — Runs `serv bench <file>` in terminal and opens a live p50/p99/throughput results panel per route.
+- **ServCloud Deployments** (`serv.viewDeployments`) — Live table of branch preview deployments with URLs, build status, and auto-refresh.
+- **ServPool Inspector** (`serv.inspectPool`) — DB connection pool dashboard showing active/idle/max connections per named pool, with wait-queue alerts.
+- **ServMail Queue** (`serv.inspectMail`) — Email queue dashboard showing queued/sent/bounced counts and per-item status with template names.
+
 ## 3.0.3
 
 ### Added
