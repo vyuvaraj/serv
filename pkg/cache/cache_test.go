@@ -4,8 +4,11 @@ import (
 	"context"
 	"container/list"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -288,5 +291,53 @@ func Test100GoroutineCacheStress(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestCacheStampedeProtection(t *testing.T) {
+	// Set up mock backend server
+	var backendCalled int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&backendCalled, 1)
+		time.Sleep(50 * time.Millisecond) // simulate database latency
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`"stampede_value"`))
+	}))
+	defer server.Close()
+
+	os.Setenv("SERV_CACHE_BACKEND_DB", server.URL)
+	defer os.Unsetenv("SERV_CACHE_BACKEND_DB")
+
+	c := NewInMemoryCache(1 * time.Second)
+
+	// Concurrently query the missing key
+	var wg sync.WaitGroup
+	numWorkers := 20
+	results := make([]string, numWorkers)
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			val, found, err := c.Get("stampede_key")
+			if err == nil && found {
+				if s, ok := val.(string); ok {
+					results[idx] = s
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	// Verify all concurrent queries received the correct value
+	for _, res := range results {
+		if res != "stampede_value" {
+			t.Errorf("expected stampede_value, got %q", res)
+		}
+	}
+
+	// Verify backend was only called once!
+	calls := atomic.LoadInt32(&backendCalled)
+	if calls != 1 {
+		t.Errorf("expected backend to be called exactly once, got %d", calls)
+	}
 }
 

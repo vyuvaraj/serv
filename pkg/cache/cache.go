@@ -34,6 +34,7 @@ type InMemoryCache struct {
 	evictList *list.List
 	maxKeys   int
 	cleanup   time.Duration
+	sf        Group
 }
 
 func NewInMemoryCache(cleanupInterval time.Duration) *InMemoryCache {
@@ -67,7 +68,9 @@ func (c *InMemoryCache) Get(key string) (interface{}, bool, error) {
 		if backend := os.Getenv("SERV_CACHE_BACKEND_DB"); backend != "" {
 			// Release lock temporarily for HTTP request
 			c.mu.Unlock()
-			val, err := c.fetchFromBackend(key)
+			val, err := c.sf.Do(key, func() (interface{}, error) {
+				return c.fetchFromBackend(key)
+			})
 			c.mu.Lock()
 			if err == nil && val != nil {
 				c.setLocalNoLock(key, val, 1*time.Minute)
@@ -84,7 +87,9 @@ func (c *InMemoryCache) Get(key string) (interface{}, bool, error) {
 
 		if backend := os.Getenv("SERV_CACHE_BACKEND_DB"); backend != "" {
 			c.mu.Unlock()
-			val, err := c.fetchFromBackend(key)
+			val, err := c.sf.Do(key, func() (interface{}, error) {
+				return c.fetchFromBackend(key)
+			})
 			c.mu.Lock()
 			if err == nil && val != nil {
 				c.setLocalNoLock(key, val, 1*time.Minute)
@@ -252,5 +257,42 @@ func (c *InMemoryCache) Keys() []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// Custom singleflight implementation
+type call struct {
+	wg  sync.WaitGroup
+	val interface{}
+	err error
+}
+
+type Group struct {
+	mu sync.Mutex
+	m  map[string]*call
+}
+
+func (g *Group) Do(key string, fn func() (interface{}, error)) (interface{}, error) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*call)
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.err
+	}
+	c := new(call)
+	c.wg.Add(1)
+	g.m[key] = c
+	g.mu.Unlock()
+
+	c.val, c.err = fn()
+	c.wg.Done()
+
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+
+	return c.val, c.err
 }
 
