@@ -64,6 +64,7 @@ Visual Webviews integrated directly into the workspace to observe and simulate l
 | `serv.inspectPool` | **ServPool Inspector** | DB connection pool stats (active/idle/max) with wait-queue alerts |
 | `serv.inspectMail` | **ServMail Queue** | Email queue with queued/sent/bounced counts and per-item status |
 | `serv.viewTunnels` | **ServTunnel Sessions** | Active tunnel sessions with client IP, target, protocol, duration, bytes in/out |
+| `serv.deploy` | **One-Click Deploy** | Deploy the current service to ServCloud with live build log (compile → test → package → provision → URL) |
 
 ---
 
@@ -80,6 +81,13 @@ Run `Serv: Run Tests (with Gutter Decorations)` to paint:
 
 Results persist when switching between tabs. The overview ruler is also colored per test. Use `Serv: Clear Test Gutter Markers` to reset.
 
+### Coverage Line Highlights _(v3.0.7+)_
+Run `Serv: Run Tests with Coverage Highlights` to shade the active `.srv` file:
+- 🟢 **Subtle green tint** on every covered line + green overview ruler bar
+- 🔴 **Red background + `✗ uncovered`** annotation on every uncovered line + red overview ruler bar
+
+A coverage percentage is shown in the Output channel and a toast notification. Use `Serv: Clear Coverage Highlights` to reset.
+
 ---
 
 ## Commands
@@ -94,6 +102,10 @@ Results persist when switching between tabs. The overview ruler is also colored 
 | `Serv: Clear Test Gutter Markers` | — | Clear all gutter decoration icons |
 | `Serv: Add Missing Imports` | — | Auto-add all missing `use` statements |
 | `Serv: Refresh Services Panel` | — | Force-refresh the Activity Bar services panel |
+| `Serv: New Project from Template` | — | Scaffold a new Serv project with template picker |
+| `Serv: Deploy to ServCloud` | — | Deploy current service to ServCloud (Production / Staging / Preview) |
+| `Serv: Run Tests with Coverage Highlights` | — | Run tests and shade covered/uncovered lines in the editor |
+| `Serv: Clear Coverage Highlights` | — | Remove all coverage highlight decorations |
 
 ---
 
@@ -101,7 +113,9 @@ Results persist when switching between tabs. The overview ruler is also colored 
 
 1. Install the [Serv compiler](https://github.com/vyuvaraj/Serv-lang)
 2. Install this extension
-3. Create a new project:
+3. **Scaffold a new project from inside VS Code** — open the Command Palette (`Ctrl+Shift+P`) and run `Serv: New Project from Template`. Choose a template, name your project, and pick a folder. The project opens automatically.
+
+   Or use the CLI:
    ```bash
    serv init my-api
    cd my-api
