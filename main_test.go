@@ -1323,6 +1323,59 @@ func TestSCIM20Provisioning(t *testing.T) {
 	}
 }
 
+func TestAdaptiveRiskScoring(t *testing.T) {
+	setupTest()
+
+	regPayload := `{"username":"risk_user","email":"risk@example.com","password":"Password123!"}`
+	reqReg := httptest.NewRequest("POST", "/api/auth/register", strings.NewReader(regPayload))
+	reqReg.Header.Set("Content-Type", "application/json")
+	wReg := httptest.NewRecorder()
+	handlers.HandleRegister(wReg, reqReg)
+	if wReg.Code != http.StatusOK && wReg.Code != http.StatusCreated {
+		t.Fatalf("failed to register user: %d", wReg.Code)
+	}
+
+	// 1. Initial login to set historical context (Device=MacBook, Country=US)
+	payload1 := `{"username":"risk_user","device":"MacBook","country":"US","hour":12}`
+	req1 := httptest.NewRequest("POST", "/api/auth/risk", strings.NewReader(payload1))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	handlers.HandleAdaptiveRiskScore(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from risk handler, got %d", w1.Code)
+	}
+
+	// 2. Safe login: identical device/country, normal hour (12) -> should have risk score 0
+	payload2 := `{"username":"risk_user","device":"MacBook","country":"US","hour":12}`
+	req2 := httptest.NewRequest("POST", "/api/auth/risk", strings.NewReader(payload2))
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	handlers.HandleAdaptiveRiskScore(w2, req2)
+	var resp2 struct {
+		RiskScore  int  `json:"risk_score"`
+		RequireMFA bool `json:"require_mfa"`
+	}
+	json.NewDecoder(w2.Body).Decode(&resp2)
+	if resp2.RiskScore != 0 || resp2.RequireMFA {
+		t.Errorf("expected 0 risk score for safe login, got score %d, require_mfa %t", resp2.RiskScore, resp2.RequireMFA)
+	}
+
+	// 3. Risky login: new device (+3), different country (+5), unusual hour (+2) -> total 10, requires MFA
+	payload3 := `{"username":"risk_user","device":"iPhone","country":"France","hour":2}`
+	req3 := httptest.NewRequest("POST", "/api/auth/risk", strings.NewReader(payload3))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	handlers.HandleAdaptiveRiskScore(w3, req3)
+	var resp3 struct {
+		RiskScore  int  `json:"risk_score"`
+		RequireMFA bool `json:"require_mfa"`
+	}
+	json.NewDecoder(w3.Body).Decode(&resp3)
+	if resp3.RiskScore != 10 || !resp3.RequireMFA {
+		t.Errorf("expected 10 risk score and require_mfa=true for risky login, got score %d, require_mfa %t", resp3.RiskScore, resp3.RequireMFA)
+	}
+}
+
 
 
 

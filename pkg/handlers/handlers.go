@@ -1164,35 +1164,79 @@ func HandleRotateJWKS(w http.ResponseWriter, r *http.Request) {
 	w.Write(fmt.Appendf(nil, `{"status":"success","rotated_to":"%s"}`, kid))
 }
 
+type RiskScoreRequest struct {
+	Username string `json:"username"`
+	Device   string `json:"device"`
+	Country  string `json:"country"`
+	Hour     *int   `json:"hour,omitempty"`
+}
+
+func (r *RiskScoreRequest) Validate() error {
+	return nil
+}
+
 func HandleAdaptiveRiskScore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req RiskScoreRequest
+	if !ServShared.DecodeAndValidateJSON(w, r, &req) {
+		return
+	}
+	if req.Username == "" {
+		httpError(w, r, "Username is required", http.StatusBadRequest)
+		return
+	}
+
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	userKey := tenantID + ":" + req.Username
+
+	UsersMu.Lock()
+	user, exists := Users[userKey]
+	UsersMu.Unlock()
+
+	score := 0
+	if exists {
+		if user.LastDevice != "" && req.Device != "" && user.LastDevice != req.Device {
+			score += 3
+		}
+		if user.LastCountry != "" && req.Country != "" && user.LastCountry != req.Country {
+			score += 5
+		}
+		hour := time.Now().Hour()
+		if req.Hour != nil {
+			hour = *req.Hour
+		}
+		if hour >= 0 && hour <= 5 {
+			score += 2
+		}
+
+		if req.Device != "" || req.Country != "" {
+			UsersMu.Lock()
+			u := Users[userKey]
+			if req.Device != "" {
+				u.LastDevice = req.Device
+			}
+			if req.Country != "" {
+				u.LastCountry = req.Country
+			}
+			Users[userKey] = u
+			UsersMu.Unlock()
+			SaveUsersToStore()
+		}
+	} else {
+		score = 2
+	}
+
+	requireMFA := score >= 5
+
 	w.Header().Set("Content-Type", "application/json")
-
-	// Default mock risk scoring algorithm checking typical indicators
-	ua := r.Header.Get("User-Agent")
-	ip := r.RemoteAddr
-	timeHour := time.Now().Hour()
-
-	risk := 0.1
-	// Logins during unusual hours (e.g. 1 AM to 5 AM) increase risk
-	if timeHour >= 1 && timeHour <= 5 {
-		risk += 0.3
-	}
-	// Missing User-Agent increases risk
-	if ua == "" {
-		risk += 0.2
-	}
-	// Localhost flag risk reduction
-	if strings.HasPrefix(ip, "127.0.0.1") || strings.HasPrefix(ip, "[::1]") {
-		risk = 0.05
-	}
-
-	if risk > 1.0 {
-		risk = 1.0
-	}
-
-	requireMFA := risk >= 0.5
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(fmt.Appendf(nil, `{"risk_score":%.2f,"require_mfa":%t}`, risk, requireMFA))
+	_, _ = w.Write([]byte(fmt.Sprintf(`{"risk_score":%d,"require_mfa":%t}`, score, requireMFA)))
 }
 
 // StuffingDetector defines pluggable coordinator hooks for analyzing credential stuffing attempts.

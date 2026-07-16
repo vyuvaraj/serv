@@ -26,6 +26,8 @@ type User struct {
 	MFAEnabled       bool      `json:"mfa_enabled"`
 	PasskeyID        string    `json:"passkey_id,omitempty"`
 	PasskeyPublicKey string    `json:"passkey_public_key,omitempty"`
+	LastDevice       string    `json:"last_device,omitempty"`
+	LastCountry      string    `json:"last_country,omitempty"`
 }
 
 type ResetRequest struct {
