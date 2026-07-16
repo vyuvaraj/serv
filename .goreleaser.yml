@@ -75,5 +75,25 @@ scoops:
     description: "Distributed tracing and observability service from the ServVerse platform"
     license: "Apache-2.0"
 
+
+nfpms:
+  - id: servtrace-pkg
+    package_name: servtrace
+    builds: [servtrace]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServTrace
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Distributed tracing and request observability from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servtrace/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
 release:
   mode: replace
