@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.0.2
+
+### Added
+- **Visual DAG Flowchart Designer** (`serv.visualizeWorkflow`) rendering step sequences using Mermaid.js.
+- **ServQueue Broker Explorer** (`serv.exploreQueue`) listing active partitions and consumer groups.
+- **ServStore Bucket Manager** (`serv.exploreStore`) showing S3 directories.
+- **ServLock Contention Dashboard** (`serv.exploreLocks`) tracing active lock waiters.
+- **ServGate Route Simulator** (`serv.simulateRoute`) validating paths against config routes.
+- **ServCron Scheduler Explorer** (`serv.exploreCron`) monitoring schedules and smart analysis warnings.
+- **ServCache Stats Dashboard** (`serv.inspectCache`) displaying cache hit ratios.
+
+## 3.0.1
+
+### Fixed
+- Colocated LSP path autodetection fixes and cross-platform terminal escaping corrections.
+
 ## 3.0.0
 
 ### Added

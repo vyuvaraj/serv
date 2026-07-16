@@ -29,6 +29,16 @@ Jump to any function, struct, or variable definition. Works across files in your
 ### Format on Save
 Automatic code formatting with 4-space indentation and consistent style — same as `serv fmt`.
 
+### Visual Dashboards & Explorers
+Visual Webviews integrated directly into the workspace to observe and simulate local services:
+- **Visual DAG Flowchart** (`serv.visualizeWorkflow`) — Renders live interactive Mermaid.js flowcharts of step sequences and compensating tasks.
+- **ServQueue Broker Explorer** (`serv.exploreQueue`) — Displays active queue broker topics, partition counts, and consumer group registrations.
+- **ServStore Bucket Explorer** (`serv.exploreStore`) — Browses object storage folders and file listings.
+- **ServLock Contention Dashboard** (`serv.exploreLocks`) — Debugs distributed locks, active leases, and FIFO waiter queues.
+- **ServGate Router Simulator** (`serv.simulateRoute`) — Simulates Gateway path-routing matches locally using the active config file.
+- **ServCron Scheduler Manager** (`serv.exploreCron`) — Lists scheduled cron jobs and prints warnings about schedule overlaps.
+- **ServCache Performance Inspector** (`serv.inspectCache`) — Real-time hit/miss metrics and active connection pool status.
+
 ### Commands
 - **Serv: Run Current File** (`Ctrl+Shift+R`) — compile and run
 - **Serv: Build Current File** (`Ctrl+Shift+B`) — compile to binary
