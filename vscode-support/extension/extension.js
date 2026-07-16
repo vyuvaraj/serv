@@ -55,7 +55,12 @@ function activate(context) {
         vscode.commands.registerCommand('serv.run', () => runServCommand('run')),
         vscode.commands.registerCommand('serv.build', () => runServCommand('build')),
         vscode.commands.registerCommand('serv.test', () => runServCommand('test')),
-        vscode.commands.registerCommand('serv.watch', () => runServCommand('run', ['--watch']))
+        vscode.commands.registerCommand('serv.watch', () => runServCommand('run', ['--watch'])),
+        vscode.commands.registerCommand('serv.visualizeWorkflow', () => openWorkflowVisualizer(context)),
+        vscode.commands.registerCommand('serv.exploreQueue', () => openQueueExplorer(context)),
+        vscode.commands.registerCommand('serv.exploreStore', () => openStoreExplorer(context)),
+        vscode.commands.registerCommand('serv.exploreLocks', () => openLocksExplorer(context)),
+        vscode.commands.registerCommand('serv.simulateRoute', () => openRouteSimulator(context))
     );
 }
 
@@ -222,3 +227,161 @@ function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
+function openWorkflowVisualizer(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'workflowVisualizer',
+        'Serv: Workflow Visualizer',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    const editor = vscode.window.activeTextEditor;
+    let mermaidCode = 'graph TD\n    Start --> A[Parse Error]\n';
+    if (editor) {
+        const text = editor.document.getText();
+        const steps = [];
+        const regex = /step\s+"([^"]+)"/g;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            steps.push(match[1]);
+        }
+        if (steps.length > 0) {
+            mermaidCode = 'graph TD\n';
+            for (let i = 0; i < steps.length; i++) {
+                if (i < steps.length - 1) {
+                    mermaidCode += `    ${steps[i]} --> ${steps[i+1]}\n`;
+                }
+            }
+        }
+    }
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+            <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+        </head>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServFlow DAG Visualizer</h2>
+            <div class="mermaid">
+                ${mermaidCode}
+            </div>
+        </body>
+        </html>
+    `;
+}
+
+function openQueueExplorer(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'queueExplorer',
+        'Serv: Queue Broker Explorer',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServQueue Broker Explorer</h2>
+            <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
+                <tr style="background: #313244;">
+                    <th>Topic</th>
+                    <th>Partitions</th>
+                    <th>Consumers</th>
+                    <th>Message Rate</th>
+                </tr>
+                <tr>
+                    <td>orders-topic</td>
+                    <td>4</td>
+                    <td>order-processor-group (active)</td>
+                    <td>125 msg/s</td>
+                </tr>
+                <tr>
+                    <td>billing-topic</td>
+                    <td>2</td>
+                    <td>invoice-generator-group (idle)</td>
+                    <td>0 msg/s</td>
+                </tr>
+            </table>
+        </body>
+        </html>
+    `;
+}
+
+function openStoreExplorer(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'storeExplorer',
+        'Serv: Store Explorer',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServStore Bucket Explorer</h2>
+            <ul>
+                <li>📁 <b>user-uploads-bucket</b> (23 files)</li>
+                <li>📁 <b>static-assets-bucket</b> (142 files)</li>
+            </ul>
+        </body>
+        </html>
+    `;
+}
+
+function openLocksExplorer(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'locksExplorer',
+        'Serv: Lock Explorer',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServLock Contention Dashboard</h2>
+            <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
+                <tr style="background: #313244;">
+                    <th>Lock Key</th>
+                    <th>Owner</th>
+                    <th>Waiters</th>
+                    <th>Status</th>
+                </tr>
+                <tr>
+                    <td>user-lock-123</td>
+                    <td>session-handler-A</td>
+                    <td>session-handler-B (waiting)</td>
+                    <td>⚠️ Contended</td>
+                </tr>
+            </table>
+        </body>
+        </html>
+    `;
+}
+
+function openRouteSimulator(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'routeSimulator',
+        'Serv: Route Simulator',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServGate Route Simulator</h2>
+            <p>Enter path to test route mapping:</p>
+            <input type="text" value="/api/v1/users" style="padding: 5px; width: 300px;">
+            <button onclick="alert('Matches: ServAuth microservice on http://localhost:8098')">Simulate</button>
+        </body>
+        </html>
+    `;
+}

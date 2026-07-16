@@ -2,7 +2,7 @@
   "name": "serv-vscode",
   "displayName": "Serv Programming Language Support",
   "description": "Full language support for the Serv programming language (.srv files) — syntax highlighting, diagnostics, autocomplete, hover, go-to-definition, and LSP.",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "publisher": "vyuvaraj",
   "engines": {
     "vscode": "^1.75.0"
@@ -101,6 +101,26 @@
         "command": "serv.watch",
         "title": "Serv: Run in Watch Mode",
         "icon": "$(eye)"
+      },
+      {
+        "command": "serv.visualizeWorkflow",
+        "title": "Serv: Visualize DAG Workflow"
+      },
+      {
+        "command": "serv.exploreQueue",
+        "title": "Serv: Explore Queue Broker"
+      },
+      {
+        "command": "serv.exploreStore",
+        "title": "Serv: Explore Store Buckets"
+      },
+      {
+        "command": "serv.exploreLocks",
+        "title": "Serv: Inspect Distributed Locks"
+      },
+      {
+        "command": "serv.simulateRoute",
+        "title": "Serv: Simulate Route Gateway"
       }
     ],
     "keybindings": [
