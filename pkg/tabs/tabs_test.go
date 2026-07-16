@@ -58,3 +58,36 @@ func TestTabsClusterEndpoint(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 }
+
+func TestHandleConsoleLocks(t *testing.T) {
+	// Start mock ServLock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/locks/observability" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`[{"key":"test-lock","owner":"test-owner","fencing_token":123,"expires_at":"2026-07-16T12:00:00Z","waiters":["waiter-1"]}]`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	config.ActiveDiscovery.Lock = server.URL
+
+	req := httptest.NewRequest("GET", "/api/locks", nil)
+	w := httptest.NewRecorder()
+	HandleConsoleLocks(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var locks []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&locks); err != nil {
+		t.Fatalf("failed to decode locks: %v", err)
+	}
+
+	if len(locks) != 1 || locks[0]["key"] != "test-lock" {
+		t.Errorf("unexpected locks response: %+v", locks)
+	}
+}

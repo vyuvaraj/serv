@@ -185,6 +185,7 @@ func main() {
 	mux.HandleFunc("/api/cron/", tabs.HandleConsoleCronJobsItem)
 	mux.HandleFunc("/api/cache/stats", tabs.HandleConsoleCacheStats)
 	mux.HandleFunc("/api/cache/clear", tabs.HandleConsoleCacheClear)
+	mux.HandleFunc("/api/locks", tabs.HandleConsoleLocks)
 	mux.HandleFunc("/api/mesh/instances", tabs.HandleConsoleMeshInstances)
 	mux.HandleFunc("/api/registry/packages", tabs.HandleConsoleRegistryPackages)
 	mux.HandleFunc("/api/cloud/services", tabs.HandleConsoleCloudServices)
@@ -274,6 +275,7 @@ func registerProxies(mux *http.ServeMux) {
 		{"/proxy/registry", config.ActiveDiscovery.Registry},
 		{"/proxy/cloud", config.ActiveDiscovery.Cloud},
 		{"/proxy/docs", config.ActiveDiscovery.Docs},
+		{"/proxy/lock", config.ActiveDiscovery.Lock},
 	}
 
 	for _, p := range proxies {

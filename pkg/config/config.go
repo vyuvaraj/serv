@@ -25,6 +25,7 @@ type ServDiscovery struct {
 	Registry     string `json:"registry"`
 	Cloud        string `json:"cloud"`
 	Docs         string `json:"docs"`
+	Lock         string `json:"lock"`
 	ConsolePort  int    `json:"console_port"`
 	JWTSecret    string `json:"jwt_secret"`
 	OTLPEndpoint string `json:"otlp_endpoint"`
@@ -80,6 +81,7 @@ var (
 	RegistryUrl = flag.String("registry-url", "http://localhost:8088", "ServRegistry base URL")
 	CloudUrl    = flag.String("cloud-url", "http://localhost:8085", "ServCloud base URL")
 	DocsUrl     = flag.String("docs-url", "http://localhost:8084", "ServDocs base URL")
+	LockUrl     = flag.String("lock-url", "http://localhost:8089", "ServLock base URL")
 	AuthToken   = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	GateConfig  = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 	StartAll    = flag.Bool("start-all", false, "Boot all ecosystem services in dependency order on startup")
@@ -105,6 +107,7 @@ func LoadDiscovery() ServDiscovery {
 		Registry:     *RegistryUrl,
 		Cloud:        *CloudUrl,
 		Docs:         *DocsUrl,
+		Lock:         *LockUrl,
 		ConsolePort:  *Port,
 		AuthToken:    *AuthToken,
 		GateConfig:   *GateConfig,

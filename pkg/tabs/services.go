@@ -464,3 +464,31 @@ func HandleDocsSpec(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(specs)
 }
+
+func HandleConsoleLocks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	targetURL := fmt.Sprintf("%s/api/locks/observability", strings.TrimSuffix(config.ActiveDiscovery.Lock, "/"))
+	client := http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_INTERNAL", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("X-Tenant-ID", r.Header.Get("X-Tenant-ID"))
+	req.Header.Set("Authorization", "Bearer "+config.ActiveDiscovery.AuthToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to connect to lock service: "+err.Error(), "ERR_LOCK_CONNECT", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
