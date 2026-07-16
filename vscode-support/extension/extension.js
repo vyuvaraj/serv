@@ -62,7 +62,9 @@ function activate(context) {
         vscode.commands.registerCommand('serv.exploreLocks', () => openLocksExplorer(context)),
         vscode.commands.registerCommand('serv.simulateRoute', () => openRouteSimulator(context)),
         vscode.commands.registerCommand('serv.exploreCron', () => openCronExplorer(context)),
-        vscode.commands.registerCommand('serv.inspectCache', () => openCacheInspector(context))
+        vscode.commands.registerCommand('serv.inspectCache', () => openCacheInspector(context)),
+        vscode.commands.registerCommand('serv.inspectAuth', () => openAuthInspector(context)),
+        vscode.commands.registerCommand('serv.openREPL', () => launchREPL(context))
     );
 }
 
@@ -606,5 +608,86 @@ function openCacheInspector(context) {
         </body>
         </html>
     `;
+}
+
+function openAuthInspector(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'authInspector',
+        'Serv: Auth Risk Inspector',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServAuth Progressive Risk Scoring</h2>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServAuth...</div>
+            <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
+                <thead>
+                    <tr style="background: #313244;">
+                        <th>User</th>
+                        <th>Device status</th>
+                        <th>Geo Context</th>
+                        <th>Risk Score</th>
+                    </tr>
+                </thead>
+                <tbody id="auth-body"></tbody>
+            </table>
+            <script>
+                async function loadAuth() {
+                    const status = document.getElementById('status');
+                    const body = document.getElementById('auth-body');
+                    try {
+                        const res = await fetch("http://localhost:8098/api/users/risk");
+                        const data = await res.json();
+                        status.innerText = "🟢 Connected (Live data)";
+                        body.innerHTML = data.map(u => \`
+                            <tr>
+                                <td>\${u.email}</td>
+                                <td>\${u.last_device || 'Unknown'}</td>
+                                <td>\${u.last_country || 'Unknown'}</td>
+                                <td style="color: \${u.risk_score >= 5 ? '#f38ba8' : '#a6e3a1'}; font-weight: bold;">\${u.risk_score || 0}</td>
+                            </tr>
+                        \`).join('');
+                    } catch(e) {
+                        status.innerText = "⚠️ Offline (Showing mock fallback)";
+                        body.innerHTML = \`
+                            <tr>
+                                <td>admin@servverse.dev</td>
+                                <td>macOS (Chromium)</td>
+                                <td>United States</td>
+                                <td style="color: #a6e3a1; font-weight: bold;">0 (Safe)</td>
+                            </tr>
+                            <tr>
+                                <td>user@servverse.dev</td>
+                                <td>iPhone (Safari) - New</td>
+                                <td>Germany - New</td>
+                                <td style="color: #f38ba8; font-weight: bold;">8 (MFA Step-up Required)</td>
+                            </tr>
+                        \`;
+                    }
+                }
+                loadAuth();
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+function launchREPL(context) {
+    const servPath = findServBinary();
+    const terminal = vscode.window.createTerminal({ name: "Serv REPL" });
+    terminal.show();
+    
+    const shellPath = vscode.env.shell ? vscode.env.shell.toLowerCase() : '';
+    const isPowerShell = shellPath.includes('powershell') || shellPath.includes('pwsh') || shellPath === '';
+    
+    if (isPowerShell) {
+        terminal.sendText(`& "${servPath}" repl`);
+    } else {
+        terminal.sendText(`"${servPath}" repl`);
+    }
 }
 }

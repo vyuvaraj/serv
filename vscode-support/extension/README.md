@@ -38,6 +38,8 @@ Visual Webviews integrated directly into the workspace to observe and simulate l
 - **ServGate Router Simulator** (`serv.simulateRoute`) — Simulates Gateway path-routing matches locally using the active config file.
 - **ServCron Scheduler Manager** (`serv.exploreCron`) — Lists scheduled cron jobs and prints warnings about schedule overlaps.
 - **ServCache Performance Inspector** (`serv.inspectCache`) — Real-time hit/miss metrics and active connection pool status.
+- **ServAuth Risk Scoring Dashboard** (`serv.inspectAuth`) — Visualizes progressive auth sessions, device fingerprints, geo context, and MFA risk scores per user.
+- **Interactive REPL Launcher** (`serv.openREPL`) — Spawns a `serv repl` terminal inside VS Code for live expression evaluation without a full project build.
 
 ### Commands
 - **Serv: Run Current File** (`Ctrl+Shift+R`) — compile and run

@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.3
+
+### Added
+- **ServAuth Progressive Risk Scoring Dashboard** (`serv.inspectAuth`) tracing user devices, countries, and MFA step-ups.
+- **Interactive REPL Terminal Launcher** (`serv.openREPL`) executing local `serv repl` on the fly inside the editor.
+
 ## 3.0.2
 
 ### Added
