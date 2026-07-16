@@ -64,8 +64,14 @@ function activate(context) {
         vscode.commands.registerCommand('serv.exploreCron', () => openCronExplorer(context)),
         vscode.commands.registerCommand('serv.inspectCache', () => openCacheInspector(context)),
         vscode.commands.registerCommand('serv.inspectAuth', () => openAuthInspector(context)),
-        vscode.commands.registerCommand('serv.openREPL', () => launchREPL(context))
+        vscode.commands.registerCommand('serv.openREPL', () => launchREPL(context)),
+        vscode.commands.registerCommand('serv.viewMesh', () => openMeshTopology(context)),
+        vscode.commands.registerCommand('serv.traceRequests', () => openTraceViewer(context)),
+        vscode.commands.registerCommand('serv.viewRegistry', () => openRegistryMonitor(context))
     );
+
+    // Status bar integration — always-visible ecosystem health indicator
+    setupStatusBar(context);
 }
 
 function runServCommand(command, extraArgs = []) {
@@ -690,4 +696,227 @@ function launchREPL(context) {
         terminal.sendText(`"${servPath}" repl`);
     }
 }
+}
+
+function openMeshTopology(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'meshTopology',
+        'Serv: Service Mesh Topology',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+            <script>mermaid.initialize({startOnLoad:true, theme: 'dark'});</script>
+        </head>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServMesh Service Topology</h2>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServMesh...</div>
+            <div id="diagram"><div class="mermaid">graph TD\n    ServGate-->ServAuth\n    ServGate-->ServQueue\n    ServGate-->ServFlow\n    ServFlow-->ServCron\n    ServFlow-->ServMail\n    ServAuth-->ServCache\n    ServQueue-->ServStore</div></div>
+            <script>
+                async function loadTopology() {
+                    const status = document.getElementById('status');
+                    try {
+                        const res = await fetch('http://localhost:8085/api/mesh/topology');
+                        const data = await res.json();
+                        status.innerText = '🟢 Connected (Live topology)';
+                        let edges = 'graph TD\\n';
+                        data.edges.forEach(e => { edges += '    ' + e.from + '-->' + e.to + '\\n'; });
+                        document.getElementById('diagram').innerHTML = '<div class="mermaid">' + edges + '</div>';
+                        mermaid.init(undefined, document.querySelector('.mermaid'));
+                    } catch(e) {
+                        status.innerText = '⚠️ Offline (Showing default topology)';
+                    }
+                }
+                loadTopology();
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+function openTraceViewer(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'traceViewer',
+        'Serv: Distributed Request Tracer',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServTrace Distributed Request Tracer</h2>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServTrace...</div>
+            <input type="text" id="trace-filter" placeholder="Filter by service or trace ID..." style="padding: 8px; width: 350px; background: #313244; color: #cdd6f4; border: 1px solid #444; border-radius: 4px; margin-bottom: 12px;">
+            <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
+                <thead>
+                    <tr style="background: #313244;">
+                        <th>Trace ID</th>
+                        <th>Service</th>
+                        <th>Operation</th>
+                        <th>Duration</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="trace-body"></tbody>
+            </table>
+            <script>
+                let allTraces = [];
+                async function loadTraces() {
+                    const status = document.getElementById('status');
+                    const body = document.getElementById('trace-body');
+                    try {
+                        const res = await fetch('http://localhost:8091/api/traces?limit=20');
+                        allTraces = await res.json();
+                        status.innerText = '🟢 Connected (Live traces)';
+                        renderTable(allTraces);
+                    } catch(e) {
+                        status.innerText = '⚠️ Offline (Showing mock spans)';
+                        allTraces = [
+                            {trace_id:'abc-001', service:'ServGate', operation:'POST /api/orders', duration_ms:42, status:'OK'},
+                            {trace_id:'abc-001', service:'ServAuth', operation:'ValidateToken', duration_ms:8, status:'OK'},
+                            {trace_id:'abc-001', service:'ServQueue', operation:'Publish orders-topic', duration_ms:5, status:'OK'},
+                            {trace_id:'def-002', service:'ServFlow', operation:'RunWorkflow', duration_ms:310, status:'ERROR'},
+                        ];
+                        renderTable(allTraces);
+                    }
+                }
+                function renderTable(traces) {
+                    const filter = document.getElementById('trace-filter').value.toLowerCase();
+                    const filtered = filter ? traces.filter(t => JSON.stringify(t).toLowerCase().includes(filter)) : traces;
+                    document.getElementById('trace-body').innerHTML = filtered.map(t => \`
+                        <tr>
+                            <td style="font-family:monospace; font-size:12px;">\${t.trace_id}</td>
+                            <td>\${t.service}</td>
+                            <td>\${t.operation}</td>
+                            <td>\${t.duration_ms}ms</td>
+                            <td style="color: \${t.status === 'OK' ? '#a6e3a1' : '#f38ba8'}; font-weight:bold;">\${t.status}</td>
+                        </tr>
+                    \`).join('');
+                }
+                document.getElementById('trace-filter').addEventListener('input', () => renderTable(allTraces));
+                loadTraces();
+                setInterval(loadTraces, 5000);
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+function openRegistryMonitor(context) {
+    const panel = vscode.window.createWebviewPanel(
+        'registryMonitor',
+        'Serv: Service Registry Health',
+        vscode.ViewColumn.Two,
+        { enableScripts: true }
+    );
+
+    panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <body style="background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; padding: 20px;">
+            <h2>ServRegistry Health Monitor</h2>
+            <div id="status" style="margin-bottom: 10px; color: #a6e3a1;">Connecting to ServRegistry...</div>
+            <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%; border-color: #444;">
+                <thead>
+                    <tr style="background: #313244;">
+                        <th>Service</th>
+                        <th>Host</th>
+                        <th>Port</th>
+                        <th>Health</th>
+                        <th>Uptime</th>
+                    </tr>
+                </thead>
+                <tbody id="registry-body"></tbody>
+            </table>
+            <script>
+                async function loadRegistry() {
+                    const status = document.getElementById('status');
+                    const body = document.getElementById('registry-body');
+                    try {
+                        const res = await fetch('http://localhost:8090/api/registry/services');
+                        const data = await res.json();
+                        status.innerText = '🟢 Connected (Live registry)';
+                        body.innerHTML = data.map(s => \`
+                            <tr>
+                                <td><b>\${s.name}</b></td>
+                                <td>\${s.host || 'localhost'}</td>
+                                <td>\${s.port}</td>
+                                <td style="color: \${s.healthy ? '#a6e3a1' : '#f38ba8'}; font-weight:bold;">\${s.healthy ? '🟢 Healthy' : '🔴 Down'}</td>
+                                <td>\${s.uptime || 'N/A'}</td>
+                            </tr>
+                        \`).join('');
+                    } catch(e) {
+                        status.innerText = '⚠️ Offline (Showing mock registry)';
+                        const mock = [
+                            {name:'ServAuth', host:'localhost', port:8098, healthy:true, uptime:'14h 32m'},
+                            {name:'ServGate', host:'localhost', port:8088, healthy:true, uptime:'14h 32m'},
+                            {name:'ServQueue', host:'localhost', port:8082, healthy:true, uptime:'14h 31m'},
+                            {name:'ServFlow', host:'localhost', port:8083, healthy:false, uptime:'0m (restarting)'},
+                            {name:'ServCron', host:'localhost', port:8087, healthy:true, uptime:'14h 30m'},
+                            {name:'ServCache', host:'localhost', port:8086, healthy:true, uptime:'14h 32m'},
+                        ];
+                        body.innerHTML = mock.map(s => \`
+                            <tr>
+                                <td><b>\${s.name}</b></td>
+                                <td>\${s.host}</td>
+                                <td>\${s.port}</td>
+                                <td style="color: \${s.healthy ? '#a6e3a1' : '#f38ba8'}; font-weight:bold;">\${s.healthy ? '🟢 Healthy' : '🔴 Down'}</td>
+                                <td>\${s.uptime}</td>
+                            </tr>
+                        \`).join('');
+                    }
+                }
+                loadRegistry();
+                setInterval(loadRegistry, 4000);
+            </script>
+        </body>
+        </html>
+    `;
+}
+
+function setupStatusBar(context) {
+    const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    statusItem.text = '$(circuit-board) Serv';
+    statusItem.tooltip = 'Serv Language Server — click to view Registry Health';
+    statusItem.command = 'serv.viewRegistry';
+    statusItem.show();
+    context.subscriptions.push(statusItem);
+
+    // Poll ServRegistry every 10s to update status bar health indicator
+    async function pollHealth() {
+        try {
+            const http = require('http');
+            const req = http.get('http://localhost:8090/api/registry/services', (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const services = JSON.parse(data);
+                        const down = services.filter(s => !s.healthy).length;
+                        statusItem.text = down > 0
+                            ? `$(warning) Serv (${down} down)`
+                            : `$(circuit-board) Serv ✓`;
+                        statusItem.backgroundColor = down > 0
+                            ? new vscode.ThemeColor('statusBarItem.warningBackground')
+                            : undefined;
+                    } catch (_) {}
+                });
+            });
+            req.on('error', () => {
+                statusItem.text = '$(circuit-board) Serv';
+                statusItem.backgroundColor = undefined;
+            });
+        } catch (_) {}
+    }
+
+    pollHealth();
+    const interval = setInterval(pollHealth, 10000);
+    context.subscriptions.push({ dispose: () => clearInterval(interval) });
 }

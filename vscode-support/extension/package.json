@@ -137,6 +137,18 @@
       {
         "command": "serv.openREPL",
         "title": "Serv: Launch Interactive REPL"
+      },
+      {
+        "command": "serv.viewMesh",
+        "title": "Serv: View Service Mesh Topology"
+      },
+      {
+        "command": "serv.traceRequests",
+        "title": "Serv: Trace Distributed Requests"
+      },
+      {
+        "command": "serv.viewRegistry",
+        "title": "Serv: View Service Registry Health"
       }
     ],
     "keybindings": [

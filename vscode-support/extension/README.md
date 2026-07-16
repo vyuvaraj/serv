@@ -40,6 +40,10 @@ Visual Webviews integrated directly into the workspace to observe and simulate l
 - **ServCache Performance Inspector** (`serv.inspectCache`) — Real-time hit/miss metrics and active connection pool status.
 - **ServAuth Risk Scoring Dashboard** (`serv.inspectAuth`) — Visualizes progressive auth sessions, device fingerprints, geo context, and MFA risk scores per user.
 - **Interactive REPL Launcher** (`serv.openREPL`) — Spawns a `serv repl` terminal inside VS Code for live expression evaluation without a full project build.
+- **ServMesh Topology Viewer** (`serv.viewMesh`) — Renders a live Mermaid.js graph of all mesh service connections, falling back to default topology offline.
+- **ServTrace Request Tracer** (`serv.traceRequests`) — Shows distributed trace spans with filterable trace ID, service, operation, latency, and OK/ERROR status. Auto-refreshes every 5s.
+- **ServRegistry Health Monitor** (`serv.viewRegistry`) — Full table of all registered microservices with live health checks, ports, and uptime. Auto-refreshes every 4s.
+- **Status Bar Health Indicator** — Always-visible `$(circuit-board) Serv` in the editor footer; turns amber when any service is down, click to open the Registry Monitor.
 
 ### Commands
 - **Serv: Run Current File** (`Ctrl+Shift+R`) — compile and run

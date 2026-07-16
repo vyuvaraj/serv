@@ -4,7 +4,11 @@
 
 ### Added
 - **ServAuth Progressive Risk Scoring Dashboard** (`serv.inspectAuth`) tracing user devices, countries, and MFA step-ups.
-- **Interactive REPL Terminal Launcher** (`serv.openREPL`) executing local `serv repl` on the fly inside the editor.
+- **Interactive REPL Launcher** (`serv.openREPL`) — Spawns a `serv repl` terminal inside VS Code for live expression evaluation without a full project build.
+- **ServMesh Topology Viewer** (`serv.viewMesh`) — Renders a live Mermaid.js graph of all mesh service connections, with fallback static topology offline.
+- **ServTrace Request Tracer** (`serv.traceRequests`) — Shows distributed trace spans with filterable trace ID, service, operation, latency, and OK/ERROR status. Auto-refreshes every 5s.
+- **ServRegistry Health Monitor** (`serv.viewRegistry`) — Full table of all registered microservices with live health checks, ports, and uptime. Auto-refreshes every 4s.
+- **Status Bar Health Indicator** — Persistent `$(circuit-board) Serv` item in the editor footer, clicking opens the Registry Monitor. Turns amber with service count when any service is down.
 
 ## 3.0.2
 
