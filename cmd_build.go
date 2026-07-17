@@ -18,6 +18,8 @@ import (
 	"serv/compiler"
 )
 
+var BuildOffline bool
+
 func buildServ(srvFile, outputBinary, target, goos, goarch, tags string) string {
 	absPath, err := buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags)
 	if err != nil {
@@ -28,6 +30,89 @@ func buildServ(srvFile, outputBinary, target, goos, goarch, tags string) string 
 	return absPath
 }
 
+func verifyReachability(program *compiler.Program) error {
+	for _, stmt := range program.Statements {
+		switch s := stmt.(type) {
+		case *compiler.DatabaseStmt:
+			if err := pingInfrastructure("database", s.Value); err != nil {
+				return err
+			}
+		case *compiler.BrokerStmt:
+			if err := pingInfrastructure("broker", s.Value); err != nil {
+				return err
+			}
+		case *compiler.CacheStmt:
+			if err := pingInfrastructure("cache", s.Value); err != nil {
+				return err
+			}
+		case *compiler.StoreStmt:
+			if err := pingInfrastructure("store", s.Value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func pingInfrastructure(kind string, expr compiler.Expression) error {
+	strLiteral, ok := expr.(*compiler.StringLiteral)
+	if !ok {
+		return nil
+	}
+	connStr := strLiteral.Value
+	if connStr == "" {
+		return nil
+	}
+
+	schemeIdx := strings.Index(connStr, "://")
+	if schemeIdx == -1 {
+		return nil
+	}
+	scheme := connStr[:schemeIdx]
+	rest := connStr[schemeIdx+3:]
+
+	if scheme == "file" || scheme == "sqlite" || scheme == "mock" || strings.Contains(connStr, "localhost:8080") || strings.Contains(connStr, "localhost:8991") {
+		return nil
+	}
+
+	if atIdx := strings.LastIndex(rest, "@"); atIdx != -1 {
+		rest = rest[atIdx+1:]
+	}
+
+	if slashIdx := strings.Index(rest, "/"); slashIdx != -1 {
+		rest = rest[:slashIdx]
+	}
+	if qIdx := strings.Index(rest, "?"); qIdx != -1 {
+		rest = rest[:qIdx]
+	}
+
+	addr := rest
+	if !strings.Contains(addr, ":") {
+		switch scheme {
+		case "postgres":
+			addr += ":5432"
+		case "mysql":
+			addr += ":3306"
+		case "redis", "redis-stream":
+			addr += ":6379"
+		case "memcached":
+			addr += ":11211"
+		case "servqueue":
+			addr += ":8082"
+		default:
+			return nil
+		}
+	}
+
+	d := net.Dialer{Timeout: 1 * time.Second}
+	conn, err := d.Dial("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("compile-time infrastructure reachability check failed for %s (%s): connection refused or timeout at %s. Use '--offline' to skip", kind, scheme, addr)
+	}
+	conn.Close()
+	return nil
+}
+
 func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (string, error) {
 	// Clear the parser cache before compilation
 	parsedFilesCache = make(map[string]*compiler.Program)
@@ -35,6 +120,12 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 	absPath, program, err := parseProject(srvFile)
 	if err != nil {
 		return "", err
+	}
+
+	if !BuildOffline {
+		if err := verifyReachability(program); err != nil {
+			return "", err
+		}
 	}
 
 	buildDir := buildDirFor(absPath)

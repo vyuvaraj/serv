@@ -600,43 +600,30 @@ func (p *Parser) parseDeclareStatement() Statement {
 	}
 
 	stmt.Functions = []DeclareModuleFunc{}
+	stmt.Routes = []DeclareModuleRoute{}
 	for p.peekToken.Type != TOKEN_RBRACE && p.peekToken.Type != TOKEN_EOF {
 		p.nextToken()
-		if p.curToken.Type != TOKEN_FN {
-			p.addError(fmt.Sprintf("expected 'fn' in declare module body, got %s", p.curToken.Type))
-			return nil
-		}
-
-		// Check for fn! (multi-return / failable function)
-		multiReturn := false
-		if p.peekToken.Type == TOKEN_BANG {
-			multiReturn = true
-			p.nextToken() // consume '!'
-		}
-
-		if !p.expectPeek(TOKEN_IDENT) {
-			return nil
-		}
-		fn := DeclareModuleFunc{Name: p.curToken.Literal, MultiReturn: multiReturn}
-
-		if !p.expectPeek(TOKEN_LPAREN) {
-			return nil
-		}
-
-		fn.Params = []string{}
-		fn.ParamTypes = []string{}
-		if p.peekToken.Type != TOKEN_RPAREN {
-			p.nextToken()
-			fn.Params = append(fn.Params, p.curToken.Literal)
-			if p.peekToken.Type == TOKEN_COLON {
-				p.nextToken()
-				p.nextToken()
-				fn.ParamTypes = append(fn.ParamTypes, p.curToken.Literal)
-			} else {
-				fn.ParamTypes = append(fn.ParamTypes, "")
+		switch p.curToken.Type {
+		case TOKEN_FN:
+			// Check for fn! (multi-return / failable function)
+			multiReturn := false
+			if p.peekToken.Type == TOKEN_BANG {
+				multiReturn = true
+				p.nextToken() // consume '!'
 			}
-			for p.peekToken.Type == TOKEN_COMMA {
-				p.nextToken()
+
+			if !p.expectPeek(TOKEN_IDENT) {
+				return nil
+			}
+			fn := DeclareModuleFunc{Name: p.curToken.Literal, MultiReturn: multiReturn}
+
+			if !p.expectPeek(TOKEN_LPAREN) {
+				return nil
+			}
+
+			fn.Params = []string{}
+			fn.ParamTypes = []string{}
+			if p.peekToken.Type != TOKEN_RPAREN {
 				p.nextToken()
 				fn.Params = append(fn.Params, p.curToken.Literal)
 				if p.peekToken.Type == TOKEN_COLON {
@@ -646,20 +633,83 @@ func (p *Parser) parseDeclareStatement() Statement {
 				} else {
 					fn.ParamTypes = append(fn.ParamTypes, "")
 				}
+				for p.peekToken.Type == TOKEN_COMMA {
+					p.nextToken() // consume ','
+					if !p.expectPeek(TOKEN_IDENT) {
+						return nil
+					}
+					fn.Params = append(fn.Params, p.curToken.Literal)
+					if p.peekToken.Type == TOKEN_COLON {
+						p.nextToken()
+						p.nextToken()
+						fn.ParamTypes = append(fn.ParamTypes, p.curToken.Literal)
+					} else {
+						fn.ParamTypes = append(fn.ParamTypes, "")
+					}
+				}
 			}
-		}
+			if !p.expectPeek(TOKEN_RPAREN) {
+				return nil
+			}
 
-		if !p.expectPeek(TOKEN_RPAREN) {
+			if p.peekToken.Type == TOKEN_RET_ARROW {
+				p.nextToken()
+				p.nextToken()
+				fn.ReturnType = p.curToken.Literal
+			}
+			stmt.Functions = append(stmt.Functions, fn)
+
+		case TOKEN_ROUTE:
+			// route METHOD "/path" (req: Type) -> ReturnType
+			if p.peekToken.Type != TOKEN_STRING && p.peekToken.Type != TOKEN_IDENT {
+				p.addError(fmt.Sprintf("expected string or identifier for route method, got %s", p.peekToken.Type))
+				return nil
+			}
+			p.nextToken()
+			method := p.curToken.Literal
+
+			if !p.expectPeek(TOKEN_STRING) {
+				return nil
+			}
+			path := p.curToken.Literal
+
+			if !p.expectPeek(TOKEN_LPAREN) {
+				return nil
+			}
+
+			var paramTypes []string
+			if p.peekToken.Type != TOKEN_RPAREN {
+				p.nextToken() // req parameter name
+				if p.peekToken.Type == TOKEN_COLON {
+					p.nextToken() // consume ':'
+					p.nextToken() // type
+					paramTypes = append(paramTypes, p.curToken.Literal)
+				} else {
+					paramTypes = append(paramTypes, "")
+				}
+			}
+			if !p.expectPeek(TOKEN_RPAREN) {
+				return nil
+			}
+
+			returnType := ""
+			if p.peekToken.Type == TOKEN_RET_ARROW {
+				p.nextToken() // consume '->'
+				p.nextToken() // type
+				returnType = p.curToken.Literal
+			}
+
+			stmt.Routes = append(stmt.Routes, DeclareModuleRoute{
+				Method:     method,
+				Path:       path,
+				ParamTypes: paramTypes,
+				ReturnType: returnType,
+			})
+
+		default:
+			p.addError(fmt.Sprintf("expected 'fn' or 'route' in declare module body, got %s", p.curToken.Type))
 			return nil
 		}
-
-		if p.peekToken.Type == TOKEN_RET_ARROW {
-			p.nextToken()
-			p.nextToken()
-			fn.ReturnType = p.curToken.Literal
-		}
-
-		stmt.Functions = append(stmt.Functions, fn)
 	}
 
 	if !p.expectPeek(TOKEN_RBRACE) {

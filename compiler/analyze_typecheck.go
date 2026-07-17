@@ -30,7 +30,7 @@ func analyzeTypeMismatches(fn *FnDecl, program *Program) []Diagnostic {
 
 	// Walk the function body looking for call expressions and null safety violations
 	for _, stmt := range fn.Body.Statements {
-		diags = append(diags, checkCallTypes(stmt, funcSigs, fn)...)
+		diags = append(diags, checkCallTypes(stmt, funcSigs, fn, program)...)
 		diags = append(diags, checkReturnTypes(stmt, fn)...)
 		diags = append(diags, checkStructLiteralTypes(stmt, structSigs)...)
 		diags = append(diags, checkNullSafety(stmt)...)
@@ -40,32 +40,32 @@ func analyzeTypeMismatches(fn *FnDecl, program *Program) []Diagnostic {
 }
 
 // checkCallTypes recursively checks function call argument types.
-func checkCallTypes(stmt Statement, funcSigs map[string]*FnDecl, enclosingFn *FnDecl) []Diagnostic {
+func checkCallTypes(stmt Statement, funcSigs map[string]*FnDecl, enclosingFn *FnDecl, program *Program) []Diagnostic {
 	var diags []Diagnostic
 
 	switch s := stmt.(type) {
 	case *ExprStmt:
-		diags = append(diags, checkExprCallTypes(s.Value, funcSigs, enclosingFn)...)
+		diags = append(diags, checkExprCallTypes(s.Value, funcSigs, enclosingFn, program)...)
 	case *LetStmt:
-		diags = append(diags, checkExprCallTypes(s.Value, funcSigs, enclosingFn)...)
+		diags = append(diags, checkExprCallTypes(s.Value, funcSigs, enclosingFn, program)...)
 	case *ReturnStmt:
-		diags = append(diags, checkExprCallTypes(s.Value, funcSigs, enclosingFn)...)
+		diags = append(diags, checkExprCallTypes(s.Value, funcSigs, enclosingFn, program)...)
 	case *IfStmt:
-		diags = append(diags, checkExprCallTypes(s.Condition, funcSigs, enclosingFn)...)
+		diags = append(diags, checkExprCallTypes(s.Condition, funcSigs, enclosingFn, program)...)
 		if s.Body != nil {
 			for _, inner := range s.Body.Statements {
-				diags = append(diags, checkCallTypes(inner, funcSigs, enclosingFn)...)
+				diags = append(diags, checkCallTypes(inner, funcSigs, enclosingFn, program)...)
 			}
 		}
 		if s.ElseBody != nil {
 			for _, inner := range s.ElseBody.Statements {
-				diags = append(diags, checkCallTypes(inner, funcSigs, enclosingFn)...)
+				diags = append(diags, checkCallTypes(inner, funcSigs, enclosingFn, program)...)
 			}
 		}
 	case *ForStmt:
 		if s.Body != nil {
 			for _, inner := range s.Body.Statements {
-				diags = append(diags, checkCallTypes(inner, funcSigs, enclosingFn)...)
+				diags = append(diags, checkCallTypes(inner, funcSigs, enclosingFn, program)...)
 			}
 		}
 	}
@@ -74,7 +74,7 @@ func checkCallTypes(stmt Statement, funcSigs map[string]*FnDecl, enclosingFn *Fn
 }
 
 // checkExprCallTypes checks a single expression for type mismatches in function calls.
-func checkExprCallTypes(expr Expression, funcSigs map[string]*FnDecl, enclosingFn *FnDecl) []Diagnostic {
+func checkExprCallTypes(expr Expression, funcSigs map[string]*FnDecl, enclosingFn *FnDecl, program *Program) []Diagnostic {
 	var diags []Diagnostic
 	if expr == nil {
 		return diags
@@ -130,18 +130,93 @@ func checkExprCallTypes(expr Expression, funcSigs map[string]*FnDecl, enclosingF
 				}
 			}
 		}
+
+		// Cross-Service Contracts: detect http.get / http.post with serv:// URLs
+		if mem, ok := e.Function.(*MemberExpr); ok {
+			if obj, ok := mem.Object.(*Identifier); ok && obj.Value == "http" {
+				if len(e.Arguments) >= 1 {
+					if strLit, ok := e.Arguments[0].(*StringLiteral); ok {
+						url := strLit.Value
+						if strings.HasPrefix(url, "serv://") {
+							rest := strings.TrimPrefix(url, "serv://")
+							slashIdx := strings.Index(rest, "/")
+							if slashIdx != -1 {
+								serviceName := rest[:slashIdx]
+								path := rest[slashIdx:]
+								method := strings.ToUpper(mem.Field)
+
+								foundRoute, foundService := findDeclaredRoute(program, serviceName, path, method)
+								if !foundService {
+									diags = append(diags, Diagnostic{
+										Line:     e.Token.Line,
+										Col:      e.Token.Col,
+										Severity: "error",
+										Message:  fmt.Sprintf("use of undeclared service '%s' in cross-service call", serviceName),
+									})
+								} else if foundRoute == nil {
+									diags = append(diags, Diagnostic{
+										Line:     e.Token.Line,
+										Col:      e.Token.Col,
+										Severity: "error",
+										Message:  fmt.Sprintf("service '%s' does not declare route '%s %s'", serviceName, method, path),
+									})
+								} else {
+									// Typecheck request payload for POST
+									if method == "POST" && len(e.Arguments) >= 2 {
+										payloadArg := e.Arguments[1]
+										if len(foundRoute.ParamTypes) >= 1 && foundRoute.ParamTypes[0] != "" {
+											expectedType := foundRoute.ParamTypes[0]
+											actualType := inferLiteralType(payloadArg)
+											if actualType != "" && !typesCompatible(actualType, expectedType) {
+												diags = append(diags, Diagnostic{
+													Line:     e.Token.Line,
+													Col:      e.Token.Col,
+													Severity: "error",
+													Message:  fmt.Sprintf("request payload type mismatch in cross-service call: expected '%s', got '%s'", expectedType, actualType),
+												})
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// Recurse into arguments
 		for _, arg := range e.Arguments {
-			diags = append(diags, checkExprCallTypes(arg, funcSigs, enclosingFn)...)
+			diags = append(diags, checkExprCallTypes(arg, funcSigs, enclosingFn, program)...)
 		}
 	case *InfixExpr:
-		diags = append(diags, checkExprCallTypes(e.Left, funcSigs, enclosingFn)...)
-		diags = append(diags, checkExprCallTypes(e.Right, funcSigs, enclosingFn)...)
+		diags = append(diags, checkExprCallTypes(e.Left, funcSigs, enclosingFn, program)...)
+		diags = append(diags, checkExprCallTypes(e.Right, funcSigs, enclosingFn, program)...)
 	case *MemberExpr:
-		diags = append(diags, checkExprCallTypes(e.Object, funcSigs, enclosingFn)...)
+		diags = append(diags, checkExprCallTypes(e.Object, funcSigs, enclosingFn, program)...)
 	}
 
 	return diags
+}
+
+func findDeclaredRoute(program *Program, serviceName, path, method string) (*DeclareModuleRoute, bool) {
+	foundService := false
+	for _, stmt := range program.Statements {
+		if decl, ok := stmt.(*DeclareModuleStmt); ok {
+			declPath := strings.Trim(decl.PkgPath, `"`+``)
+			if declPath == serviceName {
+				foundService = true
+				for _, r := range decl.Routes {
+					rPath := strings.Trim(r.Path, `"`+``)
+					rMethod := strings.Trim(r.Method, `"`+``)
+					if rPath == path && strings.EqualFold(rMethod, method) {
+						return &r, true
+					}
+				}
+			}
+		}
+	}
+	return nil, foundService
 }
 
 // inferLiteralType returns the type of a literal expression, or "" if unknown.

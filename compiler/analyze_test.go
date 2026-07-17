@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -281,4 +282,82 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestCrossServiceContracts(t *testing.T) {
+	// 1. Mismatched payload type
+	inputPayloadMismatch := `
+	declare module "service-b" {
+		route POST "/orders" (req: string) -> string
+	}
+	fn clientCall() {
+		http.post("serv://service-b/orders", 42) // expects string, got int
+	}
+	`
+	diags := parseAndAnalyze(t, inputPayloadMismatch)
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "request payload type mismatch in cross-service call") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected payload type mismatch error, got diagnostics: %v", diags)
+	}
+
+	// 2. Undeclared service name
+	inputUndeclaredService := `
+	fn clientCall() {
+		http.get("serv://service-c/users")
+	}
+	`
+	diags = parseAndAnalyze(t, inputUndeclaredService)
+	found = false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "use of undeclared service 'service-c'") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected undeclared service error, got: %v", diags)
+	}
+
+	// 3. Undeclared route path
+	inputUndeclaredRoute := `
+	declare module "service-b" {
+		route GET "/users" (req) -> string
+	}
+	fn clientCall() {
+		http.get("serv://service-b/orders") // does not exist in module
+	}
+	`
+	diags = parseAndAnalyze(t, inputUndeclaredRoute)
+	found = false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "service 'service-b' does not declare route 'GET /orders'") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected undeclared route error, got: %v", diags)
+	}
+
+	// 4. Correct call
+	inputCorrect := `
+	declare module "service-b" {
+		route POST "/orders" (req: string) -> string
+	}
+	fn clientCall() {
+		http.post("serv://service-b/orders", "ok")
+	}
+	`
+	diags = parseAndAnalyze(t, inputCorrect)
+	for _, d := range diags {
+		if d.Severity == "error" {
+			t.Errorf("unexpected error diagnostic: %s", d.Message)
+		}
+	}
 }

@@ -60,11 +60,13 @@ type TextDocumentContentChangeEvent struct {
 }
 
 type CompletionItem struct {
-	Label         string `json:"label"`
-	Kind          int    `json:"kind"` // 1=Text, 2=Method, 3=Function, 6=Variable, 7=Class, 8=Interface, 14=Keyword, 22=Struct
-	Detail        string `json:"detail,omitempty"`
-	Documentation string `json:"documentation,omitempty"`
-	InsertText    string `json:"insertText,omitempty"`
+	Label            string `json:"label"`
+	Kind             int    `json:"kind"` // 1=Text, 2=Method, 3=Function, 6=Variable, 7=Class, 8=Interface, 14=Keyword, 15=Snippet, 22=Struct
+	Detail           string `json:"detail,omitempty"`
+	Documentation    string `json:"documentation,omitempty"`
+	InsertText       string `json:"insertText,omitempty"`
+	InsertTextFormat int    `json:"insertTextFormat,omitempty"` // 1=PlainText (default), 2=Snippet
+	SortText         string `json:"sortText,omitempty"`         // lower string = higher priority
 }
 
 type CompletionList struct {
@@ -225,6 +227,8 @@ func (s *Server) handleMessage(msg JSONRPCMessage) {
 		s.handleFormatting(msg)
 	case "textDocument/codeAction":
 		s.handleCodeAction(msg)
+	case "textDocument/codeLens":
+		s.handleCodeLens(msg)
 	}
 }
 
@@ -242,6 +246,9 @@ func (s *Server) handleInitialize(msg JSONRPCMessage) {
 			"documentSymbolProvider":     true,
 			"documentFormattingProvider": true,
 			"codeActionProvider":         true,
+			"codeLensProvider": map[string]interface{}{
+				"resolveProvider": false,
+			},
 			"signatureHelpProvider": map[string]interface{}{
 				"triggerCharacters":   []string{"(", ","},
 				"retriggerCharacters": []string{","},

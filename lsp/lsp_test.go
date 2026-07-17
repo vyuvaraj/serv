@@ -328,6 +328,236 @@ func TestCompletion(t *testing.T) {
 	}
 }
 
+func TestLSPCompletionContextAware(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+
+	tests := []struct {
+		name           string
+		content        string
+		charPos        int
+		wantLabels     []string
+		notWantLabels  []string
+	}{
+		{
+			name:          "log dot triggers log-only members",
+			content:       "  log.",
+			charPos:       6,
+			wantLabels:    []string{"info", "warn", "error", "debug"},
+			notWantLabels: []string{"fn", "log.info", "db.query", "get"},
+		},
+		{
+			name:          "db dot triggers db-only members",
+			content:       "let result = db.",
+			charPos:       16,
+			wantLabels:    []string{"query", "findOne", "insert", "update"},
+			notWantLabels: []string{"fn", "log.info", "info"},
+		},
+		{
+			name:          "cache dot triggers cache-only members",
+			content:       "  cache.",
+			charPos:       8,
+			wantLabels:    []string{"get", "set", "delete", "flush"},
+			notWantLabels: []string{"fn", "log.info", "query"},
+		},
+		{
+			name:          "unknown namespace falls back to full list",
+			content:       "  myObj.",
+			charPos:       8,
+			wantLabels:    []string{"fn", "log.info"},
+			notWantLabels: []string{},
+		},
+		{
+			name:          "no dot returns full list",
+			content:       "let x = lo",
+			charPos:       10,
+			wantLabels:    []string{"fn", "log.info"},
+			notWantLabels: []string{},
+		},
+		{
+			name:          "http dot triggers http-only members",
+			content:       "http.",
+			charPos:       5,
+			wantLabels:    []string{"get", "post", "put", "delete", "patch", "static"},
+			notWantLabels: []string{"fn", "log.info", "query"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server.documents[uri] = tc.content
+
+			msg := JSONRPCMessage{
+				JSONRPC: "2.0",
+				ID:      1,
+				Method:  "textDocument/completion",
+				Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv"},"position":{"line":0,"character":` + string(rune('0'+tc.charPos/10)) + string(rune('0'+tc.charPos%10)) + `}}`),
+			}
+			// Use a proper int serialization
+			paramsJSON, _ := json.Marshal(map[string]interface{}{
+				"textDocument": map[string]string{"uri": uri},
+				"position":     map[string]int{"line": 0, "character": tc.charPos},
+			})
+			msg.Params = json.RawMessage(paramsJSON)
+
+			out := captureStdout(func() {
+				server.handleMessage(msg)
+			})
+			resp := parseLSPResponse(t, out)
+			if resp.Error != nil {
+				t.Fatalf("Expected no error, got: %v", resp.Error)
+			}
+			var list CompletionList
+			resBytes, _ := json.Marshal(resp.Result)
+			if err := json.Unmarshal(resBytes, &list); err != nil {
+				t.Fatalf("Failed to parse completion list: %v", err)
+			}
+
+			labelSet := map[string]bool{}
+			for _, item := range list.Items {
+				labelSet[item.Label] = true
+			}
+
+			for _, want := range tc.wantLabels {
+				if !labelSet[want] {
+					t.Errorf("Expected label %q in completion list, got labels: %v", want, labelSet)
+				}
+			}
+			for _, notWant := range tc.notWantLabels {
+				if labelSet[notWant] {
+					t.Errorf("Did NOT expect label %q in completion list", notWant)
+				}
+			}
+		})
+	}
+}
+
+func TestMemberHoverDX6(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	server.documents[uri] = "log.info(\"hello\")"
+
+	// Cursor on "info" (character 4-7)
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": 0, "character": 5},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 1, Method: "textDocument/hover", Params: json.RawMessage(paramsJSON)}
+
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("Expected no error, got: %v", resp.Error)
+	}
+	if resp.Result == nil {
+		t.Fatal("Expected hover result for log.info, got nil")
+	}
+	// The result should contain markdown with log.info signature
+	resBytes, _ := json.Marshal(resp.Result)
+	if !strings.Contains(string(resBytes), "log.info") {
+		t.Errorf("Expected hover to mention 'log.info', got: %s", string(resBytes))
+	}
+}
+
+func TestStructFieldCompletionsDX5(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	// Document declares a struct and a variable of that type, then accesses it
+	server.documents[uri] = "struct User {\n  id: string\n  name: string\n}\nlet u = User {\n  id: \"1\"\n  name: \"Alice\"\n}\nlet x = u."
+	// Trigger completion after "u."
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": 8, "character": 10},
+	})
+	// Register symbols (simulate didOpen)
+	openMsg := JSONRPCMessage{
+		JSONRPC: "2.0",
+		Method:  "textDocument/didOpen",
+		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv","languageId":"serv","version":1,"text":"struct User {\n  id: string\n  name: string\n}\nlet u = User {\n  id: \"1\"\n  name: \"Alice\"\n}\nlet x = u."}}`),
+	}
+	captureStdout(func() { server.handleMessage(openMsg) })
+
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 2, Method: "textDocument/completion", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("Expected no error, got: %v", resp.Error)
+	}
+	var list CompletionList
+	resBytes, _ := json.Marshal(resp.Result)
+	if err := json.Unmarshal(resBytes, &list); err != nil {
+		t.Fatalf("Failed to parse completion list: %v", err)
+	}
+	labelSet := map[string]bool{}
+	for _, item := range list.Items {
+		labelSet[item.Label] = true
+	}
+	for _, want := range []string{"id", "name"} {
+		if !labelSet[want] {
+			t.Errorf("Expected struct field %q in completions, got: %v", want, labelSet)
+		}
+	}
+}
+
+func TestImportPathCompletionsDX4(t *testing.T) {
+	server := NewServer()
+	// Use a real URI pointing to the lsp test directory — the file scan needs a real dir
+	uri := "file:///f:/Don/servverse/Serv-lang/lsp/test_main.srv"
+	server.documents[uri] = `import "`
+	// Position right after the opening quote (character 8)
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": 0, "character": 8},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 3, Method: "textDocument/completion", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("Expected no error, got: %v", resp.Error)
+	}
+	// Result could be an empty list (no .srv files in that dir) or a list — just assert no crash
+	if resp.Result == nil {
+		t.Fatal("Expected a result (even empty list) for import completion")
+	}
+}
+
+func TestCodeLensDX11(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	server.documents[uri] = `route GET "/users" (req: Request) -> Response {
+  return json.stringify(users)
+}
+
+test "fetches users" {
+  assert true
+}
+`
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 4, Method: "textDocument/codeLens", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("Expected no error, got: %v", resp.Error)
+	}
+	resBytes, _ := json.Marshal(resp.Result)
+	body := string(resBytes)
+
+	if !strings.Contains(body, "Run test") {
+		t.Errorf("Expected '▶ Run test' lens in result, got: %s", body)
+	}
+	if !strings.Contains(body, "Send request") {
+		t.Errorf("Expected '▶ Send request' lens in result, got: %s", body)
+	}
+	if !strings.Contains(body, "serv.runTest") {
+		t.Errorf("Expected 'serv.runTest' command in result, got: %s", body)
+	}
+	if !strings.Contains(body, "serv.sendRequest") {
+		t.Errorf("Expected 'serv.sendRequest' command in result, got: %s", body)
+	}
+}
+
 func TestHover(t *testing.T) {
 	server := NewServer()
 	uri := "file:///test.srv"

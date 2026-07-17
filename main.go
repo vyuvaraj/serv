@@ -24,7 +24,9 @@ func main() {
 		var buildArgs []string
 		rawArgs := os.Args[2:]
 		for i := 0; i < len(rawArgs); i++ {
-			if rawArgs[i] == "-o" && i+1 < len(rawArgs) {
+			if rawArgs[i] == "--offline" {
+				BuildOffline = true
+			} else if rawArgs[i] == "-o" && i+1 < len(rawArgs) {
 				outputBinary = rawArgs[i+1]
 				i++ // skip the value
 			} else if (rawArgs[i] == "--target" || rawArgs[i] == "-target") && i+1 < len(rawArgs) {

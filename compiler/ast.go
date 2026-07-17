@@ -1121,10 +1121,18 @@ type DeclareModuleFunc struct {
 	MultiReturn bool // true if Go function returns (value, error)
 }
 
+type DeclareModuleRoute struct {
+	Method     string
+	Path       string
+	ParamTypes []string
+	ReturnType string
+}
+
 type DeclareModuleStmt struct {
 	Token     Token
-	PkgPath   string // Go import path
+	PkgPath   string // Go import path or service name
 	Functions []DeclareModuleFunc
+	Routes    []DeclareModuleRoute
 }
 
 func (d *DeclareModuleStmt) statementNode()       {}
