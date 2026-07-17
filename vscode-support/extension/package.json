@@ -106,7 +106,8 @@
       "serv-services": [
         {
           "id": "serv-services-panel",
-          "name": "Services"
+          "name": "Services",
+          "type": "webview"
         }
       ],
       "explorer": [
