@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -295,5 +297,282 @@ func TestLockObservability(t *testing.T) {
 	}
 	if len(lock.Waiters) != 2 {
 		t.Errorf("expected 2 waiters, got %d: %+v", len(lock.Waiters), lock.Waiters)
+	}
+}
+
+func TestReentrantLock(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	// 1. First acquire (reentrancy_count should be 1)
+	p1 := LockRequest{
+		Key:      "resource-reentrant",
+		Owner:    "owner-1",
+		ClientID: "client-abc",
+		Duration: 5000,
+	}
+	b1, _ := json.Marshal(p1)
+	req1 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b1))
+	rr1 := httptest.NewRecorder()
+	HandleAcquireLock(rr1, req1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rr1.Code)
+	}
+
+	var resp1 LockResponse
+	json.NewDecoder(rr1.Body).Decode(&resp1)
+	if resp1.Lock.ReentrancyCount != 1 {
+		t.Errorf("expected reentrancy_count 1, got %d", resp1.Lock.ReentrancyCount)
+	}
+
+	// 2. Second acquire with same client_id (should succeed, count should be 2)
+	req2 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b1))
+	rr2 := httptest.NewRecorder()
+	HandleAcquireLock(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rr2.Code)
+	}
+
+	var resp2 LockResponse
+	json.NewDecoder(rr2.Body).Decode(&resp2)
+	if resp2.Lock.ReentrancyCount != 2 {
+		t.Errorf("expected reentrancy_count 2, got %d", resp2.Lock.ReentrancyCount)
+	}
+
+	// 3. Try acquire with different client_id (should fail/conflict)
+	p3 := LockRequest{
+		Key:      "resource-reentrant",
+		Owner:    "owner-1",
+		ClientID: "client-xyz",
+		Duration: 5000,
+	}
+	b3, _ := json.Marshal(p3)
+	req3 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b3))
+	rr3 := httptest.NewRecorder()
+	HandleAcquireLock(rr3, req3)
+	if rr3.Code != http.StatusConflict {
+		t.Errorf("expected 409 Conflict, got %d", rr3.Code)
+	}
+
+	// 4. First release (should succeed, count decrements to 1, lock still active)
+	reqRelease1 := httptest.NewRequest("POST", "/api/locks/release", bytes.NewReader(b1))
+	rrRelease1 := httptest.NewRecorder()
+	HandleReleaseLock(rrRelease1, reqRelease1)
+	if rrRelease1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rrRelease1.Code)
+	}
+
+	activeLock, err := Store.Get("resource-reentrant")
+	if err != nil || activeLock == nil {
+		t.Fatalf("expected lock to still be active after first release")
+	}
+	if activeLock.ReentrancyCount != 1 {
+		t.Errorf("expected active lock reentrancy_count 1, got %d", activeLock.ReentrancyCount)
+	}
+
+	// 5. Second release (should release the lock completely)
+	reqRelease2 := httptest.NewRequest("POST", "/api/locks/release", bytes.NewReader(b1))
+	rrRelease2 := httptest.NewRecorder()
+	HandleReleaseLock(rrRelease2, reqRelease2)
+	if rrRelease2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rrRelease2.Code)
+	}
+
+	_, err = Store.Get("resource-reentrant")
+	if err == nil {
+		t.Errorf("expected lock to be fully released/deleted")
+	}
+}
+
+func TestFencingToken(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	// 1. Acquire Lock
+	p1 := LockRequest{
+		Key:      "resource-fencing",
+		Owner:    "owner-1",
+		Duration: 5000,
+	}
+	b1, _ := json.Marshal(p1)
+	req1 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b1))
+	rr1 := httptest.NewRecorder()
+	HandleAcquireLock(rr1, req1)
+	
+	var resp1 LockResponse
+	json.NewDecoder(rr1.Body).Decode(&resp1)
+	token := resp1.Lock.FencingToken
+
+	if token <= 0 {
+		t.Fatalf("expected positive fencing token, got %d", token)
+	}
+
+	// 2. Try to renew with wrong fencing token (should fail)
+	pRenewWrong := LockRequest{
+		Key:          "resource-fencing",
+		Owner:        "owner-1",
+		FencingToken: token + 99,
+		Duration:     5000,
+	}
+	bRenewWrong, _ := json.Marshal(pRenewWrong)
+	reqRenewWrong := httptest.NewRequest("POST", "/api/locks/renew", bytes.NewReader(bRenewWrong))
+	rrRenewWrong := httptest.NewRecorder()
+	HandleRenewLock(rrRenewWrong, reqRenewWrong)
+	if rrRenewWrong.Code != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found (or renewal failed), got %d. Body: %s", rrRenewWrong.Code, rrRenewWrong.Body.String())
+	}
+
+	// 3. Renew with correct fencing token (should succeed)
+	pRenewCorrect := LockRequest{
+		Key:          "resource-fencing",
+		Owner:        "owner-1",
+		FencingToken: token,
+		Duration:     5000,
+	}
+	bRenewCorrect, _ := json.Marshal(pRenewCorrect)
+	reqRenewCorrect := httptest.NewRequest("POST", "/api/locks/renew", bytes.NewReader(bRenewCorrect))
+	rrRenewCorrect := httptest.NewRecorder()
+	HandleRenewLock(rrRenewCorrect, reqRenewCorrect)
+	if rrRenewCorrect.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d. Body: %s", rrRenewCorrect.Code, rrRenewCorrect.Body.String())
+	}
+
+	// 4. Try release with wrong fencing token (should fail)
+	pReleaseWrong := LockRequest{
+		Key:          "resource-fencing",
+		Owner:        "owner-1",
+		FencingToken: token + 99,
+	}
+	bReleaseWrong, _ := json.Marshal(pReleaseWrong)
+	reqReleaseWrong := httptest.NewRequest("POST", "/api/locks/release", bytes.NewReader(bReleaseWrong))
+	rrReleaseWrong := httptest.NewRecorder()
+	HandleReleaseLock(rrReleaseWrong, reqReleaseWrong)
+	if rrReleaseWrong.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request, got %d", rrReleaseWrong.Code)
+	}
+
+	// 5. Release with correct fencing token (should succeed)
+	pReleaseCorrect := LockRequest{
+		Key:          "resource-fencing",
+		Owner:        "owner-1",
+		FencingToken: token,
+	}
+	bReleaseCorrect, _ := json.Marshal(pReleaseCorrect)
+	reqReleaseCorrect := httptest.NewRequest("POST", "/api/locks/release", bytes.NewReader(bReleaseCorrect))
+	rrReleaseCorrect := httptest.NewRecorder()
+	HandleReleaseLock(rrReleaseCorrect, reqReleaseCorrect)
+	if rrReleaseCorrect.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rrReleaseCorrect.Code)
+	}
+}
+
+func TestDeadlockDetection(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	// Setup: Client A holds Lock 1
+	p1 := LockRequest{Key: "lock-1", Owner: "client-A", Duration: 10000}
+	b1, _ := json.Marshal(p1)
+	req1 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b1))
+	HandleAcquireLock(httptest.NewRecorder(), req1)
+
+	// Setup: Client B holds Lock 2
+	p2 := LockRequest{Key: "lock-2", Owner: "client-B", Duration: 10000}
+	b2, _ := json.Marshal(p2)
+	req2 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b2))
+	HandleAcquireLock(httptest.NewRecorder(), req2)
+
+	// Make Client A wait for Lock 2 (in background)
+	go func() {
+		pWait2 := LockRequest{Key: "lock-2", Owner: "client-A", Duration: 10000, WaitTime: 5000}
+		bw2, _ := json.Marshal(pWait2)
+		reqWait2 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(bw2))
+		HandleAcquireLock(httptest.NewRecorder(), reqWait2)
+	}()
+
+	// Wait for queue entry
+	time.Sleep(50 * time.Millisecond)
+
+	// Now: Client B tries to acquire Lock 1 (which Client A holds).
+	// This would create a circular wait: Client A waiting for Client B (Lock 2),
+	// and Client B waiting for Client A (Lock 1). Deadlock detected!
+	pWait1 := LockRequest{Key: "lock-1", Owner: "client-B", Duration: 10000, WaitTime: 5000}
+	bw1, _ := json.Marshal(pWait1)
+	reqWait1 := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(bw1))
+	rrWait1 := httptest.NewRecorder()
+	HandleAcquireLock(rrWait1, reqWait1)
+
+	if rrWait1.Code != http.StatusConflict {
+		t.Errorf("expected 409 Conflict, got %d", rrWait1.Code)
+	}
+
+	var resp LockResponse
+	json.NewDecoder(rrWait1.Body).Decode(&resp)
+	if !strings.Contains(resp.Message, "deadlock detected") {
+		t.Errorf("expected deadlock error message, got %q", resp.Message)
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	req := httptest.NewRequest("GET", "/api/locks/metrics", nil)
+	rr := httptest.NewRecorder()
+	HandleMetrics(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "servlock_active_locks") {
+		t.Errorf("expected metric 'servlock_active_locks' in body, got: %s", body)
+	}
+	if !strings.Contains(body, "servlock_deadlocks_total") {
+		t.Errorf("expected metric 'servlock_deadlocks_total' in body, got: %s", body)
+	}
+}
+
+func TestFileLockPersistence(t *testing.T) {
+	tempFile := "test_leases.json"
+	defer os.Remove(tempFile)
+
+	// Create a new FileLockStore and acquire a lock
+	fileStore, err := storage.NewFileLockStore(tempFile)
+	if err != nil {
+		t.Fatalf("failed to create FileLockStore: %v", err)
+	}
+	Store = fileStore
+
+	p := LockRequest{
+		Key:      "persisted-resource",
+		Owner:    "client-persist",
+		Duration: 5000,
+	}
+	b, _ := json.Marshal(p)
+	req := httptest.NewRequest("POST", "/api/locks/acquire", bytes.NewReader(b))
+	rr := httptest.NewRecorder()
+	HandleAcquireLock(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("failed to acquire lock: %d", rr.Code)
+	}
+
+	// Verify we can get the active lock details
+	lockDetails, err := Store.Get("persisted-resource")
+	if err != nil || lockDetails == nil {
+		t.Fatalf("failed to get lock details: %v", err)
+	}
+
+	// Simulating a restart: create a new FileLockStore instance reading the same file
+	recoveredStore, err := storage.NewFileLockStore(tempFile)
+	if err != nil {
+		t.Fatalf("failed to restore from file: %v", err)
+	}
+
+	recoveredLock, err := recoveredStore.Get("persisted-resource")
+	if err != nil || recoveredLock == nil {
+		t.Fatalf("failed to retrieve persisted lock after simulated restart: %v", err)
+	}
+
+	if recoveredLock.Owner != "client-persist" || recoveredLock.FencingToken != lockDetails.FencingToken {
+		t.Errorf("recovered lock details mismatch: expected owner client-persist and token %d, got owner %q and token %d",
+			lockDetails.FencingToken, recoveredLock.Owner, recoveredLock.FencingToken)
 	}
 }

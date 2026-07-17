@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,16 +12,18 @@ import (
 )
 
 type LockRequest struct {
-	Key      string `json:"key"`
-	Owner    string `json:"owner"`
-	Duration int    `json:"duration_ms"` // Lease TTL in milliseconds
-	WaitTime int    `json:"wait_ms"`     // Optional block/wait timeout in milliseconds
+	Key          string `json:"key"`
+	Owner        string `json:"owner"`
+	ClientID     string `json:"client_id"`
+	FencingToken int64  `json:"fencing_token"`
+	Duration     int    `json:"duration_ms"` // Lease TTL in milliseconds
+	WaitTime     int    `json:"wait_ms"`     // Optional block/wait timeout in milliseconds
 }
 
 type LockResponse struct {
-	Status       string        `json:"status"`
-	Lock         *storage.Lock `json:"lock,omitempty"`
-	Message      string        `json:"message,omitempty"`
+	Status  string        `json:"status"`
+	Lock    *storage.Lock `json:"lock,omitempty"`
+	Message string        `json:"message,omitempty"`
 }
 
 var Store storage.LockBackend
@@ -51,9 +54,9 @@ func HandleAcquireLock(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if req.WaitTime > 0 {
 		waitTimeout := time.Duration(req.WaitTime) * time.Millisecond
-		lock, err = Store.AcquireWithWait(req.Key, req.Owner, ttl, waitTimeout)
+		lock, err = Store.AcquireWithWait(req.Key, req.Owner, req.ClientID, ttl, waitTimeout)
 	} else {
-		lock, err = Store.Acquire(req.Key, req.Owner, ttl)
+		lock, err = Store.Acquire(req.Key, req.Owner, req.ClientID, ttl)
 	}
 
 	if err != nil {
@@ -86,7 +89,7 @@ func HandleReleaseLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	released, err := Store.Release(req.Key, req.Owner)
+	released, err := Store.Release(req.Key, req.Owner, req.FencingToken)
 	if err != nil {
 		httpError(w, r, err.Error(), http.StatusBadRequest)
 		return
@@ -124,7 +127,7 @@ func HandleRenewLock(w http.ResponseWriter, r *http.Request) {
 		ttl = time.Duration(req.Duration) * time.Millisecond
 	}
 
-	renewed, err := Store.Renew(req.Key, req.Owner, ttl)
+	renewed, err := Store.Renew(req.Key, req.Owner, req.FencingToken, ttl)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -189,4 +192,40 @@ func HandleLockObservability(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(locks)
+}
+
+func HandleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpError(w, r, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ims, ok := Store.(*storage.InMemoryStore)
+	if !ok {
+		httpError(w, r, "Metrics are only supported for InMemoryStore", http.StatusNotImplemented)
+		return
+	}
+
+	locks := ims.GetActiveLocks()
+	activeCount := len(locks)
+	waitersCount := 0
+	for _, l := range locks {
+		waitersCount += len(l.Waiters)
+	}
+	deadlockCount := ims.GetDeadlockCount()
+
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	fmt.Fprintf(w, "# HELP servlock_active_locks Number of active locks currently held\n")
+	fmt.Fprintf(w, "# TYPE servlock_active_locks gauge\n")
+	fmt.Fprintf(w, "servlock_active_locks %d\n\n", activeCount)
+
+	fmt.Fprintf(w, "# HELP servlock_waiters_count Total number of clients waiting for locks\n")
+	fmt.Fprintf(w, "# TYPE servlock_waiters_count gauge\n")
+	fmt.Fprintf(w, "servlock_waiters_count %d\n\n", waitersCount)
+
+	fmt.Fprintf(w, "# HELP servlock_deadlocks_total Total number of deadlocks detected\n")
+	fmt.Fprintf(w, "# TYPE servlock_deadlocks_total counter\n")
+	fmt.Fprintf(w, "servlock_deadlocks_total %d\n", deadlockCount)
 }
