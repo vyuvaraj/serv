@@ -168,7 +168,7 @@ func runDocs() {
 	fmt.Printf("✓ Successfully generated HTML documentation at %s\n", absPath)
 }
 
-func serveDocs(fileArg string, port int, watch bool) {
+func serveDocs(fileArg string, port int, watch bool) *http.Server {
 	// Live reload channel
 	reloadChan := make(chan struct{}, 10)
 
@@ -265,7 +265,8 @@ func serveDocs(fileArg string, port int, watch bool) {
 		}()
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -278,7 +279,7 @@ func serveDocs(fileArg string, port int, watch bool) {
 		w.Write([]byte(content))
 	})
 
-	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -309,8 +310,17 @@ func serveDocs(fileArg string, port int, watch bool) {
 	if watch {
 		fmt.Println("File watcher active: automatically reloading on changes to `.srv` files.")
 	}
-	if err := http.ListenAndServe(addr, nil); err != nil {
-		fmt.Printf("Error starting documentation server: %v\n", err)
-		os.Exit(1)
-	}
+	
+	server := &http.Server{Addr: addr, Handler: mux}
+	// Return server instance to allow clean closures/shutdowns in tests
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Error starting documentation server: %v\n", err)
+			os.Exit(1)
+		}
+	}()
+	// Sleep briefly to ensure the port binding is ready
+	time.Sleep(50 * time.Millisecond)
+	return server
 }
+

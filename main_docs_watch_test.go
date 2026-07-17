@@ -31,9 +31,8 @@ route "GET" "/hello" (req) {
 
 	// Start serveDocs asynchronously on port 8991
 	port := 8991
-	go func() {
-		serveDocs(fileArg, port, true)
-	}()
+	server := serveDocs(fileArg, port, true)
+	defer server.Close()
 
 	// Wait for server to start
 	time.Sleep(200 * time.Millisecond)
