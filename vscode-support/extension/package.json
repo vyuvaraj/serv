@@ -85,6 +85,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show inferred return type and variable type hints inline in the editor."
+        },
+        "serv.registryUrl": {
+          "type": "string",
+          "default": "http://localhost:8090/api/registry/services",
+          "description": "The URL of the ServRegistry microservice to fetch health statuses for the ServVerse services sidebar panel."
         }
       }
     },

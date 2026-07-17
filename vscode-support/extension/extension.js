@@ -2062,8 +2062,9 @@ class ServServicesPanelProvider {
     async _poll() {
         try {
             const http = require('http');
+            const registryUrl = vscode.workspace.getConfiguration('serv').get('registryUrl') || 'http://localhost:8090/api/registry/services';
             const data = await new Promise((resolve, reject) => {
-                const req = http.get('http://localhost:8090/api/registry/services', res => {
+                const req = http.get(registryUrl, res => {
                     let body = '';
                     res.on('data', chunk => body += chunk);
                     res.on('end', () => {
