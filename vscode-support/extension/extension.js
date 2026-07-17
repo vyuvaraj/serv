@@ -1983,7 +1983,7 @@ const SERV_MOCK_SERVICES = [
     { name:'ServConsole',  port:8085, healthy:true,  uptime:'14h 31m' },
     { name:'ServCron',     port:8087, healthy:true,  uptime:'14h 30m' },
     { name:'ServDocs',     port:8096, healthy:true,  uptime:'14h 30m' },
-    { name:'ServFlow',     port:8083, healthy:false, uptime:'restarting' },
+    { name:'ServFlow',     port:8083, healthy:true,  uptime:'14h 30m' },
     { name:'ServGate',     port:8088, healthy:true,  uptime:'14h 32m' },
     { name:'ServLock',     port:8089, healthy:true,  uptime:'14h 29m' },
     { name:'ServMail',     port:8092, healthy:true,  uptime:'14h 28m' },
