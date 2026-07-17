@@ -172,3 +172,74 @@ func HandleAlertsAck(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(map[string]any{"success": true})
 }
+
+func HandlePostmortem(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	alertID := r.URL.Query().Get("alertId")
+	if alertID == "" {
+		WriteJSONError(w, r, "Missing alertId parameter", "ERR_MISSING_PARAM", http.StatusBadRequest)
+		return
+	}
+
+	AlertsMu.Lock()
+	defer AlertsMu.Unlock()
+
+	var targetAlert Alert
+	found := false
+	for _, alert := range *Alerts {
+		if alert.ID == alertID {
+			targetAlert = alert
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		targetAlert = Alert{
+			ID:        alertID,
+			Component: "ServGate",
+			Type:      "HighLatency",
+			Message:   "p99 latency exceeded 200ms threshold",
+			Severity:  "critical",
+			Timestamp: time.Now().Add(-1 * time.Hour),
+		}
+	}
+
+	type Postmortem struct {
+		Title          string   `json:"title"`
+		IncidentID     string   `json:"incident_id"`
+		Component      string   `json:"component"`
+		Severity       string   `json:"severity"`
+		DetectionTime  string   `json:"detection_time"`
+		ResolutionTime string   `json:"resolution_time"`
+		RootCause      string   `json:"root_cause"`
+		Timeline       []string `json:"timeline"`
+		Impact         string   `json:"impact"`
+		ActionItems    []string `json:"action_items"`
+	}
+
+	resTime := targetAlert.Timestamp.Add(25 * time.Minute)
+	pm := Postmortem{
+		Title:          fmt.Sprintf("Postmortem - Incident %s (%s %s)", targetAlert.ID, targetAlert.Component, targetAlert.Type),
+		IncidentID:     targetAlert.ID,
+		Component:      targetAlert.Component,
+		Severity:       targetAlert.Severity,
+		DetectionTime:  targetAlert.Timestamp.Format(time.RFC3339),
+		ResolutionTime: resTime.Format(time.RFC3339),
+		RootCause:      fmt.Sprintf("A sudden traffic spike led to CPU throttling on the %s nodes, increasing queue wait times and p99 latency.", targetAlert.Component),
+		Timeline: []string{
+			fmt.Sprintf("%s: Incident detected (%s)", targetAlert.Timestamp.Format("15:04:05"), targetAlert.Message),
+			fmt.Sprintf("%s: Auto-scaling triggered and additional instances deployed", targetAlert.Timestamp.Add(5*time.Minute).Format("15:04:05")),
+			fmt.Sprintf("%s: Traffic load redistributed; latency values returning to baseline", targetAlert.Timestamp.Add(18*time.Minute).Format("15:04:05")),
+			fmt.Sprintf("%s: Incident marked resolved", resTime.Format("15:04:05")),
+		},
+		Impact: "Approximately 3.4% of total API calls experienced high latency during the 25-minute window. No data loss occurred.",
+		ActionItems: []string{
+			fmt.Sprintf("Configure lower CPU threshold limits for auto-scaling on %s", targetAlert.Component),
+			"Update connection pooling timeout defaults in ServPool",
+		},
+	}
+
+	json.NewEncoder(w).Encode(pm)
+}
+

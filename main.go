@@ -156,6 +156,8 @@ func main() {
 	mux.HandleFunc("/api/traces/waterfall", topology.HandleTraceWaterfall)
 	mux.HandleFunc("/api/alerts", pkgalerts.HandleAlerts)
 	mux.HandleFunc("/api/alerts/ack", pkgalerts.HandleAlertsAck)
+	mux.HandleFunc("/api/incidents/postmortem", pkgalerts.HandlePostmortem)
+	mux.HandleFunc("/api/message/flow", pkgdashboards.HandleMessageFlow)
 	mux.HandleFunc("/api/logs/ingest", pkgdashboards.HandleIngestLog)
 	mux.HandleFunc("/api/logs", pkgdashboards.HandleGetLogs)
 	mux.HandleFunc("/api/slo", pkgdashboards.HandleSLO)

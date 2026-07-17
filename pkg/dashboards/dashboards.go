@@ -702,3 +702,47 @@ func HandlePredictiveAlerts(w http.ResponseWriter, r *http.Request) {
 	alertsList := ActivePredictiveAlertsProvider.GetAlerts()
 	json.NewEncoder(w).Encode(alertsList)
 }
+
+type FlowStep struct {
+	Timestamp   time.Time `json:"timestamp"`
+	Component   string    `json:"component"`
+	Action      string    `json:"action"` // publish, transform, dlq, retry, ack, consume
+	Description string    `json:"description"`
+	Status      string    `json:"status"` // success, error, pending
+}
+
+type MessageFlow struct {
+	MessageID string     `json:"messageId"`
+	Topic     string     `json:"topic"`
+	Steps     []FlowStep `json:"steps"`
+}
+
+func HandleMessageFlow(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	msgID := r.URL.Query().Get("messageId")
+	if msgID == "" {
+		msgID = "msg-99f821ab"
+	}
+
+	now := time.Now()
+	flow := MessageFlow{
+		MessageID: msgID,
+		Topic:     "checkout.orders",
+		Steps: []FlowStep{
+			{Timestamp: now.Add(-10 * time.Second), Component: "ServGate", Action: "publish", Description: "Order checkout message received & published to broker", Status: "success"},
+			{Timestamp: now.Add(-8 * time.Second), Component: "ServQueue", Action: "transform", Description: "Payload transformation schema mapping applied", Status: "success"},
+			{Timestamp: now.Add(-6 * time.Second), Component: "ServStore", Action: "dlq", Description: "Database write deadlock; message routed to Dead Letter Queue (DLQ)", Status: "error"},
+			{Timestamp: now.Add(-3 * time.Second), Component: "ServQueue", Action: "retry", Description: "DLQ retry policy triggered; re-processing message", Status: "success"},
+			{Timestamp: now.Add(-1 * time.Second), Component: "ServFlow", Action: "consume", Description: "Saga runner consumed and processed order", Status: "success"},
+			{Timestamp: now, Component: "ServGate", Action: "ack", Description: "Consumer acknowledgment returned to broker", Status: "success"},
+		},
+	}
+
+	json.NewEncoder(w).Encode(flow)
+}
+
