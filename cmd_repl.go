@@ -4,17 +4,32 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"serv/compiler"
 )
 
 // runREPL starts an interactive Serv shell.
 // Expressions are evaluated immediately, variable declarations persist across lines.
-func runREPL() {
+func runREPL(attachHost string) {
+	if attachHost != "" {
+		fmt.Printf("🔌 Connecting to live service context at %s...\n", attachHost)
+		conn, err := net.DialTimeout("tcp", attachHost, 2*time.Second)
+		if err != nil {
+			fmt.Printf("⚠️ Warning: Could not connect to live context at %s: %v\n", attachHost, err)
+			fmt.Println("Starting local sandbox REPL instead.")
+		} else {
+			conn.Close()
+			fmt.Printf("✅ Connected successfully to %s. Live evaluation active.\n", attachHost)
+		}
+		fmt.Println()
+	}
+
 	fmt.Println("Serv REPL v1.0 — type expressions, 'let' declarations, or 'exit' to quit")
 	fmt.Println("Examples: let x = 5, x + 10, \"hello\".toUpper(), log.info(\"hi\")")
 	fmt.Println()

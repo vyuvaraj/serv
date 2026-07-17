@@ -187,7 +187,12 @@ func main() {
 		formatFile(args[0], *checkOnly)
 
 	case "repl":
-		runREPL()
+		replCmd := flag.NewFlagSet("repl", flag.ExitOnError)
+		attachFlag := replCmd.String("attach", "", "Connect to a running service context (host:port)")
+		if len(os.Args) > 2 {
+			replCmd.Parse(os.Args[2:])
+		}
+		runREPL(*attachFlag)
 
 	case "install":
 		if len(os.Args) < 3 {

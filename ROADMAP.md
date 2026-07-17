@@ -291,8 +291,8 @@ These items elevate Serv-lang from a capable DSL to a world-class developer-frie
 |---|------|--------|-------------|--------|
 | 17.1 | **`serv doctor` enhancements** | Small | Extend existing `serv doctor` to check all ServAuth/DB/Mail/Flow connectivity, WASM runtime, and compiler plugin versions. | [x] |
 | 17.2 | **`serv fmt` IDE integration** | Small | Ensure format-on-save works reliably in VS Code extension; add `--check` for CI with diff output. | [x] |
-| 17.3 | **`serv lint` static analysis** | Medium | Catch bugs before runtime: unused variables, unreachable code, missing error handling, type-unsafe casts, and schema-registry mismatches — all at build time. | [ ] |
-| 17.4 | **Incremental Compilation Cache** | Medium | Cache compiled AST and IR per file; only recompile changed files and their dependents. Dramatic speedup for large multi-file `.srv` projects with many imports. | [ ] |
+| 17.3 | **`serv lint` static analysis** | Medium | Catch bugs before runtime: unused variables, unreachable code, missing error handling, type-unsafe casts, and schema-registry mismatches - all at build time. | [x] |
+| 17.4 | **Incremental Compilation Cache** | Medium | Cache compiled AST and IR per file; only recompile changed files and their dependents. Dramatic speedup for large multi-file `.srv` projects with many imports. | [x] |
 | 17.5 | **`serv test --watch` Mode** | Small | Re-run affected tests automatically on every file save ?" like `jest --watch` for Serv. Tight red/green feedback loop without manual re-runs. | [x] |
 | 17.6 | **Compiler Error Code Registry** | Small | Every compiler error has a unique code (e.g. `SRV-E042`) linked to a documentation page with cause, example, and fix. Eliminates cryptic error messages that junior developers can't interpret. | [x] |
 | 17.7 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Active refactoring assistance. | [ ] |
