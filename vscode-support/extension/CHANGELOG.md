@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.2.0
+
+### Added
+- **Symbol Renaming (CD.114)**: Added workspace-wide rename symbol refactoring support, allowing renaming variables, functions, and structs across all `.srv` files.
+
+### Fixed
+- **Light Theme Sidebar Contrast**: Fixed sidebar action button contrast issues in light themes by using standard VS Code secondary state color variables.
+
 ## 3.1.0
 
 ### Added
