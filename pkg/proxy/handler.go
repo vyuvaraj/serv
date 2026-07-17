@@ -1147,7 +1147,7 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Read request body to apply AI checks
 	var reqBody []byte
-	if matchedRoute.PromptGuard || matchedRoute.PiiRedact || matchedRoute.SemanticCache || matchedRoute.SemanticRateLimit || matchedRoute.PromptABTest != nil || matchedRoute.ResponseQualityScore || matchedRoute.AIWAFEnabled {
+	if matchedRoute.PromptGuard || matchedRoute.PiiRedact || matchedRoute.SemanticCache || matchedRoute.SemanticRateLimit || matchedRoute.PromptABTest != nil || matchedRoute.ResponseQualityScore || matchedRoute.AIWAFEnabled || strings.Contains(matchedRoute.Prefix, "/ai") || r.Header.Get("X-Dry-Run") == "true" || r.Header.Get("X-Estimate-Only") == "true" {
 		reqBody, _ = io.ReadAll(r.Body)
 		r.Body.Close()
 

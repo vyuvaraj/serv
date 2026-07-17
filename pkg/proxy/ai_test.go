@@ -175,3 +175,87 @@ func TestAiPromptABTesting(t *testing.T) {
 		t.Fatalf("Failed to select prompt version")
 	}
 }
+
+func TestAiCostEstimation(t *testing.T) {
+	backendHits := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendHits++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("backend ok"))
+	}))
+	defer backend.Close()
+
+	routes := []Route{
+		{
+			Prefix: "/ai",
+			Target: backend.URL,
+		},
+	}
+
+	wasmManager, _ := wasm.GetMiddlewareManager(context.Background())
+	handler := NewGatewayHandler(routes, wasmManager, "")
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// 1. Send request WITH X-Dry-Run: true
+	payload := `{"prompt": "tell me a long story"}`
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/ai/ask", strings.NewReader(payload))
+	req.Header.Set("X-Dry-Run", "true")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 OK, got %d", resp.StatusCode)
+	}
+
+	// Verify X-Estimated-Cost header is present
+	estCostHeader := resp.Header.Get("X-Estimated-Cost")
+	if estCostHeader == "" {
+		t.Error("Expected X-Estimated-Cost response header, got empty")
+	}
+	if !strings.HasPrefix(estCostHeader, "$") {
+		t.Errorf("Expected X-Estimated-Cost to start with $, got %q", estCostHeader)
+	}
+
+	// Verify backend was NOT hit (aborted before execution)
+	if backendHits != 0 {
+		t.Errorf("Expected 0 backend hits on dry-run, got %d", backendHits)
+	}
+
+	// Verify response body
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyStr := string(bodyBytes)
+	if !strings.Contains(bodyStr, "dry-run") || !strings.Contains(bodyStr, "estimated_cost_usd") {
+		t.Errorf("Expected dry-run JSON response body, got %q", bodyStr)
+	}
+
+	// 2. Send request WITHOUT X-Dry-Run: true
+	req2, _ := http.NewRequest(http.MethodPost, server.URL+"/ai/ask", strings.NewReader(payload))
+	req2.Header.Set("Content-Type", "application/json")
+
+	resp2, err := client.Do(req2)
+	if err != nil {
+		t.Fatalf("Request 2 failed: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200 OK, got %d", resp2.StatusCode)
+	}
+
+	// Verify backend WAS hit
+	if backendHits != 1 {
+		t.Errorf("Expected 1 backend hit on normal request, got %d", backendHits)
+	}
+
+	// Verify X-Estimated-Cost header is still returned
+	if resp2.Header.Get("X-Estimated-Cost") == "" {
+		t.Error("Expected X-Estimated-Cost response header on normal request, got empty")
+	}
+}
