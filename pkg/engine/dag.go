@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -211,6 +212,13 @@ func RunWorkflow(
 			inst.Mu.Unlock()
 			SaveCheckpoint(inst, store, instances, instancesMu)
 
+			if !acquireTaskLock(inst.ID, task.Name) {
+				inst.Mu.Lock()
+				inst.Logs = append(inst.Logs, fmt.Sprintf("Task %s is being executed by another cluster node. Gated duplicate run.", task.Name))
+				inst.Mu.Unlock()
+				continue
+			}
+
 			// Start task tracing span
 			var taskTraceparent string
 			if workflowSpan != nil {
@@ -295,6 +303,7 @@ func RunWorkflow(
 
 				// Trigger durable saga rollback/compensations
 				workflowErr = err
+				releaseTaskLock(inst.ID, task.Name)
 				go TriggerRollbackSaga(inst, def, store, instances, instancesMu)
 				return
 			} else {
@@ -309,6 +318,7 @@ func RunWorkflow(
 				progressMade = true
 			}
 			inst.Mu.Unlock()
+			releaseTaskLock(inst.ID, task.Name)
 			SaveCheckpoint(inst, store, instances, instancesMu)
 		}
 
@@ -587,4 +597,50 @@ func RunAIClassify(action string) (string, error) {
 	}
 
 	return options[0], nil
+}
+
+func acquireTaskLock(instanceID, taskName string) bool {
+	url := os.Getenv("SERV_LOCK_URL")
+	if url == "" {
+		return true // Standalone / disabled
+	}
+	host, _ := os.Hostname()
+	owner := fmt.Sprintf("%s/%d", host, os.Getpid())
+	lockKey := fmt.Sprintf("servflow:instance:%s:task:%s", instanceID, taskName)
+
+	payload := map[string]interface{}{
+		"key":         lockKey,
+		"owner":       owner,
+		"client_id":   owner,
+		"duration_ms": 30000, // 30 seconds
+		"wait_ms":     0,     // Do not block/wait
+		"mode":        "exclusive",
+	}
+	body, _ := json.Marshal(payload)
+	resp, err := http.Post(url+"/api/locks/acquire", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func releaseTaskLock(instanceID, taskName string) {
+	url := os.Getenv("SERV_LOCK_URL")
+	if url == "" {
+		return
+	}
+	host, _ := os.Hostname()
+	owner := fmt.Sprintf("%s/%d", host, os.Getpid())
+	lockKey := fmt.Sprintf("servflow:instance:%s:task:%s", instanceID, taskName)
+
+	payload := map[string]string{
+		"key":   lockKey,
+		"owner": owner,
+	}
+	body, _ := json.Marshal(payload)
+	resp, err := http.Post(url+"/api/locks/release", "application/json", bytes.NewReader(body))
+	if err == nil {
+		resp.Body.Close()
+	}
 }
