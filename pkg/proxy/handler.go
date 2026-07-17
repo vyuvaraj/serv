@@ -19,6 +19,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -248,6 +249,10 @@ type GatewayHandler struct {
 	// OPS.14: Enterprise Control Plane
 	tenantPolicies   map[string]TenantPolicy // key: TenantID
 	tenantPoliciesMu sync.RWMutex
+
+	// CD.85: Automatic circuit breaker
+	circuitBreakers   map[string]*CircuitBreaker
+	circuitBreakersMu sync.Mutex
 }
 
 type TenantPolicy struct {
@@ -378,6 +383,7 @@ func NewGatewayHandler(routes []Route, wasm *wasm.MiddlewareManager, authToken s
 		revokedSessions: make(map[string]time.Time),
 		canaryStats:     make(map[string]*canaryStatsRecord),
 		tenantPolicies:  make(map[string]TenantPolicy),
+		circuitBreakers: make(map[string]*CircuitBreaker),
 	}
 	go h.startCanaryPromotionLoop()
 	return h
@@ -1291,6 +1297,24 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.incConn(selectedTarget)
 	defer h.decConn(selectedTarget)
 
+	// CD.85: Check Circuit Breaker
+	var cb *CircuitBreaker
+	h.circuitBreakersMu.Lock()
+	if c, exists := h.circuitBreakers[selectedTarget]; exists {
+		cb = c
+	} else {
+		slo := 1000 * time.Millisecond // default 1s SLO
+		cb = NewCircuitBreaker(slo)
+		h.circuitBreakers[selectedTarget] = cb
+	}
+	h.circuitBreakersMu.Unlock()
+
+	if !cb.Allow() {
+		otel.EndSpan(span, fmt.Errorf("circuit breaker open for target %s", selectedTarget), map[string]interface{}{})
+		WriteJSONError(w, r, "Service Unavailable: Circuit breaker open", "ERR_CIRCUIT_OPEN", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Webhook bridge check
 	if strings.HasPrefix(selectedTarget, "servqueue://") {
 		topic := strings.TrimPrefix(selectedTarget, "servqueue://")
@@ -1611,6 +1635,13 @@ func (h *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Access logging
 	if logger, ok := h.accessLoggers[matchedRoute.Prefix]; ok {
 		logger.Log(BuildLogEntry(r, rec, matchedRoute.Prefix, selectedTarget, traceID, start, ""))
+	}
+
+	// CD.85: Record request in circuit breaker
+	if cb != nil {
+		duration := time.Since(start)
+		success := rec.StatusCode < 500
+		cb.RecordRequest(duration, success)
 	}
 
 	otel.EndSpan(span, nil, map[string]interface{}{
@@ -2267,6 +2298,111 @@ func (h *GatewayHandler) handleGovernanceCheck(w http.ResponseWriter, r *http.Re
 		"warnings":        warnings,
 		"status":          "evaluated",
 	})
+}
+
+// --- CD.85 Automatic Circuit Breaker ---
+
+type CircuitState int
+
+const (
+	StateClosed CircuitState = iota
+	StateOpen
+	StateHalfOpen
+)
+
+type CircuitBreaker struct {
+	mu              sync.RWMutex
+	state           CircuitState
+	latencies       []time.Duration
+	successCount    int
+	lastStateChange time.Time
+	sloThreshold    time.Duration
+}
+
+func NewCircuitBreaker(slo time.Duration) *CircuitBreaker {
+	return &CircuitBreaker{
+		state:        StateClosed,
+		sloThreshold: slo,
+	}
+}
+
+func (cb *CircuitBreaker) Allow() bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	switch cb.state {
+	case StateClosed:
+		return true
+	case StateOpen:
+		// Transition to Half-Open after 5 seconds of cooling period
+		if time.Since(cb.lastStateChange) > 5*time.Second {
+			cb.state = StateHalfOpen
+			cb.lastStateChange = time.Now()
+			cb.successCount = 0
+			log.Printf("[CIRCUIT BREAKER] Cooling period expired. Transition to HALF-OPEN.")
+			return true
+		}
+		return false
+	case StateHalfOpen:
+		// Allow trial request
+		return true
+	}
+	return true
+}
+
+func (cb *CircuitBreaker) RecordRequest(dur time.Duration, success bool) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	if !success {
+		// Immediately trip if request fails during trial or generally fails
+		cb.state = StateOpen
+		cb.lastStateChange = time.Now()
+		return
+	}
+
+	cb.latencies = append(cb.latencies, dur)
+	if len(cb.latencies) > 50 {
+		cb.latencies = cb.latencies[1:]
+	}
+
+	if cb.state == StateHalfOpen {
+		cb.successCount++
+		// If we succeed 3 times in a row within SLO, close the circuit
+		if dur <= cb.sloThreshold && cb.successCount >= 3 {
+			cb.state = StateClosed
+			cb.latencies = nil
+			cb.lastStateChange = time.Now()
+			log.Printf("[CIRCUIT BREAKER] Target recovered. Transition to CLOSED.")
+		} else if dur > cb.sloThreshold {
+			// Tripped again
+			cb.state = StateOpen
+			cb.lastStateChange = time.Now()
+			log.Printf("[CIRCUIT BREAKER] SLO Breach in HALF-OPEN. Transition to OPEN.")
+		}
+		return
+	}
+
+	// For closed state: calculate p99 and trip if it breaches SLO (needs at least 5 samples)
+	if cb.state == StateClosed && len(cb.latencies) >= 5 {
+		p99 := cb.calculateP99()
+		if p99 > cb.sloThreshold {
+			cb.state = StateOpen
+			cb.lastStateChange = time.Now()
+			log.Printf("[CIRCUIT BREAKER] SLO Breach: p99 latency %.2fms exceeded SLO threshold %.2fms. Circuit OPEN.", float64(p99)/1e6, float64(cb.sloThreshold)/1e6)
+		}
+	}
+}
+
+func (cb *CircuitBreaker) calculateP99() time.Duration {
+	sorted := make([]time.Duration, len(cb.latencies))
+	copy(sorted, cb.latencies)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	idx := int(float64(len(sorted)) * 0.99)
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
 
 
