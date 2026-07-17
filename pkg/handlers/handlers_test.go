@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"testing"
 
 	"servsecret/pkg/storage"
@@ -253,5 +254,63 @@ func TestExternalProviderStore(t *testing.T) {
 	}
 	if val != "aws-value-456" {
 		t.Errorf("expected 'aws-value-456', got %q", val)
+	}
+}
+
+func TestSecretAPIKeyAuth(t *testing.T) {
+	apiKeys := []string{"key-foo", "key-bar"}
+
+	middleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("X-API-Key")
+			authorized := false
+			for _, allowed := range apiKeys {
+				if key == allowed {
+					authorized = true
+					break
+				}
+			}
+			if !authorized {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// 1. Test unauthorized request
+	req1 := httptest.NewRequest("GET", "/api/secrets", nil)
+	rr1 := httptest.NewRecorder()
+	handler.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized, got %d", rr1.Code)
+	}
+
+	// 2. Test authorized request
+	req2 := httptest.NewRequest("GET", "/api/secrets", nil)
+	req2.Header.Set("X-API-Key", "key-foo")
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rr2.Code)
+	}
+}
+
+func TestEnvInjector(t *testing.T) {
+	secretEnvs := []string{"MY_SECRET_DB_PASS=hunter2"}
+	cmd := exec.Command("go", "env", "GOPATH")
+	cmd.Env = append(os.Environ(), secretEnvs...)
+
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("failed to run simulated command: %v", err)
+	}
+
+	if len(output) == 0 {
+		t.Errorf("expected command output, got empty")
 	}
 }

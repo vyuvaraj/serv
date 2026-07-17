@@ -12,54 +12,95 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/vyuvaraj/ServShared"
+	"gopkg.in/yaml.v3"
 	"servsecret/pkg/handlers"
 	"servsecret/pkg/storage"
 )
 
+type Config struct {
+	Port            string   `yaml:"port"`
+	FilePath        string   `yaml:"file_path"`
+	MasterKey       string   `yaml:"master_key"`
+	APIKeys         []string `yaml:"api_keys"`
+	CacheTTLMinutes int      `yaml:"cache_ttl_minutes"`
+}
+
 func main() {
 	// Client Mode Flags
 	clientMode := flag.Bool("client", false, "Run in client mode to connect to a remote ServSecret instance")
-	clientAction := flag.String("action", "", "Client action: set, get, delete, list")
+	clientAction := flag.String("action", "", "Client action: set, get, delete, list, env")
 	clientKey := flag.String("key", "", "Secret key for client action")
 	clientValue := flag.String("value", "", "Secret value for client set action")
 	clientURL := flag.String("server-url", "http://localhost:8091", "ServSecret server URL")
 	clientTenant := flag.String("tenant-id", "default", "Tenant ID header")
+	clientCmd := flag.String("cmd", "", "Command to execute with injected secrets (only used with --action=env)")
+	clientAPIKey := flag.String("api-key", "", "API key for authentication header")
 
-	port := flag.String("port", "8091", "Port to listen on")
-	filePath := flag.String("file", "secrets.enc", "Path to encrypted secrets file")
+	configPath := flag.String("config", "", "Path to servsecret.yaml config file")
+	portFlag := flag.String("port", "8091", "Port to listen on (override)")
+	filePathFlag := flag.String("file", "secrets.enc", "Path to encrypted secrets file (override)")
 	flag.Parse()
 
 	if *clientMode {
-		runClient(*clientAction, *clientKey, *clientValue, *clientURL, *clientTenant)
+		if *clientAction == "env" {
+			runEnvInjector(*clientCmd, *clientURL, *clientTenant, *clientAPIKey)
+			return
+		}
+		runClient(*clientAction, *clientKey, *clientValue, *clientURL, *clientTenant, *clientAPIKey)
 		return
 	}
 
-	log.Printf("Starting ServSecret Secret & Credential Manager on port %s...", *port)
+	var cfg Config
 
-	// Fetch master key from environment
-	masterKeyHex := os.Getenv("SERVSECRET_MASTER_KEY")
+	if *configPath != "" {
+		cfgData, err := os.ReadFile(*configPath)
+		if err != nil {
+			log.Fatalf("failed to read config file: %v", err)
+		}
+		if err := yaml.Unmarshal(cfgData, &cfg); err != nil {
+			log.Fatalf("failed to parse yaml config: %v", err)
+		}
+	} else {
+		// Default config values
+		cfg = Config{
+			Port:            *portFlag,
+			FilePath:        *filePathFlag,
+			MasterKey:       os.Getenv("SERVSECRET_MASTER_KEY"),
+			APIKeys:         []string{},
+			CacheTTLMinutes: 5,
+		}
+		// Try parsing SERVSECRET_API_KEYS env if present
+		if envKeys := os.Getenv("SERVSECRET_API_KEYS"); envKeys != "" {
+			cfg.APIKeys = strings.Split(envKeys, ",")
+		}
+	}
+
+	log.Printf("Starting ServSecret Secret & Credential Manager on port %s...", cfg.Port)
+
+	// Fetch master key
 	var masterKey []byte
 	var err error
 
-	if masterKeyHex != "" {
-		masterKey, err = hex.DecodeString(masterKeyHex)
+	if cfg.MasterKey != "" {
+		masterKey, err = hex.DecodeString(cfg.MasterKey)
 		if err != nil || len(masterKey) != 32 {
-			masterKey = []byte(masterKeyHex)
+			masterKey = []byte(cfg.MasterKey)
 			if len(masterKey) != 32 {
-				log.Println("WARNING: SERVSECRET_MASTER_KEY is not 32 bytes. Adjusting key size...")
+				log.Println("WARNING: Master key is not 32 bytes. Adjusting key size...")
 				padded := make([]byte, 32)
 				copy(padded, masterKey)
 				masterKey = padded
 			}
 		}
 	} else {
-		log.Println("WARNING: SERVSECRET_MASTER_KEY environment variable not set. Generating temporary master key...")
+		log.Println("WARNING: Master key not set. Generating temporary master key...")
 		masterKey = make([]byte, 32)
 		if _, err := rand.Read(masterKey); err != nil {
 			log.Fatalf("failed to generate random temporary master key: %v", err)
@@ -68,7 +109,7 @@ func main() {
 	}
 
 	// Initialize Storage
-	store, err := storage.NewEncryptedFileStore(*filePath, masterKey)
+	store, err := storage.NewEncryptedFileStore(cfg.FilePath, masterKey)
 	if err != nil {
 		log.Printf("Failed to initialize encrypted file store: %v. Falling back to in-memory store.", err)
 		handlers.Store = storage.NewInMemoryStore()
@@ -94,28 +135,64 @@ func main() {
 		mux.ServeHTTP(w, r)
 	})
 
-	rateLimiter := ServShared.RateLimitMiddleware
-	if flag.Lookup("test.v") != nil {
-		rateLimiter = func(next http.Handler) http.Handler {
-			return next
-		}
-	}
+	var serverHandler http.Handler = v1Wrapper
 
-	// Wrap in ServShared middleware chain
-	serverHandler := ServShared.TraceMiddleware("servsecret",
-		rateLimiter(
-			ServShared.CORSMiddleware(
-				ServShared.MaxBytesMiddleware(10*1024*1024)(
-					ServShared.AuthMiddleware(
-						ServShared.TenantMiddleware(v1Wrapper),
+	// If API Keys are configured, use API Key auth. Otherwise fallback to standard AuthMiddleware.
+	if len(cfg.APIKeys) > 0 {
+		log.Println("API Key protection enabled (zero-dependency standalone mode).")
+		apiKeyAuth := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+					next.ServeHTTP(w, r)
+					return
+				}
+				key := r.Header.Get("X-API-Key")
+				if key == "" {
+					authHeader := r.Header.Get("Authorization")
+					if strings.HasPrefix(authHeader, "Bearer ") {
+						key = strings.TrimPrefix(authHeader, "Bearer ")
+					}
+				}
+				
+				authorized := false
+				for _, allowed := range cfg.APIKeys {
+					if key == allowed {
+						authorized = true
+						break
+					}
+				}
+				if !authorized {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					w.Write([]byte(`{"error": "Unauthorized: invalid or missing API key"}`))
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
+		serverHandler = apiKeyAuth(v1Wrapper)
+	} else {
+		rateLimiter := ServShared.RateLimitMiddleware
+		if flag.Lookup("test.v") != nil {
+			rateLimiter = func(next http.Handler) http.Handler {
+				return next
+			}
+		}
+		serverHandler = ServShared.TraceMiddleware("servsecret",
+			rateLimiter(
+				ServShared.CORSMiddleware(
+					ServShared.MaxBytesMiddleware(10*1024*1024)(
+						ServShared.AuthMiddleware(
+							ServShared.TenantMiddleware(v1Wrapper),
+						),
 					),
 				),
 			),
-		),
-	)
+		)
+	}
 
 	server := &http.Server{
-		Addr:    ":" + *port,
+		Addr:    ":" + cfg.Port,
 		Handler: serverHandler,
 	}
 
@@ -143,7 +220,7 @@ func main() {
 	log.Println("ServSecret stopped cleanly.")
 }
 
-func runClient(action, key, val, serverURL, tenant string) {
+func runClient(action, key, val, serverURL, tenant, apiKey string) {
 	if action == "" {
 		log.Fatalf("Action is required (set, get, delete, list)")
 	}
@@ -181,6 +258,9 @@ func runClient(action, key, val, serverURL, tenant string) {
 
 	req.Header.Set("X-Tenant-ID", tenant)
 	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -191,4 +271,87 @@ func runClient(action, key, val, serverURL, tenant string) {
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	fmt.Printf("Status: %d\n", resp.StatusCode)
 	fmt.Printf("Response: %s\n", string(bodyBytes))
+}
+
+func runEnvInjector(command, serverURL, tenant, apiKey string) {
+	if command == "" {
+		log.Fatalf("Command is required (use --cmd)")
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// 1. Fetch list of secrets keys
+	reqList, err := http.NewRequest(http.MethodGet, serverURL+"/api/v1/secrets", nil)
+	if err != nil {
+		log.Fatalf("failed to create list request: %v", err)
+	}
+	reqList.Header.Set("X-Tenant-ID", tenant)
+	if apiKey != "" {
+		reqList.Header.Set("X-API-Key", apiKey)
+	}
+
+	respList, err := client.Do(reqList)
+	if err != nil {
+		log.Fatalf("failed to query secret list: %v", err)
+	}
+	defer respList.Body.Close()
+
+	if respList.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(respList.Body)
+		log.Fatalf("failed to retrieve secrets list: %d, response: %s", respList.StatusCode, string(body))
+	}
+
+	var listResp struct {
+		Keys []string `json:"keys"`
+	}
+	if err := json.NewDecoder(respList.Body).Decode(&listResp); err != nil {
+		log.Fatalf("failed to parse secret keys list: %v", err)
+	}
+
+	// 2. Query each secret and build env variables slice
+	var secretEnvs []string
+	for _, key := range listResp.Keys {
+		reqGet, err := http.NewRequest(http.MethodGet, serverURL+"/api/v1/secrets/"+key, nil)
+		if err != nil {
+			log.Fatalf("failed to create get request: %v", err)
+		}
+		reqGet.Header.Set("X-Tenant-ID", tenant)
+		if apiKey != "" {
+			reqGet.Header.Set("X-API-Key", apiKey)
+		}
+
+		respGet, err := client.Do(reqGet)
+		if err != nil {
+			log.Fatalf("failed to fetch secret %s: %v", key, err)
+		}
+		defer respGet.Body.Close()
+
+		if respGet.StatusCode == http.StatusOK {
+			var getResp struct {
+				Key   string `json:"key"`
+				Value string `json:"value"`
+			}
+			if err := json.NewDecoder(respGet.Body).Decode(&getResp); err == nil {
+				// Inject as environment variable key=value
+				envVar := fmt.Sprintf("%s=%s", getResp.Key, getResp.Value)
+				secretEnvs = append(secretEnvs, envVar)
+			}
+		}
+	}
+
+	// 3. Spawns child process with env variables
+	cmdParts := strings.Fields(command)
+	if len(cmdParts) == 0 {
+		log.Fatal("Command cannot be empty")
+	}
+
+	c := exec.Command(cmdParts[0], cmdParts[1:]...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	c.Stdin = os.Stdin
+	c.Env = append(os.Environ(), secretEnvs...)
+
+	if err := c.Run(); err != nil {
+		log.Fatalf("child command run failed: %v", err)
+	}
 }
