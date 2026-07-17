@@ -25,7 +25,10 @@ func TestBuildReachabilityCheck(t *testing.T) {
 		t.Fatalf("failed to write srv file: %v", err)
 	}
 
-	// 3. Compile without offline flag (should fail reachability check on port 59999)
+	// 3. Compile without offline flag (should fail reachability check on port 59999).
+	// Set BuildSkipCICheck so the GITHUB_ACTIONS guard doesn't bypass the check in CI.
+	BuildSkipCICheck = true
+	defer func() { BuildSkipCICheck = false }()
 	BuildOffline = false
 	_, err = buildServNoExit(srvPath, "test_service.exe", "", "", "", "")
 	if err == nil {

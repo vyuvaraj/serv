@@ -20,6 +20,10 @@ import (
 
 var BuildOffline bool
 
+// BuildSkipCICheck disables the GITHUB_ACTIONS bypass for the reachability check.
+// Set this to true in tests that specifically verify the reachability check fires.
+var BuildSkipCICheck bool
+
 func buildServ(srvFile, outputBinary, target, goos, goarch, tags string) string {
 	absPath, err := buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags)
 	if err != nil {
@@ -106,8 +110,10 @@ func pingInfrastructure(kind string, expr compiler.Expression) error {
 		}
 	}
 
-	// Skip network check if running in a CI environment (like GitHub Actions)
-	if os.Getenv("GITHUB_ACTIONS") == "true" {
+	// Skip network check if running in a CI environment (like GitHub Actions),
+	// UNLESS BuildSkipCICheck is explicitly set to true by a test that specifically
+	// needs to verify the reachability check fires.
+	if os.Getenv("GITHUB_ACTIONS") == "true" && !BuildSkipCICheck {
 		return nil
 	}
 
