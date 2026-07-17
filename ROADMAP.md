@@ -275,11 +275,11 @@ Native language-level integration with the proposed Servverse components (ServAu
 
 | # | Item | Effort | Description | Status |
 |---|------|--------|-------------|--------|
-| 16.1 | **`auth` keyword (ServAuth backend)** | Medium | `auth "servauth://localhost:8095"` connects to the ServAuth identity provider. `auth.register()`, `auth.login()`, `auth.currentUser()`, `auth.requireRole("admin")` — first-class identity management without external IdP SDK. | [ ] |
-| 16.2 | **`database` via ServDB proxy** | Small | `database "servdb://pool/mydb"` routes through the ServDB connection pooler. Transparent — same `db.query()` API, but benefits from pooling, read/write splitting, and query analytics. | [ ] |
-| 16.3 | **`notify` keyword** | Small | `notify "servmail://localhost:8096"` with `notify.send(channel, template, data)`. Unified notification dispatch to email, Slack, SMS via ServMail hub. | [ ] |
-| 16.4 | **`workflow` blocks (ServFlow backend)** | Large | `workflow "order-process" { step "validate" { ... } -> step "charge" { ... } -> step "fulfill" { ... } }` — compiles to ServFlow API calls with automatic state checkpointing. Differs from existing `workflow` (10.7) by delegating state to the external ServFlow orchestrator for cross-service, long-running processes. | [ ] |
-| 16.5 | **`serv dev` with new components** | Small | `serv dev main.srv` auto-starts ServAuth, ServDB, ServMail, ServFlow alongside existing services when the `.srv` file references them. | [ ] |
+| 16.1 | **`auth` keyword (ServAuth backend)** | Medium | `auth "servauth://localhost:8095"` connects to the ServAuth identity provider. `auth.register()`, `auth.login()`, `auth.currentUser()`, `auth.requireRole("admin")` ? first-class identity management without external IdP SDK. | [x] |
+| 16.2 | **`database` via ServDB proxy** | Small | `database "servdb://pool/mydb"` routes through the ServDB connection pooler. Transparent ? same `db.query()` API, but benefits from pooling, read/write splitting, and query analytics. | [x] |
+| 16.3 | **`notify` keyword** | Small | `notify "servmail://localhost:8096"` with `notify.send(channel, template, data)`. Unified notification dispatch to email, Slack, SMS via ServMail hub. | [x] |
+| 16.4 | **`workflow` blocks (ServFlow backend)** | Large | `workflow "order-process" { step "validate" { ... } -> step "charge" { ... } -> step "fulfill" { ... } }` ? compiles to ServFlow API calls with automatic state checkpointing. Differs from existing `workflow` (10.7) by delegating state to the external ServFlow orchestrator for cross-service, long-running processes. | [x] |
+| 16.5 | **`serv dev` with new components** | Small | `serv dev main.srv` auto-starts ServAuth, ServDB, ServMail, ServFlow alongside existing services when the `.srv` file references them. | [x] |
 
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 

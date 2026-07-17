@@ -29,6 +29,10 @@ var servDevServices = []struct {
 	{"ServCron", "8087", "servcron", nil, []string{"PORT=8087"}},
 	{"ServGate", "8080", "servgate", nil, nil},
 	{"ServTrace", "8090", "servtrace", nil, nil},
+	{"ServAuth", "8091", "servauth", nil, nil},
+	{"ServDB", "8092", "servdb", nil, nil},
+	{"ServMail", "8093", "servmail", nil, nil},
+	{"ServFlow", "8094", "servflow", nil, nil},
 }
 
 func runDevCmd() {
@@ -58,6 +62,20 @@ func runDevCmd() {
 
 	// Determine which services to start
 	requestedServices := parseServiceList(*servicesFlag)
+
+	// Auto-detect services referenced in the .srv files
+	for _, s := range detectRequiredServices(srvFile) {
+		switch s {
+		case "auth":
+			requestedServices["ServAuth"] = true
+		case "db":
+			requestedServices["ServDB"] = true
+		case "mail":
+			requestedServices["ServMail"] = true
+		case "flow":
+			requestedServices["ServFlow"] = true
+		}
+	}
 
 	// Start infrastructure services
 	var procs []*devProcess
@@ -106,6 +124,10 @@ func runDevCmd() {
 	os.Setenv("SERV_CACHE_ENDPOINT", "http://localhost:8086")
 	os.Setenv("SERV_GATE_ENDPOINT", "http://localhost:8080")
 	os.Setenv("SERV_TRACE_ENDPOINT", "http://localhost:8090")
+	os.Setenv("SERV_AUTH_ENDPOINT", "http://localhost:8091")
+	os.Setenv("SERV_DB_ENDPOINT", "http://localhost:8092")
+	os.Setenv("SERV_MAIL_ENDPOINT", "http://localhost:8093")
+	os.Setenv("SERV_FLOW_ENDPOINT", "http://localhost:8094")
 
 	if !*noConsoleFlag {
 		fmt.Println("  Dashboard: http://localhost:8083 (start ServConsole separately)")
@@ -201,6 +223,14 @@ func parseServiceList(input string) map[string]bool {
 			result["ServGate"] = true
 		case "trace":
 			result["ServTrace"] = true
+		case "auth":
+			result["ServAuth"] = true
+		case "db":
+			result["ServDB"] = true
+		case "mail":
+			result["ServMail"] = true
+		case "flow":
+			result["ServFlow"] = true
 		}
 	}
 	return result
@@ -360,4 +390,55 @@ func startDevDashboard(procs []*devProcess) {
 		fmt.Print(sb.String())
 	}
 }
+
+func detectRequiredServices(srvFile string) []string {
+	var detected []string
+	
+	var files []string
+	info, err := os.Stat(srvFile)
+	if err != nil {
+		return nil
+	}
+	if info.IsDir() {
+		filepath.Walk(srvFile, func(path string, fileInfo os.FileInfo, walkErr error) error {
+			if fileInfo != nil && !fileInfo.IsDir() && strings.HasSuffix(path, ".srv") {
+				files = append(files, path)
+			}
+			return nil
+		})
+	} else {
+		files = append(files, srvFile)
+	}
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if strings.Contains(content, "auth") && !contains(detected, "auth") {
+			detected = append(detected, "auth")
+		}
+		if (strings.Contains(content, "servdb://") || strings.Contains(content, "database")) && !contains(detected, "db") {
+			detected = append(detected, "db")
+		}
+		if strings.Contains(content, "mail") && !contains(detected, "mail") {
+			detected = append(detected, "mail")
+		}
+		if strings.Contains(content, "workflow") && !contains(detected, "flow") {
+			detected = append(detected, "flow")
+		}
+	}
+	return detected
+}
+
+func contains(arr []string, val string) bool {
+	for _, v := range arr {
+		if v == val {
+			return true
+		}
+	}
+	return false
+}
+
 
