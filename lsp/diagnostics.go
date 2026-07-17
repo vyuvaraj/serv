@@ -61,6 +61,26 @@ func (s *Server) analyzeAndPublishDiagnostics(uri, text string) {
 		}
 	}
 
+	// DX.15: Route return linting — warn if a route body has no return statement
+	for _, stmt := range program.Statements {
+		route, ok := stmt.(*compiler.RouteStmt)
+		if !ok {
+			continue
+		}
+		if route.Body == nil || hasReturnInBlock(route.Body.Statements) {
+			continue
+		}
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: route.Token.Line - 1, Character: route.Token.Col - 1},
+				End:   Position{Line: route.Token.Line - 1, Character: route.Token.Col + len(route.Method) + len(route.Path) + 4},
+			},
+			Severity: 2, // Warning
+			Message:  fmt.Sprintf("route %s %q has no return statement — will respond with empty 200", route.Method, route.Path),
+			Source:   "serv",
+		})
+	}
+
 	// Collect symbols
 	var collectSymbols func(statements []compiler.Statement)
 	collectSymbols = func(statements []compiler.Statement) {
@@ -195,4 +215,27 @@ func (s *Server) handleCodeAction(msg JSONRPCMessage) {
 	}
 
 	sendResponse(msg.ID, actions)
+}
+
+// hasReturnInBlock recursively checks whether a list of statements contains
+// at least one return statement anywhere in the block tree. DX.15.
+func hasReturnInBlock(stmts []compiler.Statement) bool {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *compiler.ReturnStmt:
+			return true
+		case *compiler.IfStmt:
+			if s.Body != nil && hasReturnInBlock(s.Body.Statements) {
+				return true
+			}
+			if s.ElseBody != nil && hasReturnInBlock(s.ElseBody.Statements) {
+				return true
+			}
+		case *compiler.BlockStmt:
+			if hasReturnInBlock(s.Statements) {
+				return true
+			}
+		}
+	}
+	return false
 }

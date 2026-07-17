@@ -558,6 +558,193 @@ test "fetches users" {
 	}
 }
 
+func TestEnumMatchCompletionsDX7(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	doc := `enum Status { Active, Suspended, Inactive }
+let s: Status = Status::Active
+match s {
+  `
+	server.documents[uri] = doc
+	server.symbols[uri] = []symbolInfo{
+		{Name: "Status", Kind: "enum", TypeInfo: "Active, Suspended, Inactive"},
+		{Name: "s", Kind: "let", TypeInfo: "Status"},
+	}
+	// Cursor at line 3 (inside match block)
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": 3, "character": 2},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 10, Method: "textDocument/completion", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("DX.7: unexpected error: %v", resp.Error)
+	}
+	var list CompletionList
+	resBytes, _ := json.Marshal(resp.Result)
+	json.Unmarshal(resBytes, &list)
+	labelSet := map[string]bool{}
+	for _, item := range list.Items {
+		labelSet[item.Label] = true
+	}
+	for _, want := range []string{"Active", "Suspended", "Inactive"} {
+		if !labelSet[want] {
+			t.Errorf("DX.7: expected enum member %q in completions, got: %v", want, labelSet)
+		}
+	}
+}
+
+func TestCodeLensDX12RouteArgs(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	// Serv-lang route syntax: route "METHOD" "/path" (param) { ... }
+	server.documents[uri] = "route \"GET\" \"/users\" (req) {\n  return 1\n}\n"
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 11, Method: "textDocument/codeLens", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	resBytes, _ := json.Marshal(resp.Result)
+	body := string(resBytes)
+	// DX.12: Args must include the docURI as 3rd element
+	if !strings.Contains(body, "file:///test.srv") {
+		t.Errorf("DX.12: expected docURI in route lens Args, got: %s", body)
+	}
+}
+
+func TestRouteReturnLintingDX15(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	// Route with NO return — should generate a warning diagnostic
+	// Serv-lang route syntax: route "METHOD" "/path" (param) { ... }
+	noReturnRoute := "route \"GET\" \"/empty\" (req) {\n  let x = 1\n}\n"
+	out := captureStdout(func() {
+		server.analyzeAndPublishDiagnostics(uri, noReturnRoute)
+	})
+	resp := parseLSPResponse(t, out)
+	var params struct {
+		URI         string       `json:"uri"`
+		Diagnostics []Diagnostic `json:"diagnostics"`
+	}
+	resBytes, _ := json.Marshal(resp.Params)
+	json.Unmarshal(resBytes, &params)
+
+	found := false
+	for _, d := range params.Diagnostics {
+		if strings.Contains(d.Message, "no return statement") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("DX.15: expected 'no return statement' warning for route with no return, got: %+v", params.Diagnostics)
+	}
+
+	// Route WITH return — should NOT generate the warning
+	uri2 := "file:///test2.srv"
+	withReturnRoute := "route \"GET\" \"/ok\" (req) {\n  return 1\n}\n"
+	out2 := captureStdout(func() {
+		server.analyzeAndPublishDiagnostics(uri2, withReturnRoute)
+	})
+	resp2 := parseLSPResponse(t, out2)
+	var params2 struct {
+		Diagnostics []Diagnostic `json:"diagnostics"`
+	}
+	resBytes2, _ := json.Marshal(resp2.Params)
+	json.Unmarshal(resBytes2, &params2)
+	for _, d := range params2.Diagnostics {
+		if strings.Contains(d.Message, "no return statement") {
+			t.Errorf("DX.15: unexpected 'no return statement' warning for route with return: %s", d.Message)
+		}
+	}
+}
+
+func TestServURLNavigationDX16(t *testing.T) {
+	server := NewServer()
+	// Use a real temp path structure: workspace/svc-a/main.srv -> serv://svc-b
+	// We can't guarantee svc-b/main.srv exists on disk, so just verify no crash + nil
+	uri := "file:///f:/Don/servverse/Serv-lang/main.srv"
+	server.documents[uri] = `let url = "serv://auth/login"`
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"position":     map[string]int{"line": 0, "character": 14},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 12, Method: "textDocument/definition", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	// Should return nil (sibling dir doesn't exist in test env) or a valid Location — no panic
+	if resp.Error != nil {
+		t.Errorf("DX.16: unexpected error: %v", resp.Error)
+	}
+}
+
+func TestInlayHintsDX10(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	server.documents[uri] = "let count: int = 42\nlet name: string = \"Alice\"\n"
+	server.symbols[uri] = []symbolInfo{
+		{Name: "count", Kind: "let", Line: 0, Col: 4, TypeInfo: "int"},
+		{Name: "name", Kind: "let", Line: 1, Col: 4, TypeInfo: "string"},
+	}
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"range": map[string]interface{}{
+			"start": map[string]int{"line": 0, "character": 0},
+			"end":   map[string]int{"line": 10, "character": 0},
+		},
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 13, Method: "textDocument/inlayHint", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("DX.10: unexpected error: %v", resp.Error)
+	}
+	resBytes, _ := json.Marshal(resp.Result)
+	body := string(resBytes)
+	if !strings.Contains(body, ": int") {
+		t.Errorf("DX.10: expected inlay hint ': int' for count, got: %s", body)
+	}
+	if !strings.Contains(body, ": string") {
+		t.Errorf("DX.10: expected inlay hint ': string' for name, got: %s", body)
+	}
+}
+
+func TestSelectionRangeDX13(t *testing.T) {
+	server := NewServer()
+	uri := "file:///test.srv"
+	server.documents[uri] = "fn greet(name: string) -> string {\n  return \"Hello\"\n}"
+	paramsJSON, _ := json.Marshal(map[string]interface{}{
+		"textDocument": map[string]string{"uri": uri},
+		"positions":    []map[string]int{{"line": 0, "character": 3}}, // cursor on "greet"
+	})
+	msg := JSONRPCMessage{JSONRPC: "2.0", ID: 14, Method: "textDocument/selectionRange", Params: json.RawMessage(paramsJSON)}
+	out := captureStdout(func() { server.handleMessage(msg) })
+	resp := parseLSPResponse(t, out)
+	if resp.Error != nil {
+		t.Fatalf("DX.13: unexpected error: %v", resp.Error)
+	}
+	resBytes, _ := json.Marshal(resp.Result)
+	body := string(resBytes)
+	// Should have nested range with parent
+	if !strings.Contains(body, "parent") {
+		t.Errorf("DX.13: expected nested selection ranges with 'parent' field, got: %s", body)
+	}
+	// Word range should cover "fn" at character 0-2
+	if !strings.Contains(body, `"character":0`) {
+		t.Errorf("DX.13: expected word range start at character 0, got: %s", body)
+	}
+}
+
+func TestAICompletionDisabledDX14(t *testing.T) {
+	// DX.14: When env var is not set, fetchAICompletions must return nil (no panic, no HTTP call)
+	items := fetchAICompletions("log.")
+	if items != nil {
+		t.Errorf("DX.14: expected nil when SERV_AI_COMPLETION_ENDPOINT not set, got %v", items)
+	}
+}
+
 func TestHover(t *testing.T) {
 	server := NewServer()
 	uri := "file:///test.srv"

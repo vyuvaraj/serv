@@ -61,17 +61,33 @@ type TextDocumentContentChangeEvent struct {
 
 type CompletionItem struct {
 	Label            string `json:"label"`
-	Kind             int    `json:"kind"` // 1=Text, 2=Method, 3=Function, 6=Variable, 7=Class, 8=Interface, 14=Keyword, 15=Snippet, 22=Struct
+	Kind             int    `json:"kind"`
 	Detail           string `json:"detail,omitempty"`
-	Documentation    string `json:"documentation,omitempty"`
 	InsertText       string `json:"insertText,omitempty"`
-	InsertTextFormat int    `json:"insertTextFormat,omitempty"` // 1=PlainText (default), 2=Snippet
-	SortText         string `json:"sortText,omitempty"`         // lower string = higher priority
+	InsertTextFormat int    `json:"insertTextFormat,omitempty"`
+	SortText         string `json:"sortText,omitempty"`
+	Documentation    string `json:"documentation,omitempty"`
 }
 
 type CompletionList struct {
 	IsIncomplete bool             `json:"isIncomplete"`
 	Items        []CompletionItem `json:"items"`
+}
+
+// InlayHint represents ghost-text type annotations shown inline in VS Code. DX.10.
+type InlayHint struct {
+	Position     Position `json:"position"`
+	Label        string   `json:"label"`
+	Kind         int      `json:"kind"`
+	Tooltip      string   `json:"tooltip,omitempty"`
+	PaddingLeft  bool     `json:"paddingLeft,omitempty"`
+	PaddingRight bool     `json:"paddingRight,omitempty"`
+}
+
+// SelectionRange represents a nested syntactic range for Shift+Alt+→ expansion. DX.13.
+type SelectionRange struct {
+	Range  Range           `json:"range"`
+	Parent *SelectionRange `json:"parent,omitempty"`
 }
 
 type Hover struct {
@@ -229,6 +245,10 @@ func (s *Server) handleMessage(msg JSONRPCMessage) {
 		s.handleCodeAction(msg)
 	case "textDocument/codeLens":
 		s.handleCodeLens(msg)
+	case "textDocument/inlayHint":
+		s.handleInlayHint(msg) // DX.10
+	case "textDocument/selectionRange":
+		s.handleSelectionRange(msg) // DX.13
 	}
 }
 
@@ -249,6 +269,8 @@ func (s *Server) handleInitialize(msg JSONRPCMessage) {
 			"codeLensProvider": map[string]interface{}{
 				"resolveProvider": false,
 			},
+			"inlayHintProvider":      true, // DX.10
+			"selectionRangeProvider": true, // DX.13
 			"signatureHelpProvider": map[string]interface{}{
 				"triggerCharacters":   []string{"(", ","},
 				"retriggerCharacters": []string{","},
