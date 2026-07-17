@@ -204,6 +204,42 @@ func EnvSecret(key string) string {
 	return val
 }
 
+func GetSecret(key string) string {
+	url := os.Getenv("SERV_SECRET_URL")
+	if url == "" {
+		url = "http://localhost:8091" // ServSecret default port
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest("GET", url+"/api/secrets/"+key, nil)
+	if err == nil {
+		apiKey := os.Getenv("SERV_SECRET_API_KEY")
+		if apiKey != "" {
+			req.Header.Set("X-API-Key", apiKey)
+		}
+		tenantID := os.Getenv("SERV_SECRET_TENANT_ID")
+		if tenantID == "" {
+			tenantID = "default"
+		}
+		req.Header.Set("X-Tenant-ID", tenantID)
+
+		resp, err := client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var res struct {
+					Value string `json:"value"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&res); err == nil {
+					RegisterSecret(res.Value)
+					return res.Value
+				}
+			}
+		}
+	}
+	// Fallback to environment variable secret
+	return EnvSecret(key)
+}
+
 func Config(key string) string {
 	configMapMu.RLock()
 	val, exists := configMap[key]

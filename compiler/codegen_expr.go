@@ -726,6 +726,9 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		}
 
 		// Stream Processing Builtins
+		if funcStr == "secret" && len(args) == 1 {
+			return fmt.Sprintf("runtime.GetSecret(%s)", args[0]), nil
+		}
 		if funcStr == "stream" && len(args) == 1 {
 			return fmt.Sprintf("runtime.NewStream(%s)", args[0]), nil
 		}
