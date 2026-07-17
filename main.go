@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,6 +28,48 @@ import (
 
 	"github.com/vyuvaraj/ServShared"
 	"github.com/vyuvaraj/ServShared/pkg/policy"
+)
+
+func getSecretFromServSecret(key string) (string, error) {
+	url := os.Getenv("SERV_SECRET_URL")
+	if url == "" {
+		url = "http://localhost:8091"
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest("GET", url+"/api/secrets/"+key, nil)
+	if err != nil {
+		return "", err
+	}
+	apiKey := os.Getenv("SERV_SECRET_API_KEY")
+	if apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+	}
+	tenantID := os.Getenv("SERV_SECRET_TENANT_ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	req.Header.Set("X-Tenant-ID", tenantID)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var res struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+	return res.Value, nil
+}
+
+var (
+	dynamicCertBytes []byte
+	dynamicKeyBytes  []byte
 )
 
 func main() {
@@ -64,6 +107,28 @@ func main() {
 	cfg, err := prov.Load()
 	if err != nil {
 		log.Fatalf("Gateway: failed to load config: %v", err)
+	}
+
+	// Fetch dynamic secrets (EI.1)
+	if os.Getenv("SERV_SECRET_URL") != "" || os.Getenv("SERV_SECRET_API_KEY") != "" || os.Getenv("SERV_SECRET_TENANT_ID") != "" || os.Getenv("SERV_SECRET_TEST_MODE") == "true" {
+		log.Println("Gateway: Contacting ServSecret to fetch certificates and JWT validation keys dynamically...")
+		jwtSec, err := getSecretFromServSecret("jwt_secret")
+		if err == nil && jwtSec != "" {
+			os.Setenv("SERV_JWT_SECRET", jwtSec)
+			log.Println("Gateway: Successfully fetched and configured SERV_JWT_SECRET from ServSecret.")
+		} else {
+			log.Printf("Gateway: Failed to fetch jwt_secret from ServSecret: %v", err)
+		}
+
+		certPEM, err1 := getSecretFromServSecret("tls_cert")
+		keyPEM, err2 := getSecretFromServSecret("tls_key")
+		if err1 == nil && err2 == nil && certPEM != "" && keyPEM != "" {
+			dynamicCertBytes = []byte(certPEM)
+			dynamicKeyBytes = []byte(keyPEM)
+			log.Println("Gateway: Successfully fetched TLS certificate and key dynamically from ServSecret.")
+		} else {
+			log.Printf("Gateway: Failed to fetch TLS certificate/key from ServSecret: %v / %v", err1, err2)
+		}
 	}
 
 	wasmManager, err := wasm.GetMiddlewareManager(context.Background())
@@ -578,6 +643,20 @@ func main() {
 				}
 			}()
 			
+			if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Gateway: HTTP server error: %v", err)
+			}
+		} else if len(dynamicCertBytes) > 0 && len(dynamicKeyBytes) > 0 {
+			server.TLSConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
+			cert, err := tls.X509KeyPair(dynamicCertBytes, dynamicKeyBytes)
+			if err != nil {
+				log.Fatalf("Gateway: failed to parse dynamically retrieved TLS key pair: %v", err)
+			}
+			server.TLSConfig.Certificates = []tls.Certificate{cert}
+			server.Addr = ":443"
+			log.Println("Gateway: Starting HTTPS listener on :443 with dynamic certificates from ServSecret.")
 			if err := server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("Gateway: HTTP server error: %v", err)
 			}
