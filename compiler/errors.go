@@ -15,6 +15,37 @@ type DiagnosticError struct {
 	Hint       string // optional contextual hint
 }
 
+func getErrorRegistryCode(msg string) (string, string) {
+	lower := strings.ToLower(msg)
+	var code string
+	if strings.Contains(lower, "expected next token to be") {
+		code = "SRV-E001"
+	} else if strings.Contains(lower, "no prefix parse function for") {
+		code = "SRV-E002"
+	} else if strings.Contains(lower, "could not parse") {
+		code = "SRV-E003"
+	} else if strings.Contains(lower, "unused variable") {
+		code = "SRV-E004"
+	} else if strings.Contains(lower, "unreachable code") {
+		code = "SRV-E005"
+	} else if strings.Contains(lower, "expects type") || strings.Contains(lower, "mismatched type") || strings.Contains(lower, "type mismatch") {
+		code = "SRV-E006"
+	} else if strings.Contains(lower, "already declared") || strings.Contains(lower, "duplicate declaration") || strings.Contains(lower, "redefined") {
+		code = "SRV-E007"
+	} else if strings.Contains(lower, "undefined") || strings.Contains(lower, "unknown identifier") {
+		code = "SRV-E008"
+	} else if strings.Contains(lower, "cyclic") || strings.Contains(lower, "cycle") {
+		code = "SRV-E009"
+	} else if strings.Contains(lower, "missing required property") || strings.Contains(lower, "schema validation") {
+		code = "SRV-E010"
+	}
+
+	if code != "" {
+		return code, fmt.Sprintf("https://github.com/vyuvaraj/Serv-lang/blob/main/docs/errors.md#%s", code)
+	}
+	return "", ""
+}
+
 // FormatDiagnostics takes raw parser errors and source code, returns formatted diagnostics.
 func FormatDiagnostics(errors []string, source string) string {
 	if len(errors) == 0 {
@@ -27,7 +58,12 @@ func FormatDiagnostics(errors []string, source string) string {
 	for _, errMsg := range errors {
 		line, col, msg := parseErrorLocation(errMsg)
 
-		out.WriteString(fmt.Sprintf("  error: %s\n", msg))
+		code, url := getErrorRegistryCode(msg)
+		if code != "" {
+			out.WriteString(fmt.Sprintf("  error [%s]: %s\n", code, msg))
+		} else {
+			out.WriteString(fmt.Sprintf("  error: %s\n", msg))
+		}
 
 		// Show source line with caret
 		if line > 0 && line <= len(lines) {
@@ -43,6 +79,10 @@ func FormatDiagnostics(errors []string, source string) string {
 		suggestion := suggestFix(msg, source)
 		if suggestion != "" {
 			out.WriteString(fmt.Sprintf("  hint: %s\n", suggestion))
+		}
+
+		if url != "" {
+			out.WriteString(fmt.Sprintf("  reference: %s\n", url))
 		}
 
 		out.WriteString("\n")
