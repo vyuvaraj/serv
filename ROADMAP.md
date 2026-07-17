@@ -234,17 +234,17 @@ These items take Serv from a capable service language to a **category-defining**
 | 14.2 | **Hot-reload without restart (`serv run --hot`)** | Large | ✅ Done — On `.srv` file save, recompile and swap the running binary via TCP proxy + process replacement. Zero-downtime local development with no dropped connections. | [x] |
 | 14.3 | **OpenAPI spec auto-generation** | Medium | `serv docs generate` emits a complete OpenAPI 3.1 spec from route declarations, request/response types, and middleware annotations. | [x] |
 | 14.4 | **Client SDK code generation** | Large | `serv generate client --lang typescript` / `--lang python` / `--lang go` emits typed API client libraries from route declarations. No OpenAPI intermediary needed. | [x] |
-| 14.5 | **Incremental compilation** | Large | Cache AST and codegen artifacts per-file. Only recompile changed files and their dependents. Critical for large multi-file projects (>50 files). | [ ] |
+| 14.5 | **Incremental compilation** | Large | Cache AST and codegen artifacts per-file. Only recompile changed files and their dependents. Critical for large multi-file projects (>50 files). | [x] |
 | 14.6 | **Effect system (side-effect tracking)** | Large | Annotate functions as `pure`, `io`, or `async`. Compiler enforces that `pure` functions cannot call `io` functions. Enables safe parallelization and easier testing. | [ ] |
 | 14.7 | **`pipe` operator** | Small | ✅ Done — `data |> transform() |> validate() |> save()` — sugar for function chaining. High readability for data transformation pipelines. | [x] |
 | 14.8 | **Pattern matching on types** | Medium | `match value { case s: string => ..., case n: int => ..., case User { name } => ... }` — destructuring match with type narrowing. | [ ] |
 | 14.9 | **Compile-time macros** | Large | `@derive(Serialize, Validate)` annotations that generate boilerplate at compile time — similar to Rust derive or Java annotation processors. | [ ] |
-| 14.10 | **REPL with hot service context** | Medium | `serv repl --attach localhost:8080` connects to a running service and evaluates expressions against live state — inspect DB, cache, and variables interactively. | [ ] |
+| 14.10 | **REPL with hot service context** | Medium | `serv repl --attach localhost:8080` connects to a running service and evaluates expressions against live state - inspect DB, cache, and variables interactively. | [x] |
 | 14.11 | **Language-level circuit breaker** | Small | `resilient fn callPayment() retries 3 timeout 5s circuit_breaker { ... }` — declarative resiliency annotations on function signatures, compiled to runtime wrappers. | [x] |
 | 14.12 | **Streaming response support** | Medium | `route "GET" "/events" (req) stream { yield { data: "ping" }; every 1s { yield heartbeat() } }` — SSE/chunked streaming as a first-class route type. | [x] |
 | 14.13 | **GraphQL endpoint declaration** | Large | `graphql "/api" { type Query { users: [User] } resolver users() { ... } }` — native GraphQL schema + resolver syntax compiled to a performant Go handler. | [ ] |
 | 14.14 | **Cross-compilation targets** | Medium | `serv build --os linux --arch arm64` — cross-compile from any host to any Go-supported target. Enables edge/IoT deployment from a single dev machine. | [x] |
-| 14.15 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Moves beyond diagnostics into active refactoring assistance. | [ ] |
+| 14.15 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Moves beyond diagnostics into active refactoring assistance. | [x] |
 
 ---
 
@@ -295,7 +295,7 @@ These items elevate Serv-lang from a capable DSL to a world-class developer-frie
 | 17.4 | **Incremental Compilation Cache** | Medium | Cache compiled AST and IR per file; only recompile changed files and their dependents. Dramatic speedup for large multi-file `.srv` projects with many imports. | [x] |
 | 17.5 | **`serv test --watch` Mode** | Small | Re-run affected tests automatically on every file save ?" like `jest --watch` for Serv. Tight red/green feedback loop without manual re-runs. | [x] |
 | 17.6 | **Compiler Error Code Registry** | Small | Every compiler error has a unique code (e.g. `SRV-E042`) linked to a documentation page with cause, example, and fix. Eliminates cryptic error messages that junior developers can't interpret. | [x] |
-| 17.7 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Active refactoring assistance. | [ ] |
+| 17.7 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Active refactoring assistance. | [x] |
 | 17.8 | **Pattern matching on types** | Medium | `match value { case s: string => ..., case n: int => ... }` — destructuring match with type narrowing. | [ ] |
 
 ## Phase 18: Production Readiness CLI (External Audit - Completed)
