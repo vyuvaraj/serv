@@ -1,4 +1,4 @@
-# ServGate Roadmap
+ï»¿# ServGate Roadmap
 
 This document outlines the planned evolutionary stages of **ServGate** to evolve from a lightweight local proxy into a secure, distributed, WASM-programmable API Gateway.
 
@@ -119,13 +119,13 @@ These create a **moat** around ServGate â€” capabilities that Kong, Envoy, AWS A
 > See [UNIFIED_ROADMAP.md](../UNIFIED_ROADMAP.md) for the full ecosystem priority matrix and architectural recommendations.
 
 ## Phase 11: DevOps & Infrastructure (Pending)
-- [ ] **GitOps Config Sync** â€” Git repository webhooks to automatically re-sync gateway routes (OPS.5)
-- [ ] **Auto TLS Let's Encrypt** â€” Integrated ACME client for automated certificate provisioning (OPS.6)
+- [x] **GitOps Config Sync** â€” Git repository webhooks to automatically re-sync gateway routes (OPS.5)
+- [x] **Auto TLS Let's Encrypt** â€” Integrated ACME client for automated certificate provisioning (OPS.6)
 
 ## Phase 12: Production Readiness (External Audit - Completed)
-- [x] **Request Body Size Limits** — http.MaxBytesReader with configurable per-route limits; currently any-size request body is accepted (API.2)
-- [x] **Shared Input Validation Middleware** — Route-level JSON Schema validation via ServShared.ValidateJSON(); reject malformed payloads before handler executes (API.1)
-- [x] **Ecosystem Version Manifest** — GET /api/version endpoint returning service name, version, and minimum compatible API version for serv doctor compatibility checks (API.4)
-- [x] **Deprecation Header Standard** — Deprecated routes respond with Deprecation: true and Sunset: <date> headers giving consumers migration windows (API.5)
+- [x] **Request Body Size Limits** ï¿½ http.MaxBytesReader with configurable per-route limits; currently any-size request body is accepted (API.2)
+- [x] **Shared Input Validation Middleware** ï¿½ Route-level JSON Schema validation via ServShared.ValidateJSON(); reject malformed payloads before handler executes (API.1)
+- [x] **Ecosystem Version Manifest** ï¿½ GET /api/version endpoint returning service name, version, and minimum compatible API version for serv doctor compatibility checks (API.4)
+- [x] **Deprecation Header Standard** ï¿½ Deprecated routes respond with Deprecation: true and Sunset: <date> headers giving consumers migration windows (API.5)
 
-- [x] **Ecosystem Performance Suite** — Multi-tiered Go micro-benchmarks, k6 component load tests, and distributed end-to-end telemetry workloads (OPS.7)
+- [x] **Ecosystem Performance Suite** ï¿½ Multi-tiered Go micro-benchmarks, k6 component load tests, and distributed end-to-end telemetry workloads (OPS.7)
