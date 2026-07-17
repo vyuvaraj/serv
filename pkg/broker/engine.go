@@ -73,7 +73,11 @@ func NewBrokerEngine() *BrokerEngine {
 		panic(fmt.Sprintf("Failed to initialize WASM Manager: %v", err))
 	}
 
-	wal, walErr := storage.OpenWAL("queue.wal")
+	walPath := "queue.wal"
+	if override := os.Getenv("SERVQUEUE_WAL_PATH"); override != "" {
+		walPath = override
+	}
+	wal, walErr := storage.OpenWAL(walPath)
 	if walErr != nil {
 		wal = nil
 	}
@@ -147,6 +151,17 @@ func (e *BrokerEngine) Stop() {
 		cancel()
 	}
 	e.mu.Unlock()
+}
+
+// Close stops all background workers and releases the WAL file handle.
+// Must be called when the engine is no longer needed (especially in tests that use
+// t.TempDir(), to ensure the WAL file is released before directory cleanup).
+func (e *BrokerEngine) Close() {
+	e.Stop()
+	if e.wal != nil {
+		_ = e.wal.Close()
+		e.wal = nil
+	}
 }
 
 func (e *BrokerEngine) getOrCreateQueue(topic string) *PriorityQueue {

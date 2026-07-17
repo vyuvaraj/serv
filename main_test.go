@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -417,14 +418,21 @@ func TestConsumerGroups(t *testing.T) {
 }
 
 func TestReplayAndOffsets(t *testing.T) {
-	_ = os.Remove("queue.wal")
-	defer os.Remove("queue.wal")
+	// Use an isolated WAL per test run to avoid pollution from other tests that
+	// also write to the default "queue.wal" in the working directory.
+	walPath := filepath.Join(t.TempDir(), "replay_test.wal")
+	t.Setenv("SERVQUEUE_WAL_PATH", walPath)
 
 	engine := broker.NewBrokerEngine()
+	// t.Cleanup is LIFO: register engine.Close() first so it runs last —
+	// after server drains but before TempDir RemoveAll.
+	t.Cleanup(func() { engine.Close() })
+
 	webServer := web.NewServer("127.0.0.1:8085", engine, "", "", "")
 	go webServer.Start()
-	defer webServer.Shutdown(context.Background())
+	t.Cleanup(func() { webServer.Shutdown(context.Background()) })
 	time.Sleep(200 * time.Millisecond)
+
 
 	// 1. Commit and get offsets
 	// POST /api/v1/offsets
