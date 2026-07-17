@@ -23,25 +23,33 @@ function activate(context) {
     }
 
     // CodeLens provider (works with or without LSP)
+    // DX.11/12: lenses now dispatch to dedicated runTest / sendRequest commands
     const codeLensProvider = vscode.languages.registerCodeLensProvider('serv', {
         provideCodeLenses(document) {
             let lenses = [];
-            const testRegex = /^\s*(test\s+|test\s*")/i;
-            const routeRegex = /^\s*(route\s+)/i;
+            // Serv-lang: test "name" { or test name {
+            const testRegex = /^\s*test\s+"([^"]+)"/;
+            // Serv-lang: route "METHOD" "/path" or route METHOD "/path"
+            const routeRegex = /^\s*route\s+"?(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)"?\s+"([^"]+)"/;
             for (let i = 0; i < document.lineCount; i++) {
-                let line = document.lineAt(i).text;
-                if (testRegex.test(line)) {
-                    let range = new vscode.Range(i, 0, i, line.length);
-                    lenses.push(new vscode.CodeLens(range, {
-                        title: "▶ Run Test Block",
-                        command: "serv.test"
+                const line = document.lineAt(i).text;
+                const testMatch = testRegex.exec(line);
+                if (testMatch) {
+                    const testName = testMatch[1];
+                    lenses.push(new vscode.CodeLens(new vscode.Range(i, 0, i, line.length), {
+                        title: '▶ Run test',
+                        command: 'serv.runTest',
+                        arguments: [document.uri.toString(), testName]
                     }));
                 }
-                if (routeRegex.test(line)) {
-                    let range = new vscode.Range(i, 0, i, line.length);
-                    lenses.push(new vscode.CodeLens(range, {
-                        title: "⚡ Start Web Service",
-                        command: "serv.run"
+                const routeMatch = routeRegex.exec(line);
+                if (routeMatch) {
+                    const method = routeMatch[1];
+                    const routePath = routeMatch[2];
+                    lenses.push(new vscode.CodeLens(new vscode.Range(i, 0, i, line.length), {
+                        title: '▶ Send request',
+                        command: 'serv.sendRequest',
+                        arguments: [method, routePath, document.uri.toString()]
                     }));
                 }
             }
@@ -56,6 +64,10 @@ function activate(context) {
         vscode.commands.registerCommand('serv.build', () => runServCommand('build')),
         vscode.commands.registerCommand('serv.test', () => runServCommand('test')),
         vscode.commands.registerCommand('serv.watch', () => runServCommand('run', ['--watch'])),
+        // DX.11: Run a specific named test block via code lens
+        vscode.commands.registerCommand('serv.runTest', (docUri, testName) => runNamedTest(docUri, testName)),
+        // DX.12: Send an HTTP request to a running local service via code lens
+        vscode.commands.registerCommand('serv.sendRequest', (method, routePath, docUri) => openSendRequestPanel(context, method, routePath, docUri)),
         vscode.commands.registerCommand('serv.visualizeWorkflow', () => openWorkflowVisualizer(context)),
         vscode.commands.registerCommand('serv.exploreQueue', () => openQueueExplorer(context)),
         vscode.commands.registerCommand('serv.exploreStore', () => openStoreExplorer(context)),
@@ -301,6 +313,163 @@ function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
+// --- DX.11: Run a specific named test block ---
+// Triggered by the '▶ Run test' code lens above each `test "name" { }` block.
+function runNamedTest(docUri, testName) {
+    const editor = vscode.window.activeTextEditor;
+    const servPath = findServBinary();
+    if (!servPath) {
+        vscode.window.showErrorMessage('Serv compiler not found. Place serv.exe in workspace root or PATH.');
+        return;
+    }
+
+    // Resolve file path from URI if provided, otherwise fall back to active editor
+    let filePath;
+    if (docUri) {
+        filePath = vscode.Uri.parse(docUri).fsPath;
+    } else if (editor && editor.document.languageId === 'serv') {
+        filePath = editor.document.fileName;
+    } else {
+        vscode.window.showWarningMessage('Open a .srv file first');
+        return;
+    }
+
+    const terminal = vscode.window.createTerminal({ name: `Serv test: ${testName}` });
+    terminal.show();
+    const shellPath = (vscode.env.shell || '').toLowerCase();
+    const isPowerShell = shellPath.includes('powershell') || shellPath.includes('pwsh') || shellPath === '';
+    const cmd = `"${servPath}" test "${filePath}" --run "${testName}"`;
+    terminal.sendText(isPowerShell ? `& ${cmd}` : cmd);
+}
+
+// --- DX.12: Send HTTP request panel for a route code lens ---
+// Opens a minimal webview panel pre-filled with the route's method and path.
+function openSendRequestPanel(context, method, routePath, docUri) {
+    const port = vscode.workspace.getConfiguration('serv').get('devServerPort', 8080);
+    const url = `http://localhost:${port}${routePath}`;
+
+    const panel = vscode.window.createWebviewPanel(
+        'servSendRequest',
+        `${method} ${routePath}`,
+        vscode.ViewColumn.Two,
+        { enableScripts: true, retainContextWhenHidden: true }
+    );
+
+    panel.webview.html = buildSendRequestPanel(method, routePath, url);
+
+    // Handle messages from the webview (send button)
+    panel.webview.onDidReceiveMessage(async msg => {
+        if (msg.type !== 'send') return;
+        // Relay the request via VS Code's fetch (requires VS Code 1.91+) or notify
+        try {
+            const resp = await fetch(msg.url, {
+                method: msg.method,
+                headers: { 'Content-Type': 'application/json', ...JSON.parse(msg.headers || '{}') },
+                body: msg.method !== 'GET' && msg.method !== 'HEAD' ? msg.body : undefined,
+            });
+            const text = await resp.text();
+            panel.webview.postMessage({ type: 'response', status: resp.status, body: text });
+        } catch (e) {
+            panel.webview.postMessage({ type: 'response', status: 0, body: `Error: ${e.message}` });
+        }
+    });
+}
+
+function buildSendRequestPanel(method, routePath, url) {
+    const methodColor = {
+        GET: '#a6e3a1', POST: '#89b4fa', PUT: '#f9e2af',
+        DELETE: '#f38ba8', PATCH: '#cba6f7', HEAD: '#94e2d5', OPTIONS: '#74c7ec'
+    }[method] || '#cdd6f4';
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Serv: Send Request</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1e1e2e; color: #cdd6f4; font-family: 'Segoe UI', sans-serif; padding: 24px; }
+  h2 { font-size: 16px; margin-bottom: 20px; color: #89dceb; }
+  .method-badge {
+    display: inline-block; padding: 3px 10px; border-radius: 4px;
+    font-weight: bold; font-size: 13px; margin-right: 8px;
+    background: ${methodColor}22; color: ${methodColor}; border: 1px solid ${methodColor}44;
+  }
+  .path { font-family: monospace; color: #cdd6f4; font-size: 14px; }
+  label { display: block; margin: 16px 0 6px; font-size: 12px; color: #a6adc8; text-transform: uppercase; letter-spacing: .5px; }
+  input, textarea {
+    width: 100%; padding: 8px 12px; border-radius: 6px;
+    background: #313244; border: 1px solid #45475a; color: #cdd6f4;
+    font-family: monospace; font-size: 13px; outline: none;
+  }
+  input:focus, textarea:focus { border-color: #89b4fa; }
+  textarea { resize: vertical; min-height: 80px; }
+  button {
+    margin-top: 20px; padding: 9px 24px; border-radius: 6px; border: none; cursor: pointer;
+    background: #89b4fa; color: #1e1e2e; font-weight: bold; font-size: 13px; transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  .response-box {
+    margin-top: 20px; background: #181825; border: 1px solid #45475a;
+    border-radius: 8px; padding: 16px; display: none;
+  }
+  .status { font-weight: bold; margin-bottom: 10px; }
+  .status.ok { color: #a6e3a1; }
+  .status.err { color: #f38ba8; }
+  pre { font-size: 12px; white-space: pre-wrap; word-break: break-all; color: #cdd6f4; max-height: 300px; overflow-y: auto; }
+  .divider { border: none; border-top: 1px solid #313244; margin: 16px 0; }
+</style>
+</head>
+<body>
+<h2>▶ Send Request</h2>
+<div>
+  <span class="method-badge">${method}</span>
+  <span class="path">${routePath}</span>
+</div>
+<hr class="divider">
+<label>URL</label>
+<input id="url" type="text" value="${url}" />
+<label>Headers (JSON)</label>
+<textarea id="headers" placeholder='{"Authorization": "Bearer token"}'></textarea>
+${method !== 'GET' && method !== 'HEAD' ? `
+<label>Body (JSON)</label>
+<textarea id="body" placeholder='{"key": "value"}'></textarea>
+` : ''}
+<button onclick="send()">▶ Send</button>
+
+<div class="response-box" id="resp-box">
+  <div class="status" id="resp-status"></div>
+  <pre id="resp-body"></pre>
+</div>
+
+<script>
+  const vscode = acquireVsCodeApi();
+  function send() {
+    vscode.postMessage({
+      type: 'send',
+      method: '${method}',
+      url: document.getElementById('url').value,
+      headers: document.getElementById('headers').value || '{}',
+      body: document.getElementById('body') ? document.getElementById('body').value : ''
+    });
+  }
+  window.addEventListener('message', e => {
+    const { status, body } = e.data;
+    const box = document.getElementById('resp-box');
+    const st = document.getElementById('resp-status');
+    const bd = document.getElementById('resp-body');
+    box.style.display = 'block';
+    st.className = 'status ' + (status >= 200 && status < 300 ? 'ok' : 'err');
+    st.textContent = status ? 'HTTP ' + status : 'Connection error';
+    try { bd.textContent = JSON.stringify(JSON.parse(body), null, 2); }
+    catch { bd.textContent = body; }
+  });
+</script>
+</body>
+</html>`;
+}
 
 function openWorkflowVisualizer(context) {
     const panel = vscode.window.createWebviewPanel(
