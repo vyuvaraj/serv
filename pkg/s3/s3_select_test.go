@@ -18,24 +18,31 @@ func TestS3SelectCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create local store: %v", err)
 	}
-	defer store.Close()
 
 	ctx := t.Context()
 	bucket := "test-select"
 	if err := store.CreateBucket(ctx, bucket); err != nil {
+		// Close store before failing to avoid TempDir cleanup race
+		store.Close()
 		t.Fatalf("failed to create bucket: %v", err)
 	}
 
 	csvData := "name,age,city\nAlice,30,New York\nBob,25,San Francisco\nCharlie,35,Los Angeles\n"
 	_, err = store.PutObject(ctx, bucket, "users.csv", strings.NewReader(csvData), int64(len(csvData)), "text/csv")
 	if err != nil {
+		store.Close()
 		t.Fatalf("failed to put csv: %v", err)
 	}
 
 	authProv := auth.NewAuthProvider("admin", "admin", false)
 	gateway := NewGateway(store, authProv, nil, nil, 1, false, 0, 0)
 	server := httptest.NewServer(gateway)
-	defer server.Close()
+
+	// Ensure shutdown order: server first (drains in-flight requests),
+	// then store (flushes Pebble WAL/SST), both before TempDir RemoveAll.
+	// t.Cleanup runs LIFO, so register store cleanup first so it runs last.
+	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { server.Close() })
 
 	client := &http.Client{}
 

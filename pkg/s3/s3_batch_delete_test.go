@@ -18,7 +18,7 @@ func TestS3BatchDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create local store: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
 	ctx := t.Context()
 	bucket := "batch-bucket"

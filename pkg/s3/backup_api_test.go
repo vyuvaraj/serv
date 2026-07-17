@@ -21,7 +21,7 @@ func TestBackupRestoreAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create local store: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
 	// Auth provider with validation disabled for simplicity
 	authProv := auth.NewAuthProvider("", "", false)

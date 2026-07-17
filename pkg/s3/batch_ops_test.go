@@ -22,14 +22,14 @@ func TestS3BatchOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create local store: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 
 	// Initialize Gateway (with batchMgr initialized automatically in NewGateway)
 	authProvider := auth.NewAuthProvider("", "", false)
 	gateway := NewGateway(store, authProvider, nil, nil, 1, false, 0, 0)
 
 	server := httptest.NewServer(gateway)
-	defer server.Close()
+	t.Cleanup(func() { server.Close() })
 
 	client := &http.Client{}
 	defer client.CloseIdleConnections()
