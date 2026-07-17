@@ -12,18 +12,55 @@ import (
 	"time"
 
 	"github.com/vyuvaraj/ServShared"
+	"gopkg.in/yaml.v3"
 	"servlock/pkg/handlers"
 	"servlock/pkg/storage"
 )
 
+type Config struct {
+	Port     string `yaml:"port"`
+	Backend  string `yaml:"backend"`
+	FilePath string `yaml:"file_path"`
+	APIKey   string `yaml:"api_key"`
+}
+
 func main() {
-	port := flag.String("port", "8089", "Port to listen on")
+	configPath := flag.String("config", "", "Path to servlock.yaml config file")
+	portFlag := flag.String("port", "8089", "Port to listen on (override)")
 	flag.Parse()
 
-	log.Printf("Starting ServLock Distributed Lock Manager on port %s...", *port)
+	var cfg Config
 
-	// Initialize fallback local memory storage
-	handlers.Store = storage.NewInMemoryStore()
+	if *configPath != "" {
+		cfgData, err := os.ReadFile(*configPath)
+		if err != nil {
+			log.Fatalf("failed to read config file: %v", err)
+		}
+		if err := yaml.Unmarshal(cfgData, &cfg); err != nil {
+			log.Fatalf("failed to parse yaml config: %v", err)
+		}
+	} else {
+		// Default config values
+		cfg = Config{
+			Port:     *portFlag,
+			Backend:  "memory",
+			FilePath: "leases.json",
+			APIKey:   os.Getenv("SERVLOCK_API_KEY"),
+		}
+	}
+
+	log.Printf("Starting ServLock Distributed Lock Manager on port %s (backend: %s)...", cfg.Port, cfg.Backend)
+
+	// Initialize Backend Storage
+	if cfg.Backend == "file" {
+		store, err := storage.NewFileLockStore(cfg.FilePath)
+		if err != nil {
+			log.Fatalf("failed to initialize FileLockStore: %v", err)
+		}
+		handlers.Store = store
+	} else {
+		handlers.Store = storage.NewInMemoryStore()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
@@ -45,28 +82,57 @@ func main() {
 		mux.ServeHTTP(w, r)
 	})
 
-	rateLimiter := ServShared.RateLimitMiddleware
-	if flag.Lookup("test.v") != nil {
-		rateLimiter = func(next http.Handler) http.Handler {
-			return next
-		}
-	}
+	var serverHandler http.Handler = v1Wrapper
 
-	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
-	serverHandler := ServShared.TraceMiddleware("servlock",
-		rateLimiter(
-			ServShared.CORSMiddleware(
-				ServShared.MaxBytesMiddleware(10*1024*1024)(
-					ServShared.AuthMiddleware(
-						ServShared.TenantMiddleware(v1Wrapper),
+	// If API Key is configured, use API Key auth. Otherwise fallback to standard AuthMiddleware.
+	if cfg.APIKey != "" {
+		log.Println("API Key protection enabled (zero-dependency standalone mode).")
+		apiKeyAuth := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+					next.ServeHTTP(w, r)
+					return
+				}
+				key := r.Header.Get("X-API-Key")
+				if key == "" {
+					authHeader := r.Header.Get("Authorization")
+					if strings.HasPrefix(authHeader, "Bearer ") {
+						key = strings.TrimPrefix(authHeader, "Bearer ")
+					}
+				}
+				if key != cfg.APIKey {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					w.Write([]byte(`{"error": "Unauthorized: invalid or missing API key"}`))
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
+		serverHandler = apiKeyAuth(v1Wrapper)
+	} else {
+		// Standard ecosystem auth chain
+		rateLimiter := ServShared.RateLimitMiddleware
+		if flag.Lookup("test.v") != nil {
+			rateLimiter = func(next http.Handler) http.Handler {
+				return next
+			}
+		}
+		serverHandler = ServShared.TraceMiddleware("servlock",
+			rateLimiter(
+				ServShared.CORSMiddleware(
+					ServShared.MaxBytesMiddleware(10*1024*1024)(
+						ServShared.AuthMiddleware(
+							ServShared.TenantMiddleware(v1Wrapper),
+						),
 					),
 				),
 			),
-		),
-	)
+		)
+	}
 
 	server := &http.Server{
-		Addr:    ":" + *port,
+		Addr:    ":" + cfg.Port,
 		Handler: serverHandler,
 	}
 

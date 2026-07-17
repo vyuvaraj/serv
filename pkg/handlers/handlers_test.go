@@ -576,3 +576,53 @@ func TestFileLockPersistence(t *testing.T) {
 			lockDetails.FencingToken, recoveredLock.Owner, recoveredLock.FencingToken)
 	}
 }
+
+func TestAPIKeyMiddleware(t *testing.T) {
+	apiKey := "my-secret-key"
+	middleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("X-API-Key")
+			if key == "" {
+				authHeader := r.Header.Get("Authorization")
+				if strings.HasPrefix(authHeader, "Bearer ") {
+					key = strings.TrimPrefix(authHeader, "Bearer ")
+				}
+			}
+			if key != apiKey {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// 1. Test unauthorized request
+	req1 := httptest.NewRequest("GET", "/api/locks/observability", nil)
+	rr1 := httptest.NewRecorder()
+	handler.ServeHTTP(rr1, req1)
+	if rr1.Code != http.StatusUnauthorized {
+		t.Errorf("expected status 401, got %d", rr1.Code)
+	}
+
+	// 2. Test authorized request via header
+	req2 := httptest.NewRequest("GET", "/api/locks/observability", nil)
+	req2.Header.Set("X-API-Key", apiKey)
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rr2.Code)
+	}
+
+	// 3. Test authorized request via Bearer token
+	req3 := httptest.NewRequest("GET", "/api/locks/observability", nil)
+	req3.Header.Set("Authorization", "Bearer "+apiKey)
+	rr3 := httptest.NewRecorder()
+	handler.ServeHTTP(rr3, req3)
+	if rr3.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rr3.Code)
+	}
+}
