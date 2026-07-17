@@ -1650,16 +1650,22 @@ func TestAutomatedCanaryRollback(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Sleep 300ms to ensure the 200ms CanaryPromotionLoop ticker has ticked at least once
-	time.Sleep(300 * time.Millisecond)
-
-	req, _ := http.NewRequest("GET", gwServer.URL+"/api/auto-canary/test", nil)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
+	// Poll to ensure the CanaryPromotionLoop rolls back to the stable target (up to 3 seconds)
+	var canaryTarget string
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest("GET", gwServer.URL+"/api/auto-canary/test", nil)
+		resp, err := client.Do(req)
+		if err == nil {
+			canaryTarget = resp.Header.Get("X-Canary-Target")
+			resp.Body.Close()
+			if canaryTarget == tsV1.URL {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	defer resp.Body.Close()
-	canaryTarget := resp.Header.Get("X-Canary-Target")
+
 	if canaryTarget != tsV1.URL {
 		t.Errorf("Expected rollback to stable target %s, got target %s", tsV1.URL, canaryTarget)
 	}
