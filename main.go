@@ -127,6 +127,7 @@ func main() {
 	// Secret manager endpoints
 	mux.HandleFunc("/api/secrets", handlers.HandleSecretRoute)
 	mux.HandleFunc("/api/secrets/", handlers.HandleSecretRoute)
+	mux.HandleFunc("/api/secrets/rollback", handlers.HandleSecretRollback)
 
 	// Wrapper handler for /api/v1/ prefix rewriting
 	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +137,7 @@ func main() {
 		mux.ServeHTTP(w, r)
 	})
 
-	var serverHandler http.Handler = v1Wrapper
+	var serverHandler http.Handler = handlers.LeakDetectionMiddleware(v1Wrapper)
 
 	// If API Keys are configured, use API Key auth. Otherwise fallback to standard AuthMiddleware.
 	if len(cfg.APIKeys) > 0 {

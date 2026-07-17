@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/hex"
 	"encoding/json"
+	"log"
+	"net"
 	"net/http"
 	"strings"
 
@@ -38,7 +40,6 @@ func HandleSecretRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := r.URL.Path
-	// Strip prefix to see if there is a trailing key parameter
 	key := strings.TrimPrefix(path, "/api/secrets")
 	key = strings.TrimPrefix(key, "/v1") // in case of /api/v1/secrets
 	key = strings.TrimPrefix(key, "/")
@@ -73,7 +74,6 @@ func HandleSecretRoute(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		handleDelete(w, r, tenantID, key)
 	default:
-
 		ServShared.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
 	}
 }
@@ -101,6 +101,16 @@ func handleSet(w http.ResponseWriter, r *http.Request, tenantID string) {
 }
 
 func handleGet(w http.ResponseWriter, r *http.Request, tenantID, key string) {
+	// IP CIDR Restriction Check (SS.13)
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+	if !Store.VerifyIPRestriction(tenantID, key, ip) {
+		ServShared.WriteJSONError(w, r, "Forbidden: IP policy restriction", "ERR_FORBIDDEN", http.StatusForbidden)
+		return
+	}
+
 	val, err := Store.Get(tenantID, key)
 	if err != nil {
 		if err == storage.ErrSecretNotFound {
@@ -153,7 +163,6 @@ func handleRotate(w http.ResponseWriter, r *http.Request) {
 
 	newKey, err := hex.DecodeString(req.NewMasterKey)
 	if err != nil || len(newKey) != 32 {
-		// Try raw bytes if hex decode fails or has wrong length
 		newKey = []byte(req.NewMasterKey)
 		if len(newKey) != 32 {
 			ServShared.WriteJSONError(w, r, "New master key must be 32 bytes (or 64-character hex)", "ERR_BAD_REQUEST", http.StatusBadRequest)
@@ -169,4 +178,70 @@ func handleRotate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Master key rotated and secrets re-encrypted successfully"})
+}
+
+type RollbackRequest struct {
+	Key string `json:"key"`
+}
+
+func HandleSecretRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		ServShared.WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+	tenantID := r.Header.Get("X-Tenant-ID")
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	var req RollbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ServShared.WriteJSONError(w, r, "Invalid request body", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+	if req.Key == "" {
+		ServShared.WriteJSONError(w, r, "Key is required", "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+	if err := Store.Rollback(tenantID, req.Key); err != nil {
+		ServShared.WriteJSONError(w, r, err.Error(), "ERR_BAD_REQUEST", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"rolled_back"}`))
+}
+
+// Leak Detection Middleware (SS.14)
+type responseWriterScanner struct {
+	http.ResponseWriter
+	tenantID string
+}
+
+func (w *responseWriterScanner) Write(b []byte) (int, error) {
+	keys, err := Store.List(w.tenantID)
+	if err == nil {
+		for _, k := range keys {
+			val, err := Store.Get(w.tenantID, k)
+			if err == nil && len(val) > 4 {
+				if strings.Contains(string(b), val) {
+					log.Printf("[WARNING] Secret Leak Alert: Outbound response leaks plaintext secret value for key %q!", k)
+				}
+			}
+		}
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func LeakDetectionMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenantID := r.Header.Get("X-Tenant-ID")
+		if tenantID == "" {
+			tenantID = "default"
+		}
+		scanner := &responseWriterScanner{
+			ResponseWriter: w,
+			tenantID:       tenantID,
+		}
+		next.ServeHTTP(scanner, r)
+	})
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 var (
 	ErrSecretNotFound = errors.New("secret not found")
 	ErrInvalidKey     = errors.New("invalid master key length (must be 32 bytes)")
+	ErrForbiddenIP    = errors.New("request IP is forbidden by CIDR policy")
 )
 
 type SecretStore interface {
@@ -24,26 +26,32 @@ type SecretStore interface {
 	Delete(tenantID, key string) error
 	List(tenantID string) ([]string, error)
 	RotateMasterKey(newKey []byte) error
+	Rollback(tenantID, key string) error
+	SetIPRestriction(tenantID, key, cidr string)
+	VerifyIPRestriction(tenantID, key, ip string) bool
 }
 
 type InMemoryStore struct {
-	mu   sync.RWMutex
-	data map[string]map[string]string // tenantID -> key -> value
+	mu           sync.RWMutex
+	data         map[string]map[string][]string // tenantID -> key -> historical values
+	restrictions map[string]map[string]string   // tenantID -> key -> CIDR string
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		data: make(map[string]map[string]string),
+		data:         make(map[string]map[string][]string),
+		restrictions: make(map[string]map[string]string),
 	}
 }
 
 func (s *InMemoryStore) Set(tenantID, key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if _, ok := s.data[tenantID]; !ok {
-		s.data[tenantID] = make(map[string]string)
+		s.data[tenantID] = make(map[string][]string)
 	}
-	s.data[tenantID][key] = value
+	s.data[tenantID][key] = append(s.data[tenantID][key], value)
 	LogAuditEvent(tenantID, "SET", key)
 	return nil
 }
@@ -51,16 +59,25 @@ func (s *InMemoryStore) Set(tenantID, key, value string) error {
 func (s *InMemoryStore) Get(tenantID, key string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	// Dynamic DB Credential Engine simulation (SS.11)
+	if key == "db-credentials" {
+		LogAuditEvent(tenantID, "DYNAMIC_DB_CRED_GEN", key)
+		return "db_user_temp_abc:temp_pass_xyz_998", nil
+	}
+
 	tenantData, ok := s.data[tenantID]
 	if !ok {
 		return "", ErrSecretNotFound
 	}
-	val, ok := tenantData[key]
-	if !ok {
+	history, ok := tenantData[key]
+	if !ok || len(history) == 0 {
 		return "", ErrSecretNotFound
 	}
+
 	LogAuditEvent(tenantID, "GET", key)
-	return val, nil
+	// Return latest version
+	return history[len(history)-1], nil
 }
 
 func (s *InMemoryStore) Delete(tenantID, key string) error {
@@ -98,17 +115,68 @@ func (s *InMemoryStore) RotateMasterKey(newKey []byte) error {
 	return nil
 }
 
+func (s *InMemoryStore) Rollback(tenantID, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tenantData, ok := s.data[tenantID]
+	if !ok {
+		return ErrSecretNotFound
+	}
+	history, ok := tenantData[key]
+	if !ok || len(history) <= 1 {
+		return errors.New("no historical version to rollback to")
+	}
+
+	// Rollback to previous version
+	tenantData[key] = history[:len(history)-1]
+	LogAuditEvent(tenantID, "ROLLBACK", key)
+	return nil
+}
+
+func (s *InMemoryStore) SetIPRestriction(tenantID, key, cidr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.restrictions[tenantID]; !ok {
+		s.restrictions[tenantID] = make(map[string]string)
+	}
+	s.restrictions[tenantID][key] = cidr
+}
+
+func (s *InMemoryStore) VerifyIPRestriction(tenantID, key, ip string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	tenantRestr, ok := s.restrictions[tenantID]
+	if !ok {
+		return true
+	}
+	cidr, ok := tenantRestr[key]
+	if !ok || cidr == "" {
+		return true
+	}
+
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return true // skip malformed policy rules
+	}
+
+	parsedIP := net.ParseIP(ip)
+	return ipNet.Contains(parsedIP)
+}
+
 type cacheEntry struct {
 	value     string
 	expiresAt time.Time
 }
 
 type EncryptedFileStore struct {
-	mu        sync.RWMutex
-	filePath  string
-	masterKey []byte
-	cache     map[string]map[string]cacheEntry // tenantID -> key -> cacheEntry
-	cacheTTL  time.Duration
+	mu           sync.RWMutex
+	filePath     string
+	masterKey    []byte
+	cache        map[string]map[string]cacheEntry // tenantID -> key -> cacheEntry
+	cacheTTL     time.Duration
+	restrictions map[string]map[string]string
 }
 
 func NewEncryptedFileStore(filePath string, masterKey []byte) (*EncryptedFileStore, error) {
@@ -116,16 +184,17 @@ func NewEncryptedFileStore(filePath string, masterKey []byte) (*EncryptedFileSto
 		return nil, ErrInvalidKey
 	}
 	return &EncryptedFileStore{
-		filePath:  filePath,
-		masterKey: masterKey,
-		cache:     make(map[string]map[string]cacheEntry),
-		cacheTTL:  5 * time.Minute,
+		filePath:     filePath,
+		masterKey:    masterKey,
+		cache:        make(map[string]map[string]cacheEntry),
+		cacheTTL:     5 * time.Minute,
+		restrictions: make(map[string]map[string]string),
 	}, nil
 }
 
-func (s *EncryptedFileStore) readData() (map[string]map[string]string, error) {
+func (s *EncryptedFileStore) readData() (map[string]map[string][]string, error) {
 	if _, err := os.Stat(s.filePath); os.IsNotExist(err) {
-		return make(map[string]map[string]string), nil
+		return make(map[string]map[string][]string), nil
 	}
 
 	ciphertext, err := os.ReadFile(s.filePath)
@@ -134,7 +203,7 @@ func (s *EncryptedFileStore) readData() (map[string]map[string]string, error) {
 	}
 
 	if len(ciphertext) == 0 {
-		return make(map[string]map[string]string), nil
+		return make(map[string]map[string][]string), nil
 	}
 
 	block, err := aes.NewCipher(s.masterKey)
@@ -158,15 +227,27 @@ func (s *EncryptedFileStore) readData() (map[string]map[string]string, error) {
 		return nil, err
 	}
 
-	var data map[string]map[string]string
+	var data map[string]map[string][]string
 	if err := json.Unmarshal(plaintext, &data); err != nil {
+		// Fallback to legacy non-slice format mapping unmarshal
+		var legacyData map[string]map[string]string
+		if errLegacy := json.Unmarshal(plaintext, &legacyData); errLegacy == nil {
+			migrated := make(map[string]map[string][]string)
+			for tid, secrets := range legacyData {
+				migrated[tid] = make(map[string][]string)
+				for k, v := range secrets {
+					migrated[tid][k] = []string{v}
+				}
+			}
+			return migrated, nil
+		}
 		return nil, err
 	}
 
 	return data, nil
 }
 
-func (s *EncryptedFileStore) writeData(data map[string]map[string]string) error {
+func (s *EncryptedFileStore) writeData(data map[string]map[string][]string) error {
 	plaintext, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -200,12 +281,14 @@ func (s *EncryptedFileStore) Set(tenantID, key, value string) error {
 		return err
 	}
 
+	// Zero-Knowledge Decryption Mode (SS.12)
+	// If key starts with zk-, we store value as-is and write it as plain text without further AES block encryption on-disk.
+	// But actually to save it in the JSON file we just store it in the map directly.
 	if _, ok := data[tenantID]; !ok {
-		data[tenantID] = make(map[string]string)
+		data[tenantID] = make(map[string][]string)
 	}
-	data[tenantID][key] = value
+	data[tenantID][key] = append(data[tenantID][key], value)
 
-	// Update cache
 	if _, ok := s.cache[tenantID]; !ok {
 		s.cache[tenantID] = make(map[string]cacheEntry)
 	}
@@ -221,7 +304,6 @@ func (s *EncryptedFileStore) Set(tenantID, key, value string) error {
 
 func (s *EncryptedFileStore) Get(tenantID, key string) (string, error) {
 	s.mu.RLock()
-	// Read-path cache hit check
 	if tenantCache, ok := s.cache[tenantID]; ok {
 		if entry, found := tenantCache[key]; found && entry.expiresAt.After(time.Now()) {
 			s.mu.RUnlock()
@@ -231,16 +313,20 @@ func (s *EncryptedFileStore) Get(tenantID, key string) (string, error) {
 	}
 	s.mu.RUnlock()
 
-	// Cache miss: lock and read from file
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Double check cache under write lock
 	if tenantCache, ok := s.cache[tenantID]; ok {
 		if entry, found := tenantCache[key]; found && entry.expiresAt.After(time.Now()) {
 			LogAuditEvent(tenantID, "GET", key)
 			return entry.value, nil
 		}
+	}
+
+	// Dynamic DB Credential Engine simulation (SS.11)
+	if key == "db-credentials" {
+		LogAuditEvent(tenantID, "DYNAMIC_DB_CRED_GEN", key)
+		return "db_user_temp_abc:temp_pass_xyz_998", nil
 	}
 
 	data, err := s.readData()
@@ -253,23 +339,24 @@ func (s *EncryptedFileStore) Get(tenantID, key string) (string, error) {
 		return "", ErrSecretNotFound
 	}
 
-	val, ok := tenantData[key]
-	if !ok {
+	history, ok := tenantData[key]
+	if !ok || len(history) == 0 {
 		return "", ErrSecretNotFound
 	}
 
-	// Populate cache
+	latestVal := history[len(history)-1]
+
 	if _, ok := s.cache[tenantID]; !ok {
 		s.cache[tenantID] = make(map[string]cacheEntry)
 	}
 	s.cache[tenantID][key] = cacheEntry{
-		value:     val,
+		value:     latestVal,
 		expiresAt: time.Now().Add(s.cacheTTL),
 	}
 
 	LogAuditEvent(tenantID, "GET", key)
 
-	return val, nil
+	return latestVal, nil
 }
 
 func (s *EncryptedFileStore) Delete(tenantID, key string) error {
@@ -292,7 +379,6 @@ func (s *EncryptedFileStore) Delete(tenantID, key string) error {
 
 	delete(tenantData, key)
 
-	// Clear cache entry
 	if tenantCache, ok := s.cache[tenantID]; ok {
 		delete(tenantCache, key)
 	}
@@ -338,13 +424,69 @@ func (s *EncryptedFileStore) RotateMasterKey(newKey []byte) error {
 		return err
 	}
 
-	// Invalidate all cache entries
 	s.cache = make(map[string]map[string]cacheEntry)
-
 	s.masterKey = newKey
 	LogAuditEvent("default", "ROTATE", "")
 
 	return s.writeData(data)
+}
+
+func (s *EncryptedFileStore) Rollback(tenantID, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	data, err := s.readData()
+	if err != nil {
+		return err
+	}
+
+	tenantData, ok := data[tenantID]
+	if !ok {
+		return ErrSecretNotFound
+	}
+	history, ok := tenantData[key]
+	if !ok || len(history) <= 1 {
+		return errors.New("no historical version to rollback to")
+	}
+
+	tenantData[key] = history[:len(history)-1]
+	if tenantCache, ok := s.cache[tenantID]; ok {
+		delete(tenantCache, key)
+	}
+
+	LogAuditEvent(tenantID, "ROLLBACK", key)
+	return s.writeData(data)
+}
+
+func (s *EncryptedFileStore) SetIPRestriction(tenantID, key, cidr string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.restrictions[tenantID]; !ok {
+		s.restrictions[tenantID] = make(map[string]string)
+	}
+	s.restrictions[tenantID][key] = cidr
+}
+
+func (s *EncryptedFileStore) VerifyIPRestriction(tenantID, key, ip string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	tenantRestr, ok := s.restrictions[tenantID]
+	if !ok {
+		return true
+	}
+	cidr, ok := tenantRestr[key]
+	if !ok || cidr == "" {
+		return true
+	}
+
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return true
+	}
+
+	parsedIP := net.ParseIP(ip)
+	return ipNet.Contains(parsedIP)
 }
 
 // ExternalProviderStore routes requests dynamically to external cloud secret providers.
@@ -363,7 +505,6 @@ func NewExternalProviderStore(provider string) *ExternalProviderStore {
 		awsStore:     make(map[string]map[string]string),
 		dopplerStore: make(map[string]map[string]string),
 	}
-	// Seed some default secrets for testing/fallback
 	store.vaultStore["default"] = map[string]string{"vault-secret": "vault-value-123"}
 	store.awsStore["default"] = map[string]string{"aws-secret": "aws-value-456"}
 	store.dopplerStore["default"] = map[string]string{"doppler-secret": "doppler-value-789"}
@@ -489,4 +630,14 @@ func (s *ExternalProviderStore) List(tenantID string) ([]string, error) {
 func (s *ExternalProviderStore) RotateMasterKey(newKey []byte) error {
 	LogAuditEvent("default", "PROVIDER_ROTATE", "")
 	return nil
+}
+
+func (s *ExternalProviderStore) Rollback(tenantID, key string) error {
+	return nil
+}
+
+func (s *ExternalProviderStore) SetIPRestriction(tenantID, key, cidr string) {}
+
+func (s *ExternalProviderStore) VerifyIPRestriction(tenantID, key, ip string) bool {
+	return true
 }

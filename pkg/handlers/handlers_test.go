@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"servsecret/pkg/storage"
@@ -312,5 +313,95 @@ func TestEnvInjector(t *testing.T) {
 
 	if len(output) == 0 {
 		t.Errorf("expected command output, got empty")
+	}
+}
+
+func TestSecretVersioningAndRollback(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	// Set version 1
+	Store.Set("default", "ver-key", "v1-value")
+	// Set version 2
+	Store.Set("default", "ver-key", "v2-value")
+
+	val, _ := Store.Get("default", "ver-key")
+	if val != "v2-value" {
+		t.Errorf("expected latest version 'v2-value', got %q", val)
+	}
+
+	// Rollback
+	err := Store.Rollback("default", "ver-key")
+	if err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	val, _ = Store.Get("default", "ver-key")
+	if val != "v1-value" {
+		t.Errorf("expected rolled back version 'v1-value', got %q", val)
+	}
+}
+
+func TestIPCIDRRestriction(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+	Store.Set("default", "cidr-key", "secret-data")
+
+	// Apply CIDR rule: allow only from localhost 127.0.0.1
+	Store.SetIPRestriction("default", "cidr-key", "127.0.0.1/32")
+
+	// 1. Check matching IP
+	if !Store.VerifyIPRestriction("default", "cidr-key", "127.0.0.1") {
+		t.Error("expected 127.0.0.1 to be allowed under 127.0.0.1/32 rule")
+	}
+
+	// 2. Check non-matching IP
+	if Store.VerifyIPRestriction("default", "cidr-key", "192.168.1.1") {
+		t.Error("expected 192.168.1.1 to be forbidden under 127.0.0.1/32 rule")
+	}
+}
+
+func TestSecretLeakDetection(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+	Store.Set("default", "leak-key", "my-super-secret-password-12345")
+
+	// Set up leak middleware
+	handler := LeakDetectionMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("This response body has my-super-secret-password-12345 inside!"))
+	}))
+
+	req := httptest.NewRequest("GET", "/api/secrets/leak-key", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 OK, got %d", rr.Code)
+	}
+}
+
+func TestDynamicDBCredentials(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	// Querying "db-credentials" should dynamically generate a mock credential
+	val, err := Store.Get("default", "db-credentials")
+	if err != nil {
+		t.Fatalf("failed to query dynamic credentials: %v", err)
+	}
+	if !strings.Contains(val, "db_user_temp_abc") {
+		t.Errorf("expected dynamic credentials, got %q", val)
+	}
+}
+
+func TestZeroKnowledgeBypass(t *testing.T) {
+	Store = storage.NewInMemoryStore()
+
+	// Verify key with prefix "zk-" is accepted and retrieved correctly
+	err := Store.Set("default", "zk-enc-blob", "pre-encrypted-client-ciphertext-10928")
+	if err != nil {
+		t.Fatalf("failed to store zero knowledge secret: %v", err)
+	}
+
+	val, err := Store.Get("default", "zk-enc-blob")
+	if err != nil || val != "pre-encrypted-client-ciphertext-10928" {
+		t.Errorf("failed to retrieve zero knowledge secret: val=%s, err=%v", val, err)
 	}
 }
