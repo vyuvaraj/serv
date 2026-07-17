@@ -5467,6 +5467,188 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// --- Locks & Secrets Management Views (EI.3) ---
+
+function fetchLocks() {
+  console.log('[ServConsole] Fetching active locks...');
+  const tbody = document.getElementById('locks-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading active leases...</td></tr>';
+
+  fetch('/api/locks')
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(locks => {
+      if (!locks || locks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No active leases</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      locks.forEach(l => {
+        const tr = document.createElement('tr');
+        const expiresAt = new Date(l.expires_at);
+        const diffMs = expiresAt - new Date();
+        const expiresStr = diffMs > 0 ? `${Math.round(diffMs / 1000)}s` : 'expired';
+
+        tr.innerHTML = `
+          <td><strong>${l.key}</strong></td>
+          <td><code>${l.owner || l.client_id}</code></td>
+          <td><span class="badge badge-info">${l.fencing_token}</span></td>
+          <td>${expiresStr}</td>
+          <td><code>${(l.waiters || []).join(', ') || 'none'}</code></td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="forceReleaseLock('${l.key}')">Force Release</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Failed to load locks: ${err.message}</td></tr>`;
+    });
+}
+
+function forceReleaseLock(key) {
+  if (!confirm(`Are you sure you want to force release the lease on "${key}"?`)) return;
+  fetch('/api/locks/release', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: key, owner: 'console-admin-override' })
+  })
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    logEvent('admin', `Force released distributed lease: ${key}`);
+    fetchLocks();
+  })
+  .catch(err => alert(`Failed to release lock: ${err.message}`));
+}
+
+function fetchSecrets() {
+  console.log('[ServConsole] Fetching secure credentials...');
+  const tbody = document.getElementById('secrets-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Loading credentials vault...</td></tr>';
+
+  fetch('/api/secrets')
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(data => {
+      const secrets = data.secrets || {};
+      const keys = Object.keys(secrets);
+      if (keys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No credentials registered</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      keys.forEach(k => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${k}</strong></td>
+          <td><code id="secret-val-${k.replace(/\./g, '_')}">••••••••</code></td>
+          <td>
+            <button class="btn btn-secondary btn-sm" onclick="toggleSecretValue('${k}', '${secrets[k]}')">View</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSecret('${k}')">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Failed to load secrets: ${err.message}</td></tr>`;
+    });
+}
+
+function toggleSecretValue(key, val) {
+  const el = document.getElementById(`secret-val-${key.replace(/\./g, '_')}`);
+  if (!el) return;
+  if (el.textContent === '••••••••') {
+    el.textContent = val;
+  } else {
+    el.textContent = '••••••••';
+  }
+}
+
+// Global logger helper proxy if missing
+if (typeof logEvent !== 'function') {
+  window.logEvent = function(type, msg) { console.log(`[${type}] ${msg}`); };
+}
+
+function deleteSecret(key) {
+  if (!confirm(`Are you sure you want to permanently delete the secret "${key}"?`)) return;
+  fetch(`/api/secrets?key=${encodeURIComponent(key)}`, {
+    method: 'DELETE'
+  })
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    logEvent('admin', `Deleted secret credential: ${key}`);
+    fetchSecrets();
+  })
+  .catch(err => alert(`Failed to delete secret: ${err.message}`));
+}
+
+// Bind to DOMContentLoaded hook for console extensions
+document.addEventListener('DOMContentLoaded', () => {
+  // Bind refresh buttons
+  const rLocks = document.getElementById('btn-refresh-locks');
+  if (rLocks) rLocks.addEventListener('click', fetchLocks);
+
+  const rSecrets = document.getElementById('btn-refresh-secrets');
+  if (rSecrets) rSecrets.addEventListener('click', fetchSecrets);
+
+  // Bind tabs
+  document.querySelectorAll('.tab-btn[data-tab="locks"]').forEach(btn => {
+    btn.addEventListener('click', fetchLocks);
+  });
+  document.querySelectorAll('.tab-btn[data-tab="secrets"]').forEach(btn => {
+    btn.addEventListener('click', fetchSecrets);
+  });
+
+  // Modal actions
+  const addSecretBtn = document.getElementById('btn-add-secret');
+  const secretModal = document.getElementById('create-secret-modal');
+  const closeSecretModal = document.getElementById('btn-close-secret-modal');
+  const secretForm = document.getElementById('create-secret-form');
+
+  if (addSecretBtn && secretModal) {
+    addSecretBtn.addEventListener('click', () => {
+      secretModal.style.display = 'flex';
+    });
+  }
+  if (closeSecretModal && secretModal) {
+    closeSecretModal.addEventListener('click', () => {
+      secretModal.style.display = 'none';
+    });
+  }
+
+  if (secretForm) {
+    secretForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const key = document.getElementById('new-secret-key').value;
+      const val = document.getElementById('new-secret-value').value;
+
+      fetch('/api/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: key, value: val })
+      })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        secretModal.style.display = 'none';
+        secretForm.reset();
+        logEvent('admin', `Stored new secret key: ${key}`);
+        fetchSecrets();
+      })
+      .catch(err => alert(`Failed to save secret: ${err.message}`));
+    });
+  }
+});
+
 
 
 

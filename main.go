@@ -188,6 +188,7 @@ func main() {
 	mux.HandleFunc("/api/cache/stats", tabs.HandleConsoleCacheStats)
 	mux.HandleFunc("/api/cache/clear", tabs.HandleConsoleCacheClear)
 	mux.HandleFunc("/api/locks", tabs.HandleConsoleLocks)
+	mux.HandleFunc("/api/secrets", tabs.HandleConsoleSecrets)
 	mux.HandleFunc("/api/mesh/instances", tabs.HandleConsoleMeshInstances)
 	mux.HandleFunc("/api/registry/packages", tabs.HandleConsoleRegistryPackages)
 	mux.HandleFunc("/api/cloud/services", tabs.HandleConsoleCloudServices)

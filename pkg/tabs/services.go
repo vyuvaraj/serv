@@ -492,3 +492,45 @@ func HandleConsoleLocks(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
 }
+
+func HandleConsoleSecrets(w http.ResponseWriter, r *http.Request) {
+	targetURL := fmt.Sprintf("%s/api/secrets", strings.TrimSuffix(config.ActiveDiscovery.Secret, "/"))
+	client := http.Client{Timeout: 2 * time.Second}
+
+	var req *http.Request
+	var err error
+
+	if r.Method == http.MethodGet {
+		req, err = http.NewRequest("GET", targetURL, nil)
+	} else if r.Method == http.MethodPost {
+		req, err = http.NewRequest("POST", targetURL, r.Body)
+	} else if r.Method == http.MethodDelete {
+		key := r.URL.Query().Get("key")
+		req, err = http.NewRequest("DELETE", targetURL+"/"+key, nil)
+	} else {
+		WriteJSONError(w, r, "Method not allowed", "ERR_METHOD_NOT_ALLOWED", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err != nil {
+		WriteJSONError(w, r, err.Error(), "ERR_INTERNAL", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("X-Tenant-ID", r.Header.Get("X-Tenant-ID"))
+	req.Header.Set("Authorization", "Bearer "+config.ActiveDiscovery.AuthToken)
+	if r.Header.Get("Content-Type") != "" {
+		req.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		WriteJSONError(w, r, "Failed to connect to secret service: "+err.Error(), "ERR_SECRET_CONNECT", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}

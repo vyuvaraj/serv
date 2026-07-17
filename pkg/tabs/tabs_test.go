@@ -91,3 +91,37 @@ func TestHandleConsoleLocks(t *testing.T) {
 		t.Errorf("unexpected locks response: %+v", locks)
 	}
 }
+
+func TestHandleConsoleSecrets(t *testing.T) {
+	// Start mock ServSecret server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/secrets" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"secrets":{"db.pass":"super-secret"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	config.ActiveDiscovery.Secret = server.URL
+
+	req := httptest.NewRequest("GET", "/api/secrets", nil)
+	w := httptest.NewRecorder()
+	HandleConsoleSecrets(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var res map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&res); err != nil {
+		t.Fatalf("failed to decode secrets: %v", err)
+	}
+
+	secrets := res["secrets"].(map[string]any)
+	if secrets["db.pass"] != "super-secret" {
+		t.Errorf("unexpected secrets response: %+v", res)
+	}
+}

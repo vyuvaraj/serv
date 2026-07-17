@@ -379,6 +379,14 @@
             <svg class="icon" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
             <span class="tab-label">Dashboards</span>
           </button>
+          <button class="tab-btn" data-tab="locks">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+            <span class="tab-label">Locks (ServLock)</span>
+          </button>
+          <button class="tab-btn" data-tab="secrets">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12.65 11.3c.02-.1.05-.2.05-.3 0-2.21-1.79-4-4-4S4.7 8.79 4.7 11s1.79 4 4 4c.1 0 .2-.03.3-.05l5.7 5.7c.39.39 1.02.39 1.41 0l1.41-1.41c.39-.39.39-1.02 0-1.41l-5.67-5.63zm-3.95.7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+            <span class="tab-label">Secrets (ServSecret)</span>
+          </button>
           <button class="tab-btn" data-tab="docs">
             <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93z"/></svg>
             <span class="tab-label">Documentation</span>
@@ -2117,6 +2125,66 @@
         </div>
       </div>
 
+      <!-- TAB: LOCKS -->
+      <div class="tab-pane" id="tab-locks">
+        <div class="pane-grid">
+          <div class="card glass-card span-3">
+            <div class="card-header">
+              <h2>Active Distributed Leases (ServLock)</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-locks">🔄 Refresh</button>
+            </div>
+            <p class="section-desc">Monitor real-time distributed resource locks, fencing tokens, and process owners.</p>
+            <div class="table-container">
+              <table id="locks-table">
+                <thead>
+                  <tr>
+                    <th>Lock Key</th>
+                    <th>Process Owner</th>
+                    <th>Fencing Token</th>
+                    <th>Expires In</th>
+                    <th>Wait Queue</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="locks-table-body">
+                  <tr><td colspan="6" class="text-center text-muted">No active leases</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SECRETS -->
+      <div class="tab-pane" id="tab-secrets">
+        <div class="pane-grid">
+          <div class="card glass-card span-3">
+            <div class="card-header">
+              <h2>Secure Credentials Vault (ServSecret)</h2>
+              <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-secrets">🔄 Refresh</button>
+                <button class="btn btn-primary btn-sm" id="btn-add-secret">+ Create Secret</button>
+              </div>
+            </div>
+            <p class="section-desc">Manage encrypted service tokens, api keys, and rotate environment keys securely.</p>
+            <div class="table-container">
+              <table id="secrets-table">
+                <thead>
+                  <tr>
+                    <th>Secret Key</th>
+                    <th>Encrypted Value</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="secrets-table-body">
+                  <tr><td colspan="3" class="text-center text-muted">No credentials registered</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 </div>
@@ -2246,6 +2314,29 @@
         <button type="submit" class="btn btn-primary w-100 mt-3">⚡ Provision Topic</button>
       </form>
     </div>
+  </div>
+
+  <!-- Create Secret Modal -->
+  <div class="modal-backdrop" id="create-secret-modal" style="display: none;">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Store New Secret Credential</h3>
+        <button class="modal-close" id="btn-close-secret-modal">&times;</button>
+      </div>
+      <form id="create-secret-form">
+        <div class="form-group">
+          <label for="new-secret-key">Secret Key</label>
+          <input type="text" id="new-secret-key" placeholder="e.g. database.password" required>
+        </div>
+        <div class="form-group">
+          <label for="new-secret-value">Secret Value</label>
+          <input type="password" id="new-secret-value" placeholder="Enter plaintext value to encrypt" required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">🔐 Encrypt & Store</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Diagnostics Terminal Modal -->
   <div class="modal-backdrop" id="diagnostics-terminal-modal" style="display: none;">
     <div class="modal glass-card" style="max-width: 720px; width: 90%;">

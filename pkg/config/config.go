@@ -26,6 +26,7 @@ type ServDiscovery struct {
 	Cloud        string `json:"cloud"`
 	Docs         string `json:"docs"`
 	Lock         string `json:"lock"`
+	Secret       string `json:"secret"`
 	ConsolePort  int    `json:"console_port"`
 	JWTSecret    string `json:"jwt_secret"`
 	OTLPEndpoint string `json:"otlp_endpoint"`
@@ -82,6 +83,7 @@ var (
 	CloudUrl    = flag.String("cloud-url", "http://localhost:8085", "ServCloud base URL")
 	DocsUrl     = flag.String("docs-url", "http://localhost:8084", "ServDocs base URL")
 	LockUrl     = flag.String("lock-url", "http://localhost:8089", "ServLock base URL")
+	SecretUrl   = flag.String("secret-url", "http://localhost:8091", "ServSecret base URL")
 	AuthToken   = flag.String("auth-token", "gateway-secret-token", "Default API Auth token to use for downstream proxying")
 	GateConfig  = flag.String("gate-config", "../ServGate/config.json", "Path to ServGate config.json")
 	StartAll    = flag.Bool("start-all", false, "Boot all ecosystem services in dependency order on startup")
@@ -108,6 +110,7 @@ func LoadDiscovery() ServDiscovery {
 		Cloud:        *CloudUrl,
 		Docs:         *DocsUrl,
 		Lock:         *LockUrl,
+		Secret:       *SecretUrl,
 		ConsolePort:  *Port,
 		AuthToken:    *AuthToken,
 		GateConfig:   *GateConfig,
@@ -157,6 +160,8 @@ func LoadDiscovery() ServDiscovery {
 	if manifest.Registry != "" { d.Registry = manifest.Registry }
 	if manifest.Cloud != "" { d.Cloud = manifest.Cloud }
 	if manifest.Docs != "" { d.Docs = manifest.Docs }
+	if manifest.Lock != "" { d.Lock = manifest.Lock }
+	if manifest.Secret != "" { d.Secret = manifest.Secret }
 
 	return d
 }
