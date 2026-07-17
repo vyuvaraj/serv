@@ -187,6 +187,7 @@ func TestKeyRotationAndCaching(t *testing.T) {
 func TestAuditTrail(t *testing.T) {
 	// Setup test audit path
 	testAuditLog := "test_audit.log"
+	os.Remove(testAuditLog)
 	storage.SetAuditLogPath(testAuditLog)
 	defer os.Remove(testAuditLog)
 
