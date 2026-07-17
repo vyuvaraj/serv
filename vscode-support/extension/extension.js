@@ -2156,7 +2156,7 @@ class ServServicesPanelProvider {
         body {
             padding: 10px;
             font-family: var(--vscode-font-family, 'Segoe UI', Roboto, sans-serif);
-            color: var(--vscode-editor-foreground, #ccc);
+            color: var(--vscode-sideBar-foreground, var(--vscode-foreground, #ccc));
             background-color: var(--vscode-sideBar-background, #1e1e2e);
             margin: 0;
             user-select: none;
@@ -2168,7 +2168,7 @@ class ServServicesPanelProvider {
             flex-direction: column;
             gap: 4px;
             margin-bottom: 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+            border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.2));
             padding-bottom: 10px;
         }
         .header-title {
@@ -2177,15 +2177,15 @@ class ServServicesPanelProvider {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            color: var(--vscode-foreground, #fff);
+            color: var(--vscode-sideBarTitle-foreground, var(--vscode-foreground, #fff));
         }
         .offline-badge {
             font-size: 9px;
-            background: rgba(235, 94, 40, 0.15);
-            color: #eb5e28;
+            background: var(--vscode-badge-background, rgba(235, 94, 40, 0.15));
+            color: var(--vscode-badge-foreground, #eb5e28);
             padding: 2px 6px;
             border-radius: 10px;
-            border: 1px dashed rgba(235, 94, 40, 0.3);
+            border: 1px dashed rgba(235, 94, 40, 0.4);
             text-transform: uppercase;
         }
         .actions-row {
@@ -2195,9 +2195,9 @@ class ServServicesPanelProvider {
         }
         .btn {
             flex: 1;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.08);
-            color: var(--vscode-foreground, #ccc);
+            background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.1));
+            border: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.2));
+            color: var(--vscode-button-secondaryForeground, var(--vscode-sideBar-foreground, #ccc));
             padding: 4px;
             font-size: 11px;
             border-radius: 4px;
@@ -2209,8 +2209,8 @@ class ServServicesPanelProvider {
             transition: all 0.2s ease;
         }
         .btn:hover {
-            background: rgba(255,255,255,0.1);
-            color: #fff;
+            background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
+            color: var(--vscode-foreground, #fff);
         }
 
         /* Search input */
@@ -2220,13 +2220,16 @@ class ServServicesPanelProvider {
         }
         .search-input {
             width: 100%;
-            background: rgba(0,0,0,0.2);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: var(--vscode-input-background, rgba(0,0,0,0.2));
+            border: 1px solid var(--vscode-input-border, rgba(128,128,128,0.2));
             border-radius: 4px;
-            padding: 5px 8px;
-            color: #fff;
+            padding: 6px 8px;
+            color: var(--vscode-input-foreground, #fff);
             font-size: 11px;
             box-sizing: border-box;
+        }
+        .search-input::placeholder {
+            color: var(--vscode-input-placeholderForeground, rgba(255,255,255,0.4));
         }
         .search-input:focus {
             outline: none;
@@ -2240,8 +2243,8 @@ class ServServicesPanelProvider {
             gap: 8px;
         }
         .service-card {
-            background: rgba(255,255,255,0.02);
-            border: 1px solid rgba(255,255,255,0.05);
+            background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,0.03));
+            border: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.15));
             border-radius: 6px;
             padding: 8px 10px;
             display: flex;
@@ -2250,8 +2253,8 @@ class ServServicesPanelProvider {
             transition: transform 0.2s ease, border-color 0.2s ease;
         }
         .service-card:hover {
-            background: rgba(255,255,255,0.04);
-            border-color: rgba(255,255,255,0.1);
+            background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.06));
+            border-color: var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.3));
         }
         .service-info {
             display: flex;
@@ -2286,11 +2289,12 @@ class ServServicesPanelProvider {
         .service-name {
             font-size: 12px;
             font-weight: 600;
-            color: var(--vscode-foreground, #fff);
+            color: var(--vscode-sideBar-foreground, var(--vscode-foreground, #fff));
         }
         .service-port {
             font-size: 10px;
-            color: rgba(255,255,255,0.4);
+            color: var(--vscode-descriptionForeground, rgba(128,128,128,0.7));
+            font-weight: 500;
         }
         
         /* Stats row */
@@ -2298,10 +2302,11 @@ class ServServicesPanelProvider {
             display: flex;
             justify-content: space-between;
             font-size: 9.5px;
-            color: rgba(255,255,255,0.4);
-            background: rgba(0,0,0,0.15);
-            padding: 3px 6px;
+            color: var(--vscode-descriptionForeground, rgba(128,128,128,0.8));
+            background: var(--vscode-list-hoverBackground, rgba(0,0,0,0.08));
+            padding: 4px 8px;
             border-radius: 4px;
+            border: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.08));
         }
 
         /* Card actions */
@@ -2310,34 +2315,38 @@ class ServServicesPanelProvider {
             justify-content: flex-end;
             gap: 6px;
             margin-top: 2px;
-            border-top: 1px solid rgba(255,255,255,0.03);
+            border-top: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.1));
             padding-top: 6px;
         }
         .action-icon {
-            background: none;
-            border: none;
+            background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.05));
+            border: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.15));
             cursor: pointer;
-            padding: 2px 6px;
-            border-radius: 3px;
+            padding: 3px 8px;
+            border-radius: 4px;
             font-size: 10px;
-            color: rgba(255,255,255,0.4);
+            color: var(--vscode-sideBar-foreground, var(--vscode-foreground, #ccc));
             transition: all 0.2s ease;
             display: flex;
             align-items: center;
             gap: 3px;
         }
         .action-icon:hover {
-            background: rgba(255,255,255,0.08);
-            color: #fff;
+            background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.15));
+            border-color: var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.3));
+            color: var(--vscode-foreground, #fff);
         }
         .action-icon.dashboard:hover {
             color: #4ec9b0;
+            border-color: rgba(78, 201, 176, 0.4);
         }
         .action-icon.browser:hover {
             color: #569cd6;
+            border-color: rgba(86, 156, 214, 0.4);
         }
         .action-icon.restart:hover {
             color: #dcdcaa;
+            border-color: rgba(220, 220, 170, 0.4);
         }
 
         /* Animations */
