@@ -46,6 +46,9 @@ func Analyze(program *Program) []Diagnostic {
 	// Check for dead imports
 	diags = append(diags, analyzeDeadImports(program)...)
 
+	// CD.78: Cross-service dead code detection
+	diags = append(diags, analyzeCrossServiceDeadCode(program)...)
+
 	// Check for SQL injection risks
 	diags = append(diags, analyzeSQLInjection(program)...)
 
