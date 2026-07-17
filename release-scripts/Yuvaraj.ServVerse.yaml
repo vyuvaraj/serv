@@ -1,0 +1,34 @@
+# WinGet Manifest for ServVerse Platform
+# Package Identifier: Yuvaraj.ServVerse
+# Version: 3.1.0
+
+PackageIdentifier: Yuvaraj.ServVerse
+PackageVersion: 3.1.0
+PackageName: ServVerse
+Publisher: Yuvaraj
+Author: Yuvaraj
+License: Apache-2.0
+LicenseUrl: https://github.com/vyuvaraj/Serv-lang/blob/main/LICENSE
+ShortDescription: A Programming Language and Microservice Suite for Event-Driven Background Services.
+Description: Serv is a modern DSL designed specifically for building background services, event-driven systems, and API microservices. This package installs the Serv compiler, local database engines, caches, brokers, and the complete ServVerse suite.
+Moniker: servverse
+Tags:
+  - serv
+  - dsl
+  - microservices
+  - compiler
+  - background-services
+  - event-driven
+  - golang
+  - lsp
+
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: https://github.com/vyuvaraj/Serv-lang/releases/download/v3.1.0/ServVerse-3.1.0-windows-setup.exe
+    InstallerSha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 # Default mock sha placeholder
+    Scope: machine
+    UpgradeBehavior: install
+
+ManifestType: singleton
+ManifestVersion: 1.4.0

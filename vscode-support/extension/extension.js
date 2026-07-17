@@ -91,7 +91,8 @@ function activate(context) {
         vscode.commands.registerCommand('serv.initProject',    () => initProject()),
         vscode.commands.registerCommand('serv.deploy',         () => deployToCloud(context)),
         vscode.commands.registerCommand('serv.runCoverage',    () => coverageManager.runCoverage()),
-        vscode.commands.registerCommand('serv.clearCoverage',  () => coverageManager.clearCoverage())
+        vscode.commands.registerCommand('serv.clearCoverage',  () => coverageManager.clearCoverage()),
+        vscode.commands.registerCommand('serv.openPlayground', () => openPlayground(context))
     );
 
     // Status bar integration
@@ -2923,4 +2924,60 @@ class ServCoverageManager {
         return { covered, uncovered, total: covered.length + uncovered.length };
     }
 }
+
+function openPlayground(context) {
+    const cp = require('child_process');
+    const port = 8095;
+    
+    let compilerPath = vscode.workspace.getConfiguration('serv').get('compilerPath') || 'serv';
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders) {
+        const root = workspaceFolders[0].uri.fsPath;
+        const winPath = path.join(root, 'serv.exe');
+        if (fs.existsSync(winPath)) compilerPath = winPath;
+    }
+    
+    // Spawn compiler playground command
+    const child = cp.spawn(compilerPath, ['playground', '--port', port.toString()], {
+        cwd: workspaceFolders ? workspaceFolders[0].uri.fsPath : undefined,
+        shell: true
+    });
+    
+    const panel = vscode.window.createWebviewPanel(
+        'servPlayground',
+        'Serv Web Playground',
+        vscode.ViewColumn.One,
+        {
+            enableScripts: true,
+            retainContextWhenHidden: true
+        }
+    );
+    
+    panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        html, body, iframe {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+            overflow: hidden;
+            background: #1e1e2e;
+        }
+    </style>
+</head>
+<body>
+    <iframe src="http://localhost:${port}"></iframe>
+</body>
+</html>`;
+
+    panel.onDidDispose(() => {
+        child.kill();
+    });
+}
+
 

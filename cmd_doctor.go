@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -132,12 +134,53 @@ func runDoctor(integration bool) {
 	}
 
 	checkTelemetryPipeline()
+	checkWasmRuntime()
+	checkCompilerPlugins()
 
 	if hasErrors {
 		fmt.Println("\n❌ Doctor check complete with errors. Some services are down or misconfigured.")
 		osExit(1)
 	}
 	fmt.Println("\n✅ All configured services are online and compatible!")
+}
+
+func checkWasmRuntime() {
+	fmt.Println("\n🌐 Running WASM Runtime Diagnostics...")
+	runtimes := []string{"node", "wasmtime", "wasmer"}
+	foundAny := false
+	for _, rt := range runtimes {
+		// exec is imported as os/exec in Go
+		path, err := exec.LookPath(rt)
+		if err == nil {
+			fmt.Printf("✅ Found WASM runtime %q at: %s\n", rt, path)
+			foundAny = true
+		}
+	}
+	if !foundAny {
+		fmt.Println("⚠️ Warning: No local WASM execution runtime (node, wasmtime, wasmer) was found in PATH.")
+		fmt.Println("To run compiled WASM targets, please install Node.js or Wasmtime.")
+	}
+}
+
+func checkCompilerPlugins() {
+	fmt.Println("\n🔌 Running Compiler Plugin Diagnostics...")
+	// Search in vscode-support/extension/package.json
+	packageJsonPath := filepath.Join("vscode-support", "extension", "package.json")
+	data, err := os.ReadFile(packageJsonPath)
+	if err != nil {
+		fmt.Println("⚠️ Warning: VS Code extension package.json not found in local workspace.")
+		return
+	}
+
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		fmt.Printf("⚠️ Warning: failed to parse VS Code package.json: %v\n", err)
+		return
+	}
+
+	fmt.Printf("✅ Serv VS Code Extension (local plugin) version: v%s\n", pkg.Version)
 }
 
 func checkTelemetryPipeline() {
@@ -165,3 +208,4 @@ func checkTelemetryPipeline() {
 	defer resp.Body.Close()
 	fmt.Printf("✅ Telemetry Pipeline OK (Collector healthz returned HTTP %d)\n", resp.StatusCode)
 }
+

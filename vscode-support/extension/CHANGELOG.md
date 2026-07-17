@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.0
+
+### Added
+- **`serv.openPlayground` Command (CD.121)**: Embedded Monaco Web Playground directly inside a VS Code Webview panel, launching a local background compiler sandbox server.
+- **Extended `serv doctor` (17.1)**: Enhanced diagnostics to automatically verify installed local WASM runtimes (node, wasmtime, wasmer) and local plugin/extension versions.
+- **WinGet Installer Manifest (PKG.7)**: Created the `Yuvaraj.ServVerse.yaml` package manifest under `release-scripts/` to support automated Winget platform setups.
+
+### Fixed
+- **LSP Windows URI Normalization**: Fixed a bug where differences in Windows path/URI casing and URL-encoding caused autocomplete lookups to return empty results.
+- **Robust JSON-RPC Parser**: Fixed a stream desynchronization hang by parsing multiple incoming headers (e.g. `Content-Type`) correctly and using `io.ReadFull`.
+- **Trace Options Fix**: Fixed a `LanguageClient` start hang by correcting the trace configuration type to string `'verbose'` for compatibility with `vscode-languageclient` v9.
+
 ## 3.0.7
 
 ### Added
