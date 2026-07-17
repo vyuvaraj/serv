@@ -311,6 +311,8 @@ func StartServer() interface{} {
 	mux.HandleFunc("/metrics", handleMetrics)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/ready", handleReady)
+	mux.HandleFunc("/api/changelog", handleChangelog)
+	mux.HandleFunc("/api/v1/changelog", handleChangelog)
 
 	// WebSocket endpoints
 	wsHandlersMu.RLock()
@@ -827,3 +829,41 @@ func sanitizeInterface(val interface{}) interface{} {
 		return v
 	}
 }
+
+func handleChangelog(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	if data, err := os.ReadFile("api_changelog.json"); err == nil {
+		w.Write(data)
+		return
+	}
+	if data, err := os.ReadFile(".build/api_changelog.json"); err == nil {
+		w.Write(data)
+		return
+	}
+
+	routesMu.Lock()
+	defer routesMu.Unlock()
+	
+	type Change struct {
+		Action    string `json:"action"`
+		Method    string `json:"method"`
+		Path      string `json:"path"`
+		Timestamp string `json:"timestamp"`
+	}
+	
+	var changes []Change
+	for method, pathMap := range routes {
+		for path := range pathMap {
+			changes = append(changes, Change{
+				Action:    "added",
+				Method:    method,
+				Path:      path,
+				Timestamp: time.Now().Format(time.RFC3339),
+			})
+		}
+	}
+	
+	json.NewEncoder(w).Encode(changes)
+}
+
