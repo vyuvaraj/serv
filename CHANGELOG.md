@@ -1,9 +1,17 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.1.0] - 2026-07-17
+
+### Added
+- Implemented `serv changelog` CLI command to display and filter the ecosystem release notes.
+- Added `--attach <host:port>` flag to `serv repl` to verify connectivity to a live service before prompt startup.
+- Implemented cross-service dead route static linter checking (`CD.78`).
+- Added automated dependencies start mapping to `serv dev` environment CLI.
 
 ## [1.0.0] - 2026-07-15
 
