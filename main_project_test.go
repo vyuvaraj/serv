@@ -145,8 +145,8 @@ func TestNewAndDeployK8s(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read deployment.yaml: %v", err)
 	}
-	if !contains(string(depContent), "config-volume") {
-		t.Error("expected deployment.yaml to contain config-volume mount reference")
+	if !testContains(string(depContent), "config-volume") {
+		t.Errorf("expected deployment to mount config volume")
 	}
 }
 
@@ -183,7 +183,7 @@ route "POST" "/ask" (req) {
 	}
 }
 
-func contains(s, substr string) bool {
+func testContains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || stringsContains(s, substr))
 }
 
