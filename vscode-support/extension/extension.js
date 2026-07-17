@@ -139,6 +139,22 @@ function activate(context) {
         )
     );
 
+     // Register a virtual document provider to resolve 'serv://' schemes inside editor panes
+     context.subscriptions.push(
+         vscode.workspace.registerTextDocumentContentProvider('serv', {
+             provideTextDocumentContent(uri) {
+                 const serviceName = uri.authority;
+                 const servicePath = uri.path;
+                 return `// Virtual definition for Serv service: ${serviceName}\n` +
+                        `// Path referenced: ${servicePath}\n\n` +
+                        `service "${serviceName}" {\n` +
+                        `    // Resolved dynamically via LSP serv:// definition link\n` +
+                        `    status: "online"\n` +
+                        `}\n`;
+             }
+         })
+     );
+
     // CD.119 — ServVerse Services Activity Bar panel
     const servicesPanelProvider = new ServServicesPanelProvider();
     vscode.window.registerTreeDataProvider('serv-services-panel', servicesPanelProvider);
