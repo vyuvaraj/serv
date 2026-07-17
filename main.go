@@ -76,7 +76,6 @@ func main() {
 			APIKeys:         []string{},
 			CacheTTLMinutes: 5,
 		}
-		// Try parsing SERVSECRET_API_KEYS env if present
 		if envKeys := os.Getenv("SERVSECRET_API_KEYS"); envKeys != "" {
 			cfg.APIKeys = strings.Split(envKeys, ",")
 		}
@@ -115,6 +114,8 @@ func main() {
 		handlers.Store = storage.NewInMemoryStore()
 	} else {
 		handlers.Store = store
+		// Start background tickers for backup and rotation
+		startScheduledTasks(cfg.FilePath, store)
 	}
 
 	mux := http.NewServeMux()
@@ -332,7 +333,6 @@ func runEnvInjector(command, serverURL, tenant, apiKey string) {
 				Value string `json:"value"`
 			}
 			if err := json.NewDecoder(respGet.Body).Decode(&getResp); err == nil {
-				// Inject as environment variable key=value
 				envVar := fmt.Sprintf("%s=%s", getResp.Key, getResp.Value)
 				secretEnvs = append(secretEnvs, envVar)
 			}
@@ -354,4 +354,49 @@ func runEnvInjector(command, serverURL, tenant, apiKey string) {
 	if err := c.Run(); err != nil {
 		log.Fatalf("child command run failed: %v", err)
 	}
+}
+
+// Scheduled Tasks Helpers (SS.7, SS.9)
+func startScheduledTasks(filePath string, store *storage.EncryptedFileStore) {
+	// 1. Backup Ticker (every 24h)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		for range ticker.C {
+			PerformBackup(filePath)
+		}
+	}()
+
+	// 2. Automated Key Rotation Ticker (every 90 days)
+	go func() {
+		ticker := time.NewTicker(90 * 24 * time.Hour)
+		for range ticker.C {
+			PerformKeyRotation(store)
+		}
+	}()
+}
+
+func PerformBackup(filePath string) error {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	backupDir := "backups"
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		return err
+	}
+
+	backupPath := fmt.Sprintf("%s/secrets_%d.enc", backupDir, time.Now().UnixNano())
+	return os.WriteFile(backupPath, data, 0600)
+}
+
+func PerformKeyRotation(store *storage.EncryptedFileStore) error {
+	newKey := make([]byte, 32)
+	if _, err := rand.Read(newKey); err != nil {
+		return err
+	}
+	return store.RotateMasterKey(newKey)
 }
