@@ -358,25 +358,29 @@ func (s *Server) handleRename(msg JSONRPCMessage) {
 			currentPath = strings.TrimPrefix(currentPath, "/")
 		}
 		workspaceDir := filepath.Dir(currentPath)
-		_ = filepath.WalkDir(workspaceDir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".srv") {
-				return nil
+		if workspaceDir != "" && workspaceDir != "." && workspaceDir != "/" && workspaceDir != "\\" {
+			if info, err := os.Stat(workspaceDir); err == nil && info.IsDir() {
+				_ = filepath.WalkDir(workspaceDir, func(path string, d os.DirEntry, err error) error {
+					if err != nil || d.IsDir() || !strings.HasSuffix(path, ".srv") {
+						return nil
+					}
+					fileURI := "file://" + filepath.ToSlash(path)
+					if _, alreadyOpen := s.documents[fileURI]; alreadyOpen {
+						return nil
+					}
+					data, readErr := os.ReadFile(path)
+					if readErr != nil {
+						return nil
+					}
+					docText := string(data)
+					lines := strings.Split(docText, "\n")
+					for lineNum, line := range lines {
+						locations = append(locations, findWordOccurrencesInLine(line, word, lineNum, fileURI)...)
+					}
+					return nil
+				})
 			}
-			fileURI := "file://" + filepath.ToSlash(path)
-			if _, alreadyOpen := s.documents[fileURI]; alreadyOpen {
-				return nil
-			}
-			data, readErr := os.ReadFile(path)
-			if readErr != nil {
-				return nil
-			}
-			docText := string(data)
-			lines := strings.Split(docText, "\n")
-			for lineNum, line := range lines {
-				locations = append(locations, findWordOccurrencesInLine(line, word, lineNum, fileURI)...)
-			}
-			return nil
-		})
+		}
 	}
 	s.mu.RUnlock()
 
