@@ -284,6 +284,9 @@ func main() {
 	case "status":
 		runStatus()
 
+	case "changelog":
+		runChangelog()
+
 	case "monitor":
 		target := "8080"
 		if len(os.Args) >= 3 {
