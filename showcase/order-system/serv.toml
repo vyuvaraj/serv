@@ -1,0 +1,32 @@
+# Serv Project Manifest for the Order Processing System Showcase
+# Defines metadata, build configuration, and environment properties.
+
+name = "order-system"
+version = "1.0.0"
+entry = "main.srv"
+
+[dependencies]
+# Required standard library namespaces
+db = "std"
+cache = "std"
+broker = "std"
+json = "std"
+log = "std"
+
+[env]
+# Default runtime environment variables
+PORT = "4000"
+LOG_LEVEL = "info"
+DATABASE_URL = "sqlite://orders.db"
+BROKER_URL = "in-memory"
+CACHE_URL = "in-memory"
+
+[env.development]
+# Overrides when running in development mode
+LOG_LEVEL = "debug"
+
+[env.production]
+# Overrides when running in production mode (e.g. serv run --env production)
+LOG_LEVEL = "warn"
+PORT = "8080"
+DATABASE_URL = "sqlite:///var/data/orders.db"

@@ -1,5 +1,6 @@
 // API handlers — receives orders and exposes status
 
+
 // Create a new order
 // POST /api/orders  body: {"customer": "Alice", "item": "widget", "quantity": 2}
 export route "POST" "/api/orders" (req) {
@@ -94,4 +95,4 @@ export route "GET" "/api/dashboard" (req) {
 }
 
 // Serve interactive dashboard UI
-http.static("/dashboard", "./web")
+html.static("/dashboard", "./web")
