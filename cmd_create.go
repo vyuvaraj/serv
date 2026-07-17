@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -49,7 +50,12 @@ Serv DSL Syntax Quick Reference:
 
 		var result interface{}
 		if mockResp := os.Getenv("SERV_TEST_AI_RESPONSE"); mockResp != "" {
-			result = mockResp
+			parts := strings.Split(mockResp, "|||")
+			if attempt <= len(parts) {
+				result = parts[attempt-1]
+			} else {
+				result = parts[len(parts)-1]
+			}
 		} else {
 			result = runtime.AIComplete(payload)
 		}
@@ -89,8 +95,18 @@ Serv DSL Syntax Quick Reference:
 				fmt.Printf("Failed to write scaffolded code to %s: %v\n", outputFile, err)
 				os.Exit(1)
 			}
-			fmt.Printf("Successfully scaffolded service code into %s!\n", outputFile)
-			return
+
+			if autoFix {
+				var testBuf bytes.Buffer
+				if runTestsWithWriter(outputFile, false, "", &testBuf, &testBuf) {
+					fmt.Printf("Successfully scaffolded service code into %s (all tests passed)!\n", outputFile)
+					return
+				}
+				errors = append(errors, "Test suite execution failed with output:\n"+testBuf.String())
+			} else {
+				fmt.Printf("Successfully scaffolded service code into %s!\n", outputFile)
+				return
+			}
 		}
 
 		if attempt == maxAttempts {
@@ -99,6 +115,6 @@ Serv DSL Syntax Quick Reference:
 		}
 
 		fmt.Printf("Attempt %d generated code has compiler/analysis errors. Retrying with feedback...\n", attempt)
-		currentPrompt = fmt.Sprintf("%s\n\nYour previous code had compilation errors:\n%s\n\nPlease fix the errors and provide the corrected Serv code.", prompt, strings.Join(errors, "\n"))
+		currentPrompt = fmt.Sprintf("%s\n\nYour previous code had compilation or test failures:\n%s\n\nPlease fix the errors and provide the corrected Serv code.", prompt, strings.Join(errors, "\n"))
 	}
 }

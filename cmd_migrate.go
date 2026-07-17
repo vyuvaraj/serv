@@ -19,7 +19,10 @@ import (
 //
 // Usage: serv migrate [file-or-dir] [--db <connection-string>]
 // Usage: serv migrate [file-or-dir] [--db <connection-string>] [--rollback]
-func runMigrate(target string, dbConn string, rollback bool) {
+// Usage: serv migrate [file-or-dir] [--db <connection-string>]
+// Usage: serv migrate [file-or-dir] [--db <connection-string>] [--rollback]
+// Usage: serv migrate [file-or-dir] [--db <connection-string>] [--dry-run]
+func runMigrate(target string, dbConn string, rollback bool, dryRun bool) {
 	if target == "" {
 		target = "."
 	}
@@ -63,65 +66,95 @@ func runMigrate(target string, dbConn string, rollback bool) {
 	}
 	defer db.Close()
 
-	// Ensure migration tracking table exists
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS serv_schema_migrations (
-		table_name TEXT PRIMARY KEY,
-		applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`); err != nil {
-		fmt.Printf("Failed to create migration tracking table: %v\n", err)
-		os.Exit(1)
+	// Ensure migration tracking table exists (only if not dry-run)
+	if !dryRun {
+		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS serv_schema_migrations (
+			table_name TEXT PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+			fmt.Printf("Failed to create migration tracking table: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if rollback {
-		fmt.Println("🔄 Rolling back schema changes...")
+		if dryRun {
+			fmt.Println("\033[33m🔍 Dry-run: Reverting/rolling back schema modifications (preview):\033[0m")
+		} else {
+			fmt.Println("🔄 Rolling back schema changes...")
+		}
 		rolledBack := 0
 		for _, td := range tables {
-			changed, err := rollbackTableDecl(db, td)
+			changed, err := rollbackTableDecl(db, td, dryRun)
 			if err != nil {
 				fmt.Printf("  ✗ %s rollback failed: %v\n", td.Name, err)
 				continue
 			}
 			if changed {
 				rolledBack++
-				fmt.Printf("  ✓ %s: rolled back schema modifications\n", td.Name)
+				if dryRun {
+					fmt.Printf("  ✓ %s: schema modifications would be rolled back\n", td.Name)
+				} else {
+					fmt.Printf("  ✓ %s: rolled back schema modifications\n", td.Name)
+				}
 			} else {
 				fmt.Printf("  - %s: no rollback actions needed\n", td.Name)
 			}
 		}
 		if rolledBack > 0 {
-			fmt.Printf("Rollback complete: %d table(s) updated/reverted.\n", rolledBack)
+			if dryRun {
+				fmt.Printf("\033[33mDry-run complete: %d table(s) would be updated/reverted.\033[0m\n", rolledBack)
+			} else {
+				fmt.Printf("Rollback complete: %d table(s) updated/reverted.\n", rolledBack)
+			}
 		} else {
 			fmt.Println("No rollback actions performed.")
 		}
 		return
 	}
 
+	if dryRun {
+		fmt.Println("\033[33m🔍 Dry-run: Applying schema migrations (preview):\033[0m")
+	}
+
 	// Apply each table declaration
 	applied := 0
 	for _, td := range tables {
-		changed, err := applyTableDecl(db, td)
+		changed, err := applyTableDecl(db, td, dryRun)
 		if err != nil {
 			fmt.Printf("  ✗ %s: %v\n", td.Name, err)
 			continue
 		}
 		if changed {
 			applied++
-			fmt.Printf("  ✓ %s: schema applied\n", td.Name)
+			if dryRun {
+				fmt.Printf("  ✓ %s: schema would be applied\n", td.Name)
+			} else {
+				fmt.Printf("  ✓ %s: schema applied\n", td.Name)
+			}
 		} else {
 			fmt.Printf("  - %s: already up to date\n", td.Name)
 		}
 	}
 
 	fmt.Println()
-	if applied > 0 {
-		fmt.Printf("Migration complete: %d table(s) created/updated.\n", applied)
+	if dryRun {
+		if applied > 0 {
+			fmt.Printf("\033[33mDry-run complete. %d table(s) would be created/updated.\033[0m\n", applied)
+		} else {
+			fmt.Println("Database schema is already up to date (no actions needed).")
+		}
 	} else {
-		fmt.Println("Database schema is already up to date.")
+		if applied > 0 {
+			fmt.Printf("Migration complete: %d table(s) created/updated.\n", applied)
+		} else {
+			fmt.Println("Database schema is already up to date.")
+		}
 	}
 }
 
 // rollbackTableDecl reverts columns that are in the database but NOT in the TableDecl.
-func rollbackTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
+func rollbackTableDecl(db *sql.DB, td *compiler.TableDecl, dryRun bool) (bool, error) {
 	existingCols, err := getExistingColumns(db, td.Name)
 	if err != nil {
 		// Table might not exist at all, skip
@@ -138,11 +171,16 @@ func rollbackTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
 		// If column is in db but NOT declared in srv, drop it (rollback)
 		if !declaredCols[colName] {
 			dropSQL := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", td.Name, colName)
-			if _, err := db.Exec(dropSQL); err != nil {
-				// Fallback: if DROP COLUMN is unsupported by old engine version, continue
-				continue
+			if dryRun {
+				printDryRunSQL(dropSQL, false)
+				rolledBack = true
+			} else {
+				if _, err := db.Exec(dropSQL); err != nil {
+					// Fallback: if DROP COLUMN is unsupported by old engine version, continue
+					continue
+				}
+				rolledBack = true
 			}
-			rolledBack = true
 		}
 	}
 	return rolledBack, nil
@@ -150,7 +188,7 @@ func rollbackTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
 
 // applyTableDecl checks if the table exists in the DB and creates or alters it.
 // Returns true if any SQL was executed.
-func applyTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
+func applyTableDecl(db *sql.DB, td *compiler.TableDecl, dryRun bool) (bool, error) {
 	// Check if table exists (SQLite)
 	var count int
 	err := db.QueryRow(
@@ -163,6 +201,10 @@ func applyTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
 	if count == 0 {
 		// Table doesn't exist — generate CREATE TABLE
 		createSQL := tableToSQL(td)
+		if dryRun {
+			printDryRunSQL(createSQL, true)
+			return true, nil
+		}
 		if _, err := db.Exec(createSQL); err != nil {
 			return false, fmt.Errorf("CREATE TABLE failed: %w", err)
 		}
@@ -190,14 +232,35 @@ func applyTableDecl(db *sql.DB, td *compiler.TableDecl) (bool, error) {
 					alterSQL += " DEFAULT " + defVal
 				}
 			}
-			if _, err := db.Exec(alterSQL); err != nil {
-				return false, fmt.Errorf("ALTER TABLE failed for column %s: %w", col.Name, err)
+			if dryRun {
+				printDryRunSQL(alterSQL, true)
+				altered = true
+			} else {
+				if _, err := db.Exec(alterSQL); err != nil {
+					return false, fmt.Errorf("ALTER TABLE failed for column %s: %w", col.Name, err)
+				}
+				fmt.Printf("    + added column %s.%s\n", td.Name, col.Name)
+				altered = true
 			}
-			fmt.Printf("    + added column %s.%s\n", td.Name, col.Name)
-			altered = true
 		}
 	}
 	return altered, nil
+}
+
+func printDryRunSQL(sqlStr string, isAdd bool) {
+	lines := strings.Split(sqlStr, "\n")
+	prefix := "+"
+	color := "\033[32m" // Green
+	if !isAdd {
+		prefix = "-"
+		color = "\033[31m" // Red
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fmt.Printf("%s%s %s\033[0m\n", color, prefix, line)
+	}
 }
 
 // getExistingColumns returns a set of lowercase column names for a table.

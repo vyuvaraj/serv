@@ -369,6 +369,7 @@ func main() {
 		migrateCmd := flag.NewFlagSet("migrate", flag.ExitOnError)
 		dbFlag := migrateCmd.String("db", "", "Database connection string (e.g. sqlite://mydb.db). Falls back to $DATABASE_URL")
 		rollbackFlag := migrateCmd.Bool("rollback", false, "Roll back structural schema changes (e.g., dropping columns or tables)")
+		dryRunFlag := migrateCmd.Bool("dry-run", false, "Preview structural schema changes with a colored diff without executing them")
 		if err := migrateCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Printf("Error parsing arguments: %v\n", err)
 			os.Exit(1)
@@ -378,7 +379,7 @@ func main() {
 		if len(args) >= 1 {
 			target = args[0]
 		}
-		runMigrate(target, *dbFlag, *rollbackFlag)
+		runMigrate(target, *dbFlag, *rollbackFlag, *dryRunFlag)
 
 	case "lsp-action":
 		runLspActionCmd(os.Args[2:])
@@ -417,7 +418,7 @@ func printUsage() {
 	fmt.Println("  serv audit                                 Audit Go/Serv dependencies for vulnerabilities")
 	fmt.Println("  serv doctor                                Run compatibility and health checks on all Servverse services")
 	fmt.Println("  serv status                                Print live health, uptime, and latency stats for all services")
-	fmt.Println("  serv migrate [file.srv] [--db <conn>]         Apply declarative `table` schema migrations to the database")
+	fmt.Println("  serv migrate [file.srv] [--db <conn>] [--dry-run] Apply declarative `table` schema migrations to the database")
 	fmt.Println("  serv queue tail <topic> [--host <url>] [--limit <n>]   Tail recent messages on a ServQueue topic")
 	fmt.Println("  serv queue list [--host <url>]                         List all ServQueue topics and consumer counts")
 	fmt.Println("  serv mesh inspect [--host <url>] [--service <name>]   Inspect ServMesh registry and instance list")
