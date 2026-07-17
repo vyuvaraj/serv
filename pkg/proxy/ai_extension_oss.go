@@ -30,7 +30,7 @@ func (h *GatewayHandler) applyAIRequestExtensions(w http.ResponseWriter, r *http
 	if r.Header.Get("X-Dry-Run") == "true" || r.Header.Get("X-Estimate-Only") == "true" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf(`{"status":"dry-run","estimated_cost_usd":%.6f,"estimated_cost_str":"$%.3f"}`, estCost, estCost)))
+		w.Write(fmt.Appendf(nil, `{"status":"dry-run","estimated_cost_usd":%.6f,"estimated_cost_str":"$%.3f"}`, estCost, estCost))
 		return reqBody, false
 	}
 
