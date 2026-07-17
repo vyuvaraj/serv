@@ -99,9 +99,16 @@ func pingInfrastructure(kind string, expr compiler.Expression) error {
 			addr += ":11211"
 		case "servqueue":
 			addr += ":8082"
+		case "mongodb":
+			addr += ":27017"
 		default:
 			return nil
 		}
+	}
+
+	// Skip network check if running in a CI environment (like GitHub Actions)
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return nil
 	}
 
 	d := net.Dialer{Timeout: 1 * time.Second}
