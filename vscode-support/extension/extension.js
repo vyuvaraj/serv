@@ -2319,22 +2319,22 @@ class ServServicesPanelProvider {
             padding-top: 6px;
         }
         .action-icon {
-            background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.05));
+            background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.1));
             border: 1px solid var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.15));
             cursor: pointer;
-            padding: 3px 8px;
+            padding: 3.5px 8px;
             border-radius: 4px;
             font-size: 10px;
-            color: var(--vscode-sideBar-foreground, var(--vscode-foreground, #ccc));
+            color: var(--vscode-button-secondaryForeground, #fff);
             transition: all 0.2s ease;
             display: flex;
             align-items: center;
             gap: 3px;
         }
         .action-icon:hover {
-            background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.15));
+            background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
             border-color: var(--vscode-sideBarSectionHeader-border, rgba(128,128,128,0.3));
-            color: var(--vscode-foreground, #fff);
+            color: var(--vscode-button-foreground, #fff);
         }
         .action-icon.dashboard:hover {
             color: #4ec9b0;
