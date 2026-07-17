@@ -9,11 +9,24 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 )
+
+// normalizeURI normalises a file URI so that Windows drive-letter encoding
+// differences (file:///F:/ vs file:///f:/ vs file:///f%3A/) all map to the
+// same key in the documents map.
+func normalizeURI(uri string) string {
+	decoded, err := url.PathUnescape(uri)
+	if err != nil {
+		decoded = uri
+	}
+	return strings.ToLower(decoded)
+}
 
 // --- LSP Protocol Types ---
 
@@ -176,24 +189,30 @@ func main() {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		header, err := reader.ReadString('\n')
-		if err != nil {
-			break
+		var contentLength int
+		// Read headers until empty line
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if line == "" {
+				break
+			}
+			if strings.HasPrefix(line, "Content-Length:") {
+				lenStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
+				contentLength, _ = strconv.Atoi(lenStr)
+			}
 		}
-		header = strings.TrimSpace(header)
-		if !strings.HasPrefix(header, "Content-Length:") {
-			continue
-		}
-		lengthStr := strings.TrimSpace(strings.TrimPrefix(header, "Content-Length:"))
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
+
+		if contentLength <= 0 {
 			continue
 		}
 
-		reader.ReadString('\n')
-
-		body := make([]byte, length)
-		_, err = reader.Read(body)
+		body := make([]byte, contentLength)
+		// Use io.ReadFull to read the exact number of bytes
+		_, err := io.ReadFull(reader, body)
 		if err != nil {
 			break
 		}
@@ -291,7 +310,8 @@ func (s *Server) handleDidOpen(msg JSONRPCMessage) {
 	json.Unmarshal(msg.Params, &params)
 
 	s.mu.Lock()
-	s.documents[params.TextDocument.URI] = params.TextDocument.Text
+	normURI := normalizeURI(params.TextDocument.URI)
+	s.documents[normURI] = params.TextDocument.Text
 	s.mu.Unlock()
 
 	s.analyzeAndPublishDiagnostics(params.TextDocument.URI, params.TextDocument.Text)
@@ -307,7 +327,8 @@ func (s *Server) handleDidChange(msg JSONRPCMessage) {
 	if len(params.ContentChanges) > 0 {
 		text := params.ContentChanges[len(params.ContentChanges)-1].Text
 		s.mu.Lock()
-		s.documents[params.TextDocument.URI] = text
+		normURI := normalizeURI(params.TextDocument.URI)
+		s.documents[normURI] = text
 		s.mu.Unlock()
 
 		s.analyzeAndPublishDiagnostics(params.TextDocument.URI, text)

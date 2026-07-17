@@ -924,8 +924,11 @@ func (s *Server) handleCompletion(msg JSONRPCMessage) {
 
 	// --- Context detection: check if cursor is right after a namespace dot ---
 	s.mu.RLock()
-	docText := s.documents[params.TextDocument.URI]
+	normURI := normalizeURI(params.TextDocument.URI)
+	docText := s.documents[normURI]
 	s.mu.RUnlock()
+	fmt.Fprintf(os.Stderr, "[LSP] completion uri=%q norm=%q docLen=%d linePrefix=%q\n",
+		params.TextDocument.URI, normURI, len(docText), getLinePrefix(docText, params.Position))
 
 	linePrefix := getLinePrefix(docText, params.Position)
 

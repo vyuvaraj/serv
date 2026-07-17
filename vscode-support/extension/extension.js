@@ -9,15 +9,13 @@ let client;
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
-    // Try to find the LSP binary
     const lspPath = findLspBinary();
 
     if (lspPath) {
         startLspClient(context, lspPath);
     } else {
-        // Fallback: basic features without LSP
         vscode.window.showInformationMessage(
-            'Serv LSP not found. Build it with: go build -o serv-lsp ./lsp/ — Using basic mode.'
+            'Serv LSP not found. Place serv-lsp or serv-lsp.exe in your PATH or workspace root.'
         );
         activateBasicMode(context);
     }
@@ -201,18 +199,42 @@ function runServCommand(command, extraArgs = []) {
     }
 }
 
-function findServBinary() {
-    // Check config
-    const configPath = vscode.workspace.getConfiguration('serv').get('compilerPath');
-    if (configPath && fs.existsSync(configPath)) return configPath;
+function resolveToFile(configuredPath, binaryNames) {
+    if (!configuredPath) return null;
+    // If it's a directory, look for the binary inside it
+    try {
+        const stat = fs.statSync(configuredPath);
+        if (stat.isDirectory()) {
+            for (const name of binaryNames) {
+                const p = path.join(configuredPath, name);
+                if (fs.existsSync(p)) return p;
+            }
+            return null;
+        }
+    } catch (e) { /* path doesn't exist */ }
+    // It's a file path
+    if (fs.existsSync(configuredPath)) return configuredPath;
+    return null;
+}
 
-    // Check workspace root
+function findServBinary() {
+    // Check config (supports both directory and file paths)
+    const configPath = vscode.workspace.getConfiguration('serv').get('compilerPath');
+    const fromConfig = resolveToFile(configPath, ['serv.exe', 'serv']);
+    if (fromConfig) return fromConfig;
+
+    // Check workspace root and parent directories
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (workspaceFolders) {
-        const root = workspaceFolders[0].uri.fsPath;
-        for (const name of ['serv.exe', 'serv']) {
-            const p = path.join(root, name);
-            if (fs.existsSync(p)) return p;
+        let dir = workspaceFolders[0].uri.fsPath;
+        for (let i = 0; i < 4; i++) {
+            for (const name of ['serv.exe', 'serv']) {
+                const p = path.join(dir, name);
+                if (fs.existsSync(p)) return p;
+            }
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
         }
     }
 
@@ -221,38 +243,42 @@ function findServBinary() {
 }
 
 function findLspBinary() {
-    // 1. Check config
-    const configPath = vscode.workspace.getConfiguration('serv').get('lspPath');
-    if (configPath && fs.existsSync(configPath)) {
-        return configPath;
-    }
+    const lspNames = ['serv-lsp.exe', 'serv-lsp'];
 
-    // 1.5. Check colocated with compiler path
+    // 1. Check config (supports both directory and file paths)
+    const configPath = vscode.workspace.getConfiguration('serv').get('lspPath');
+    const fromConfig = resolveToFile(configPath, lspNames);
+    if (fromConfig) return fromConfig;
+
+    // 2. Check colocated with compiler binary
     const servPath = findServBinary();
     if (servPath && servPath !== 'serv') {
         const compilerDir = path.dirname(servPath);
-        for (const name of ['serv-lsp.exe', 'serv-lsp']) {
+        for (const name of lspNames) {
             const p = path.join(compilerDir, name);
             if (fs.existsSync(p)) return p;
         }
     }
 
-    // 2. Check workspace root
+    // 3. Check workspace root and parent directories (up to 4 levels)
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (workspaceFolders) {
-        const root = workspaceFolders[0].uri.fsPath;
-        const candidates = ['serv-lsp.exe', 'serv-lsp'];
-        for (const name of candidates) {
-            const p = path.join(root, name);
-            if (fs.existsSync(p)) return p;
+        let dir = workspaceFolders[0].uri.fsPath;
+        for (let i = 0; i < 4; i++) {
+            for (const name of lspNames) {
+                const p = path.join(dir, name);
+                if (fs.existsSync(p)) return p;
+            }
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
         }
     }
 
-    // 3. Check PATH (assume it's available if the file exists in common locations)
+    // 4. Check PATH directories
     const pathDirs = (process.env.PATH || '').split(path.delimiter);
     for (const dir of pathDirs) {
-        const candidates = ['serv-lsp.exe', 'serv-lsp'];
-        for (const name of candidates) {
+        for (const name of lspNames) {
             const p = path.join(dir, name);
             if (fs.existsSync(p)) return p;
         }
@@ -262,13 +288,29 @@ function findLspBinary() {
 }
 
 function startLspClient(context, lspPath) {
+    const debugChannel = vscode.window.createOutputChannel('Serv LSP Trace');
+    
+    // Log every open document's language ID so we can verify matching
+    vscode.workspace.onDidOpenTextDocument(doc => {
+        debugChannel.appendLine(`[doc opened] uri=${doc.uri.fsPath} languageId="${doc.languageId}" scheme="${doc.uri.scheme}"`);
+    });
+    vscode.workspace.textDocuments.forEach(doc => {
+        debugChannel.appendLine(`[doc already open] uri=${doc.uri.fsPath} languageId="${doc.languageId}"`);
+    });
+
     const serverOptions = {
         run: { command: lspPath, transport: TransportKind.stdio },
         debug: { command: lspPath, transport: TransportKind.stdio }
     };
 
     const clientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'serv' }],
+        documentSelector: [
+            { scheme: 'file', language: 'serv' },
+            { scheme: 'file', pattern: '**/*.srv' },
+        ],
+        outputChannel: debugChannel,
+        traceOutputChannel: debugChannel,
+        trace: 'verbose',
     };
 
     client = new LanguageClient(
@@ -278,7 +320,14 @@ function startLspClient(context, lspPath) {
         clientOptions
     );
 
-    client.start();
+    client.start().then(() => {
+        debugChannel.appendLine('[Serv LSP] Client is ready — completions active');
+        debugChannel.show(true);
+    }).catch(err => {
+        debugChannel.appendLine(`[Serv LSP] Client failed to start: ${err}`);
+        debugChannel.show(true);
+    });
+
     context.subscriptions.push(client);
 }
 
@@ -944,7 +993,6 @@ function launchREPL(context) {
     } else {
         terminal.sendText(`"${servPath}" repl`);
     }
-}
 }
 
 function openMeshTopology(context) {
