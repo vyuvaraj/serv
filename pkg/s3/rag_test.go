@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"servstore/pkg/auth"
 	"servstore/pkg/storage"
@@ -19,7 +21,12 @@ func TestBucketConversationalQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create local store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		store.Close()
+		// Force GC and a micro-sleep to ensure all Windows file handles from Pebble & zstd are fully released
+		runtime.GC()
+		time.Sleep(50 * time.Millisecond)
+	}()
 
 	authProvider := auth.NewAuthProvider("", "", false) // disabled auth for easy testing
 
