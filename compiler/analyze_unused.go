@@ -316,6 +316,8 @@ func collectRefsInExpr(expr Expression, scope *Scope) {
 		collectRefsInExpr(e.Object, scope)
 	case *OptionalMemberExpr:
 		collectRefsInExpr(e.Object, scope)
+	case *SpreadElement:
+		collectRefsInExpr(e.Value, scope)
 	case *MemberAssignExpr:
 		collectRefsInExpr(e.Object, scope)
 		collectRefsInExpr(e.Value, scope)
@@ -577,6 +579,8 @@ func collectExprIdentifiers(expr Expression, refs map[string]bool) {
 		collectExprIdentifiers(e.Object, refs)
 	case *OptionalMemberExpr:
 		collectExprIdentifiers(e.Object, refs)
+	case *SpreadElement:
+		collectExprIdentifiers(e.Value, refs)
 	case *InfixExpr:
 		collectExprIdentifiers(e.Left, refs)
 		collectExprIdentifiers(e.Right, refs)

@@ -113,6 +113,10 @@ func (c *Codegen) getExpressionType(expr Expression) string {
 		return "bool"
 	case *NilLiteral:
 		return "interface{}"
+	case *OptionalMemberExpr:
+		return "interface{}"
+	case *SpreadElement:
+		return "interface{}"
 	case *StructLiteral:
 		return e.TypeName
 	case *SelfExpr:

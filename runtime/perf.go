@@ -320,6 +320,23 @@ func MergeMaps(maps ...interface{}) map[string]interface{} {
 	return result
 }
 
+// MergeArrays merges multiple slices or individual elements into a single []interface{}.
+func MergeArrays(args ...interface{}) []interface{} {
+	var result []interface{}
+	for _, arg := range args {
+		if arg == nil {
+			continue
+		}
+		if s, ok := arg.([]interface{}); ok {
+			result = append(result, s...)
+		} else {
+			result = append(result, arg)
+		}
+	}
+	return result
+}
+
+
 // TryCall executes a function and returns its result.
 // If the function panics, returns nil (error is swallowed).
 // If the function returns a [2]interface{} tuple, returns only the first value

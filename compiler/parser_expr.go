@@ -260,11 +260,22 @@ func (p *Parser) parseArrayLiteral() Expression {
 		return a
 	}
 	p.nextToken() // skip '['
-	a.Elements = append(a.Elements, p.parseExpression(LOWEST))
+
+	parseElement := func() Expression {
+		if p.curToken.Type == TOKEN_SPREAD {
+			tok := p.curToken
+			p.nextToken() // skip '...'
+			expr := p.parseExpression(LOWEST)
+			return &SpreadElement{Token: tok, Value: expr}
+		}
+		return p.parseExpression(LOWEST)
+	}
+
+	a.Elements = append(a.Elements, parseElement())
 	for p.peekToken.Type == TOKEN_COMMA {
 		p.nextToken() // move to comma
 		p.nextToken() // move to expression
-		a.Elements = append(a.Elements, p.parseExpression(LOWEST))
+		a.Elements = append(a.Elements, parseElement())
 	}
 	if !p.expectPeek(TOKEN_RBRACKET) {
 		return nil

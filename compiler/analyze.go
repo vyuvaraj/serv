@@ -324,6 +324,9 @@ func checkExprDomainBoundaries(expr Expression, contextName string, line, col in
 	case *OptionalMemberExpr:
 		diags = append(diags, checkExprDomainBoundaries(e.Object, contextName, line, col)...)
 
+	case *SpreadElement:
+		diags = append(diags, checkExprDomainBoundaries(e.Value, contextName, line, col)...)
+
 	case *MapLiteral:
 		for _, val := range e.Pairs {
 			diags = append(diags, checkExprDomainBoundaries(val, contextName, line, col)...)

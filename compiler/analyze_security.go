@@ -130,6 +130,9 @@ func checkExprSQLInjection(expr Expression) []Diagnostic {
 	case *OptionalMemberExpr:
 		diags = append(diags, checkExprSQLInjection(e.Object)...)
 
+	case *SpreadElement:
+		diags = append(diags, checkExprSQLInjection(e.Value)...)
+
 	case *MapLiteral:
 		for _, val := range e.Pairs {
 			diags = append(diags, checkExprSQLInjection(val)...)

@@ -813,3 +813,59 @@ let allFiles = file.list(".")
 - **`env.int(key, default)`**: Reads environment variable parsed as integer.
 - **`env.bool(key, default)`**: Reads environment variable parsed as boolean.
 
+## Optional Chaining (`?.`)
+
+Enables safe member traversal. If any parent in the path resolves to `nil`, the entire chain short-circuits to `nil` rather than throwing a panic:
+
+```serv
+let city = user?.address?.city
+// If user or user.address is nil, city is set to nil safely
+```
+
+## Spread Operator (`...`)
+
+Merge arrays and maps efficiently using the spread operator syntax:
+
+```serv
+let baseArr = [1, 2]
+let combined = [...baseArr, 3, 4] // [1, 2, 3, 4]
+
+let config = { timeout: 30 }
+let customConfig = { ...config, retries: 3 } // { timeout: 30, retries: 3 }
+```
+
+## Time Namespace Overhaul (`time` namespace)
+
+The `time` namespace has been extended to provide complete parsing, formatting, TZ translation, comparisons, and part-destructuring:
+
+- **`time.parse(str, layout)`**: Parses string representation using specific layout.
+- **`time.format(t, layout)`**: Formats `time` value back to string.
+- **`time.add(t, duration)`**: Adds human-readable duration (e.g. `"24h"`, `"30m"`).
+- **`time.sub(t1, t2)`**: Computes difference in seconds (returns `float64`).
+- **`time.before(t1, t2)`** / **`time.after(t1, t2)`**: Time value comparisons.
+- **`time.inZone(t, timezone)`**: Translates `time` value to IANA timezone location (e.g. `"America/New_York"`).
+- **`time.utc(t)`** / **`time.local(t)`**: Shorthands to translate time location to UTC or Local.
+- **`time.components(t)`**: Destructures a `time` value into its parts: `{ year, month, day, hour, minute, second, weekday, tz }`.
+- **`time.fromUnix(seconds)`**: Converts Unix epoch timestamp back to a time value.
+
+### Predefined Layout Constants
+- **`time.RFC3339`**: RFC3339 layout (`"2006-01-02T15:04:05Z07:00"`)
+- **`time.DATE`**: Date layout (`"2006-01-02"`)
+- **`time.DATETIME`**: Datetime layout (`"2006-01-02 15:04:05"`)
+- **`time.TIME`**: Clock time layout (`"15:04:05"`)
+- **`time.HTTP`**: HTTP header layout (`"Mon, 02 Jan 2006 15:04:05 MST"`)
+
+## Multiline String Dedentation
+
+Backtick raw string literals are automatically dedented at compile-time by stripping the common leading whitespace prefix from each line:
+
+```serv
+let query = `
+    SELECT *
+    FROM users
+    WHERE status = 'active'
+`
+// The common prefix of 4 spaces is automatically stripped from all lines
+```
+
+

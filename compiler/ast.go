@@ -748,6 +748,16 @@ func (a *ArrayLiteral) String() string {
 	return "[" + strings.Join(elements, ", ") + "]"
 }
 
+// SpreadElement represents a ...expr inside an array literal.
+type SpreadElement struct {
+	Token Token // ...
+	Value Expression
+}
+
+func (s *SpreadElement) expressionNode()      {}
+func (s *SpreadElement) TokenLiteral() string { return s.Token.Literal }
+func (s *SpreadElement) String() string       { return "..." + s.Value.String() }
+
 type DurationLiteral struct {
 	Token Token
 	Value string // e.g. "5s", "10m"

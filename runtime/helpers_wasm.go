@@ -643,5 +643,52 @@ func EnvBool(key interface{}, defaultValue interface{}) interface{} {
 	return defaultValue
 }
 
+// ── Time Overhaul Stubs ───────────────────────────────────────────────────────
+
+func TimeParse(str, layout interface{}) interface{} {
+	return [2]interface{}{nil, "TimeParse is not supported in the sandboxed WebAssembly target"}
+}
+
+func TimeFormat(tVal, layout interface{}) interface{} {
+	return ""
+}
+
+func TimeInZone(tVal, tz interface{}) interface{} {
+	return tVal
+}
+
+func TimeUTC(tVal interface{}) interface{} {
+	return tVal
+}
+
+func TimeLocal(tVal interface{}) interface{} {
+	return tVal
+}
+
+func TimeAdd(tVal, durVal interface{}) interface{} {
+	return tVal
+}
+
+func TimeSub(t1Val, t2Val interface{}) interface{} {
+	return 0.0
+}
+
+func TimeBefore(t1Val, t2Val interface{}) interface{} {
+	return false
+}
+
+func TimeAfter(t1Val, t2Val interface{}) interface{} {
+	return false
+}
+
+func TimeFromUnix(seconds interface{}) interface{} {
+	return ""
+}
+
+func TimeComponents(tVal interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
+
 
 

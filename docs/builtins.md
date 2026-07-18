@@ -69,13 +69,35 @@ let obj = json.parse("{\"name\": \"Alice\"}")
 let str = json.stringify({ "name": "Alice" })
 ```
 
-## time — Time Operations
+## time — Date, Time & Timezones
 
 ```serv
-let now = time.now()       // ISO 8601 timestamp
-let ts = time.unix()       // Unix timestamp (int)
-time.sleep(1000)           // Sleep milliseconds
+let now = time.now()                       // Current ISO 8601 timestamp string
+let ts = time.unix()                       // Current Unix epoch timestamp integer
+time.sleep(1000)                           // Sleep for 1000 milliseconds
+
+let t1 = time.parse("2026-07-18", time.DATE) // Parse date string
+let str = time.format(t1, time.RFC3339)    // Format back to string
+let t2 = time.add(t1, "2h30m")             // Add duration
+let diff = time.sub(t2, t1)                // Difference in seconds (float64)
+let after = time.after(t2, t1)             // Compare times (bool)
+let nyTime = time.inZone(t1, "America/New_York") // Convert timezone
+let comp = time.components(t1)             // { year, month, day, hour, minute, second, weekday, tz }
+let t3 = time.fromUnix(1753000000)         // Convert epoch seconds back to time value
 ```
+
+- **`time.parse(str string, layout string) time`**: Parses a date/time string.
+- **`time.format(t time, layout string) string`**: Formats a time value to custom layout.
+- **`time.add(t time, dur string) time`**: Adds human-readable duration.
+- **`time.sub(t1 time, t2 time) float`**: Returns difference `t1 - t2` in seconds.
+- **`time.before(t1 time, t2 time) bool`**: Checks if `t1` is chronologically before `t2`.
+- **`time.after(t1 time, t2 time) bool`**: Checks if `t1` is chronologically after `t2`.
+- **`time.inZone(t time, tz string) time`**: Translates time location to timezone.
+- **`time.utc(t time) time`**: Shorthand to convert to UTC.
+- **`time.local(t time) time`**: Shorthand to convert to local server timezone.
+- **`time.fromUnix(seconds int) time`**: Converts epoch seconds to time value.
+- **`time.components(t time) map`**: Extract parts of the date/time value.
+
 
 ## env — Environment Variables & Secrets
 

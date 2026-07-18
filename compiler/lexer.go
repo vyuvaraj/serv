@@ -572,7 +572,69 @@ func (l *Lexer) readRawString() string {
 	if l.ch == '`' {
 		l.readChar() // skip trailing backtick
 	}
-	return string(buf)
+	return dedent(string(buf))
+}
+
+func dedent(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= 1 {
+		return s
+	}
+
+	var commonPrefix *string
+	for i, line := range lines {
+		if i == 0 && len(strings.TrimSpace(line)) == 0 {
+			continue
+		}
+		if len(strings.TrimSpace(line)) == 0 {
+			continue
+		}
+
+		var leading strings.Builder
+		for _, r := range line {
+			if r == ' ' || r == '\t' {
+				leading.WriteRune(r)
+			} else {
+				break
+			}
+		}
+		leadingStr := leading.String()
+
+		if commonPrefix == nil {
+			commonPrefix = &leadingStr
+		} else {
+			commonPrefixVal := *commonPrefix
+			var common strings.Builder
+			for j := 0; j < len(commonPrefixVal) && j < len(leadingStr); j++ {
+				if commonPrefixVal[j] == leadingStr[j] {
+					common.WriteByte(commonPrefixVal[j])
+				} else {
+					break
+				}
+			}
+			commonStr := common.String()
+			commonPrefix = &commonStr
+		}
+	}
+
+	if commonPrefix == nil || *commonPrefix == "" {
+		return s
+	}
+
+	prefixVal := *commonPrefix
+	var result []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, prefixVal) {
+			result = append(result, strings.TrimPrefix(line, prefixVal))
+		} else {
+			trimmed := line
+			for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t') {
+				trimmed = trimmed[1:]
+			}
+			result = append(result, trimmed)
+		}
+	}
+	return strings.Join(result, "\n")
 }
 
 func isLetter(ch byte) bool {

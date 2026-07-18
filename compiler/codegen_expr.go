@@ -23,6 +23,33 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		return fmt.Sprintf("%f", e.Value), nil
 
 	case *ArrayLiteral:
+		hasSpread := false
+		for _, el := range e.Elements {
+			if _, ok := el.(*SpreadElement); ok {
+				hasSpread = true
+				break
+			}
+		}
+		if hasSpread {
+			var mergeArgs []string
+			for _, el := range e.Elements {
+				if se, ok := el.(*SpreadElement); ok {
+					valStr, err := c.genExpression(se.Value)
+					if err != nil {
+						return "", err
+					}
+					mergeArgs = append(mergeArgs, valStr)
+				} else {
+					elStr, err := c.genExpression(el)
+					if err != nil {
+						return "", err
+					}
+					mergeArgs = append(mergeArgs, elStr)
+				}
+			}
+			return fmt.Sprintf("runtime.MergeArrays(%s)", strings.Join(mergeArgs, ", ")), nil
+		}
+
 		var elements []string
 		for _, el := range e.Elements {
 			elStr, err := c.genExpression(el)
@@ -32,6 +59,9 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			elements = append(elements, elStr)
 		}
 		return fmt.Sprintf("[]interface{}{%s}", strings.Join(elements, ", ")), nil
+
+	case *SpreadElement:
+		return c.genExpression(e.Value)
 
 	case *DurationLiteral:
 		return fmt.Sprintf("%q", e.Value), nil
@@ -82,6 +112,38 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			case "unix":
 				c.imports[`"time"`] = true
 				return "func() int { return int(time.Now().Unix()) }", nil
+			case "RFC3339":
+				return "\"2006-01-02T15:04:05Z07:00\"", nil
+			case "DATE":
+				return "\"2006-01-02\"", nil
+			case "DATETIME":
+				return "\"2006-01-02 15:04:05\"", nil
+			case "TIME":
+				return "\"15:04:05\"", nil
+			case "HTTP":
+				return "\"Mon, 02 Jan 2006 15:04:05 MST\"", nil
+			case "parse":
+				return "runtime.TimeParse", nil
+			case "format":
+				return "runtime.TimeFormat", nil
+			case "inZone":
+				return "runtime.TimeInZone", nil
+			case "utc":
+				return "runtime.TimeUTC", nil
+			case "local":
+				return "runtime.TimeLocal", nil
+			case "add":
+				return "runtime.TimeAdd", nil
+			case "sub":
+				return "runtime.TimeSub", nil
+			case "before":
+				return "runtime.TimeBefore", nil
+			case "after":
+				return "runtime.TimeAfter", nil
+			case "fromUnix":
+				return "runtime.TimeFromUnix", nil
+			case "components":
+				return "runtime.TimeComponents", nil
 			}
 		}
 
