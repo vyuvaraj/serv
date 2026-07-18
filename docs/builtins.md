@@ -344,3 +344,27 @@ let list = file.list(".")
 - **`env.int(key string, default int) float`**: Reads environment variable as integer, returning default if unset/invalid.
 - **`env.bool(key string, default bool) bool`**: Reads environment variable as boolean, returning default if unset/invalid.
 
+## jwt — JSON Web Tokens (HS256)
+
+- **`jwt.sign(payload map, secret string) string`**: Generates a signed HS256 JWT token.
+- **`jwt.verify(token string, secret string) map`**: Decodes and verifies token signature/expiration, returning claims.
+- **`jwt.decode(token string) map`**: Decodes token claims without verifying signature.
+
+## compress — Compression
+
+- **`compress.gzip(data string/bytes) bytes`**: Compresses data using gzip.
+- **`compress.ungzip(bytes bytes) string`**: Decompresses gzip bytes.
+- **`compress.deflate(data string/bytes) bytes`**: Compresses data using deflate.
+- **`compress.inflate(bytes bytes) string`**: Decompresses deflate bytes.
+
+## semver — Semantic Versioning
+
+- **`semver.parse(version string) map`**: Parses semantic version into `{ major, minor, patch }` map.
+- **`semver.compare(v1 string, v2 string) float`**: Returns `-1` if `v1 < v2`, `0` if `v1 == v2`, `1` if `v1 > v2`.
+- **`semver.satisfies(range string, version string) bool`**: Returns true if version satisfies range constraints.
+
+## duration — Human-Readable Durations
+
+- **`duration.parse(dur string) float`**: Parses human-readable duration strings (like `"2h30m"`) to float seconds.
+- **`duration.format(seconds float) string`**: Formats float seconds into human-readable duration string.
+- **`duration.since(ts time) float`**: Returns float seconds elapsed since a past timestamp.

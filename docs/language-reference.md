@@ -866,6 +866,53 @@ let query = `
     WHERE status = 'active'
 `
 // The common prefix of 4 spaces is automatically stripped from all lines
+```## JWT Namespace (`jwt`)
+
+Allows encoding, decoding, and verification of JSON Web Tokens natively:
+
+- **`jwt.sign(payload map, secret string) string`**: Generates a signed HS256 JWT token.
+- **`jwt.verify(token string, secret string) map`**: Decodes and verifies the signature and expiration of a token, returning claims.
+- **`jwt.decode(token string) map`**: Decodes a token without verifying its signature, returning claims.
+
+```serv
+let token = jwt.sign({ "sub": "alice", "admin": true }, "my-secret")
+let claims = jwt.verify(token, "my-secret")
 ```
 
+## Compression Namespace (`compress`)
 
+Provides compression and decompression utilities:
+
+- **`compress.gzip(data)`**: Gzips string or binary data, returning compressed bytes.
+- **`compress.ungzip(bytes)`**: Decompresses gzip bytes, returning a string.
+- **`compress.deflate(data)`**: Deflates string or binary data, returning compressed bytes.
+- **`compress.inflate(bytes)`**: Decompresses deflate bytes, returning a string.
+
+```serv
+let compressed = compress.gzip("hello world")
+let original = compress.ungzip(compressed)
+```
+
+## Semantic Versioning Namespace (`semver`)
+
+Parses and validates semantic version strings:
+
+- **`semver.parse(version string) map`**: Parses version into `{ major, minor, patch }` map.
+- **`semver.compare(v1 string, v2 string) int`**: Compares two versions; returns `-1` if `v1 < v2`, `0` if `v1 == v2`, `1` if `v1 > v2`.
+- **`semver.satisfies(range string, version string) bool`**: Checks if version satisfies range constraints (e.g. `^1.2.3`, `~1.2.3`, `>=2.0.0`).
+
+```serv
+let ok = semver.satisfies("^1.2.3", "1.5.0")
+```
+
+## Duration Namespace (`duration`)
+
+Simplifies operations on human-readable time spans:
+
+- **`duration.parse(dur string) float`**: Parses duration strings (like `"2h30m"`) to float seconds.
+- **`duration.format(seconds float) string`**: Formats seconds to a standard duration string (like `"2h30m0s"`).
+- **`duration.since(ts time) float`**: Returns seconds elapsed since a past timestamp.
+
+```serv
+let secs = duration.parse("1h15m")
+```

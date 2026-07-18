@@ -689,6 +689,67 @@ func TimeComponents(tVal interface{}) interface{} {
 	return map[string]interface{}{}
 }
 
+// ── JWT Stubs ───────────────────────────────────────────────────────────────
+
+func JWTSign(payload, secret interface{}) interface{} {
+	return ""
+}
+
+func JWTVerify(token, secret interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
+func JWTDecode(token interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
+// ── Compress Stubs ──────────────────────────────────────────────────────────
+
+func CompressGzip(data interface{}) interface{} {
+	return []byte{}
+}
+
+func CompressUngzip(bytesVal interface{}) interface{} {
+	return ""
+}
+
+func CompressDeflate(data interface{}) interface{} {
+	return []byte{}
+}
+
+func CompressInflate(bytesVal interface{}) interface{} {
+	return ""
+}
+
+// ── Semver Stubs ────────────────────────────────────────────────────────────
+
+func SemverParse(version interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
+func SemverCompare(v1, v2 interface{}) interface{} {
+	return 0.0
+}
+
+func SemverSatisfies(rangeStr, version interface{}) interface{} {
+	return false
+}
+
+// ── Duration Stubs ──────────────────────────────────────────────────────────
+
+func DurationParse(durStr interface{}) interface{} {
+	return 0.0
+}
+
+func DurationFormat(seconds interface{}) interface{} {
+	return ""
+}
+
+func DurationSince(ts interface{}) interface{} {
+	return 0.0
+}
+
+
 
 
 

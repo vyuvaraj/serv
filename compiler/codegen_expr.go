@@ -79,7 +79,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 
-		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path" || objStr == "regex" || objStr == "math" || objStr == "encoding" || objStr == "hash" || objStr == "runtime.EncodingBase64Namespace{}" || objStr == "runtime.EncodingHexNamespace{}" || objStr == "uuid" || objStr == "rand" || objStr == "url" || objStr == "env")
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path" || objStr == "regex" || objStr == "math" || objStr == "encoding" || objStr == "hash" || objStr == "runtime.EncodingBase64Namespace{}" || objStr == "runtime.EncodingHexNamespace{}" || objStr == "uuid" || objStr == "rand" || objStr == "url" || objStr == "env" || objStr == "jwt" || objStr == "compress" || objStr == "semver" || objStr == "duration")
 		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
 			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
 		}
@@ -365,6 +365,48 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.EnvInt", nil
 			case "bool":
 				return "runtime.EnvBool", nil
+			}
+		}
+		if objStr == "jwt" {
+			switch e.Field {
+			case "sign":
+				return "runtime.JWTSign", nil
+			case "verify":
+				return "runtime.JWTVerify", nil
+			case "decode":
+				return "runtime.JWTDecode", nil
+			}
+		}
+		if objStr == "compress" {
+			switch e.Field {
+			case "gzip":
+				return "runtime.CompressGzip", nil
+			case "ungzip":
+				return "runtime.CompressUngzip", nil
+			case "deflate":
+				return "runtime.CompressDeflate", nil
+			case "inflate":
+				return "runtime.CompressInflate", nil
+			}
+		}
+		if objStr == "semver" {
+			switch e.Field {
+			case "parse":
+				return "runtime.SemverParse", nil
+			case "compare":
+				return "runtime.SemverCompare", nil
+			case "satisfies":
+				return "runtime.SemverSatisfies", nil
+			}
+		}
+		if objStr == "duration" {
+			switch e.Field {
+			case "parse":
+				return "runtime.DurationParse", nil
+			case "format":
+				return "runtime.DurationFormat", nil
+			case "since":
+				return "runtime.DurationSince", nil
 			}
 		}
 		if objStr == "db" {
