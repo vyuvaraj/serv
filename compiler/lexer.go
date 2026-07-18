@@ -523,6 +523,21 @@ func (l *Lexer) readString() string {
 				l.readChar()
 				l.readChar()
 				continue
+			} else if next == 'n' {
+				buf = append(buf, '\n')
+				l.readChar()
+				l.readChar()
+				continue
+			} else if next == 'r' {
+				buf = append(buf, '\r')
+				l.readChar()
+				l.readChar()
+				continue
+			} else if next == 't' {
+				buf = append(buf, '\t')
+				l.readChar()
+				l.readChar()
+				continue
 			}
 		}
 		if l.ch == '\n' {

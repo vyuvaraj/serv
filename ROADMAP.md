@@ -1,4 +1,4 @@
-﻿# Serv Language — Critical Analysis & Roadmap
+# Serv Language — Critical Analysis & Roadmap
 
 ## Executive Summary
 
@@ -297,6 +297,37 @@ These items elevate Serv-lang from a capable DSL to a world-class developer-frie
 | 17.6 | **Compiler Error Code Registry** | Small | Every compiler error has a unique code (e.g. `SRV-E042`) linked to a documentation page with cause, example, and fix. Eliminates cryptic error messages that junior developers can't interpret. | [x] |
 | 17.7 | **Language server code actions** | Medium | Quick-fix suggestions in the LSP: "Extract to function", "Add error handling", "Generate test stub", "Wrap in try/catch". Active refactoring assistance. | [x] |
 | 17.8 | **Pattern matching on types** | Medium | `match value { case s: string => ..., case n: int => ... }` - destructuring match with type narrowing. | [x] |
+| 17.9 | **`exec` namespace — Native Shell/Script Execution** | Small | Add a built-in `exec` namespace (similar to `http`, `json`, `log`) that wraps `os/exec`: `exec.run("powershell -File ./repo-report.ps1")`, returns `{ stdout, stderr, exitCode }`. Eliminates Python daemon wrappers. |  |
+| 17.10 | **`csv` built-in namespace** | Small | Promote `stdlib/csv.srv` to a compiler built-in: `csv.parse(content)` and `csv.stringify(rows, headers)`. Makes CSV as natural as `json.parse()`. |  |
+| 17.11 | **`xml` namespace** | Small | `xml.parse(content)` → map, `xml.stringify(obj)` → XML string. Backed by Go's `encoding/xml`. |  |
+| 17.12 | **`yaml` namespace** | Small | `yaml.parse(content)` and `yaml.stringify(obj)`. Enables reading Kubernetes manifests and CI configs natively. |  |
+| 17.13 | **`file` namespace — Direct File I/O** | Small | `file.read(path)`, `file.write(path, content)`, `file.exists(path)`, `file.list(dir)`, `file.delete(path)`. Backed by Go's `os` package. |  |
+| 17.14 | **`path` namespace** | Small | `path.join(a, b)`, `path.dirname(p)`, `path.basename(p)`, `path.ext(p)`, `path.abs(p)`. Wraps Go's `path/filepath`. |  |
+| 17.15 | **`regex` namespace** | Small | `regex.match(pattern, str)` → bool, `regex.find(pattern, str)` → string, `regex.replace(pattern, str, repl)` → string. Backed by Go's `regexp`. |  |
+| 17.16 | **`math` namespace extensions** | Small | Extend built-in `math` with `math.floor(x)`, `math.ceil(x)`, `math.pow(base, exp)`, `math.sqrt(x)`, `math.log(x)`. Currently only `min/max/abs` exist in stdlib. |  |
+| 17.17 | **`encoding` namespace — Base64 & Hex** | Small | Real implementations: `encoding.base64.encode(str)`, `encoding.base64.decode(str)`, `encoding.hex.encode(str)`. Current stdlib is a stub returning `"base64(input)"`. |  |
+| 17.18 | **`hash` namespace — Cryptographic Hashing** | Small | `hash.md5(str)`, `hash.sha1(str)`, `hash.sha256(str)`, `hash.sha512(str)`, `hash.hmac(key, data, "sha256")`. Backed by Go's `crypto/*`. |  |
+| 17.19 | **`jwt` namespace** | Small | `jwt.sign(payload, secret)` → token, `jwt.verify(token, secret)` → payload, `jwt.decode(token)` → payload (no verify). Currently buried in auth runtime. |  |
+| 17.20 | **`uuid` namespace** | Small | `uuid.v4()` → string, `uuid.v7()` → string. Backed by Go's `github.com/google/uuid`. |  |
+| 17.21 | **`rand` namespace** | Small | `rand.int(min, max)`, `rand.float()`, `rand.string(n)`, `rand.bytes(n)`. Backed by `crypto/rand`. |  |
+| 17.22 | **`url` namespace** | Small | Real `url.parse(str)` → `{ scheme, host, path, query }`, `url.encode(str)`, `url.decode(str)`. Current stdlib only replaces spaces. |  |
+| 17.23 | **`env` namespace — Typed Env Vars** | Small | `env.get("KEY")`, `env.require("KEY")`, `env.int("PORT", 8080)`, `env.bool("DEBUG", false)`. Replaces bare `env("VAR")` nil checks. |  |
+| 17.24 | **`compress` namespace** | Small | `compress.gzip(data)`, `compress.ungzip(bytes)`, `compress.deflate(data)`. Backed by Go's `compress/gzip`. |  |
+| 17.25 | **`semver` namespace** | Small | `semver.parse("1.2.3")` → `{ major, minor, patch }`, `semver.compare(v1, v2)`, `semver.satisfies("^1.0.0", v)`. |  |
+| 17.26 | **`duration` namespace** | Small | `duration.parse("2h30m")` → seconds, `duration.format(9015)` → `"2h30m15s"`, `duration.since(timestamp)`. |  |
+| 17.27 | **`format` namespace** | Small | `format.bytes(1048576)` → `"1 MB"`, `format.number(1_500_000)` → `"1.5M"`, `format.percent(0.856)` → `"85.6%"`. |  |
+| 17.28 | **`ip` namespace** | Small | `ip.isPrivate(addr)`, `ip.inCIDR(addr, range)`, `ip.version(addr)`, `ip.parse(addr)`. |  |
+| 17.29 | **`dns` namespace** | Small | `dns.lookup("example.com")`, `dns.txt(domain)`, `dns.srv(domain)`. Backed by Go's `net` package. |  |
+| 17.30 | **`multipart` namespace** | Small | `multipart.parse(req)` → `{ fields, files }`. Backed by Go's `mime/multipart`. |  |
+| 17.31 | **`diff` namespace** | Small | `diff.text(a, b)` → unified diff, `diff.json(objA, objB)` → change operations array. |  |
+| 17.32 | **`proto` namespace** | Medium | `proto.encode(obj, schema)` → bytes, `proto.decode(bytes, schema)` → map. For gRPC and high-throughput binary serialization. |  |
+| 17.33 | **Optional chaining (`?.`)** | Medium | `user?.address?.city` → nil-safe member access. Compiler emits safe nil checks at each `?.` point. |  |
+| 17.34 | **Spread operator (`...`)** | Medium | `[...arr1, ...arr2]` and `{...defaults, timeout: 30}`. Emits `append()` / map copy in Go. |  |
+| 17.35 | **`time.format()` and `time.parse()`** | Small | `time.format(t, "2006-01-02")`, `time.parse(str, layout)`, `time.utc()`, `time.local()`. |  |
+| 17.36 | **Multiline string dedentation** | Small | Auto-strip common leading whitespace from backtick string literals for clean inline SQL/HTML templates. |  |
+| 17.37 | **`@inline go` blocks — Raw Go Code Embedding** | Medium | Add `@inline go fn name(args) returnType { /* raw Go */ }` declarations. The block is emitted verbatim into the generated `.go` file. Compiler validates the outer signature but passes the body through as-is. Enables one-off Go snippets (e.g. `sha256.New()`, custom parsers) without creating a full Go package. Auto-imports any `import` listed at the top of the block. Maximum-flexibility escape hatch when the stdlib doesn't cover a use case yet. |  |
+| 17.38 | **`extern fn` → `go:` binding improvements** | Small | Extend `extern fn name() from "go:pkg:Func"` to support: (1) block syntax for multiple bindings from one package, (2) method receivers `go:pkg:Type.Method`, (3) auto-alias inference to avoid package name collisions. Currently each extern needs a separate statement and the alias is always `filepath.Base(importPath)`. |  |
+
 
 ## Phase 18: Production Readiness CLI (External Audit - Completed)
 - [x] **serv status Command** � Single command querying all services, showing health, version, uptime, error rate, and p99 latency in a terminal dashboard (OPS.9)
