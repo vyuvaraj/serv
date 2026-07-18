@@ -799,14 +799,26 @@ func DNSSRV(service interface{}) interface{} {
 	return map[string]interface{}{}
 }
 
-// ── Multipart Stubs ──────────────────────────────────────────────────────────
+// ── Diff Stubs ──────────────────────────────────────────────────────────────
 
-func MultipartParse(req interface{}) interface{} {
-	return map[string]interface{}{
-		"fields": map[string]interface{}{},
-		"files":  []interface{}{},
-	}
+func DiffText(aIn, bIn interface{}) interface{} {
+	return ""
 }
+
+func DiffJSON(aIn, bIn interface{}) interface{} {
+	return []interface{}{}
+}
+
+// ── Proto Stubs ─────────────────────────────────────────────────────────────
+
+func ProtoEncode(objIn, schemaIn interface{}) interface{} {
+	return []byte{}
+}
+
+func ProtoDecode(bytesIn, schemaIn interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
 
 
 

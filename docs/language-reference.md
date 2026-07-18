@@ -967,3 +967,46 @@ let username = form.fields.username
 let avatarFile = form.files[0]
 ```
 
+## Structural Difference Namespace (`diff`)
+
+Provides line-by-line and structural differences:
+
+- **`diff.text(a string, b string) string`**: Generates a unified diff output.
+- **`diff.json(a map, b map) array`**: Computes differences between maps and lists, returning RFC 6902-like patch operations.
+
+```serv
+let d = diff.text("line 1\nline 2", "line 1\nline 3")
+```
+
+## Protocol Buffer Namespace (`proto`)
+
+Provides encoding and decoding of protocol buffer structures:
+
+- **`proto.encode(payload map, schema string) bytes`**: Encodes map to protocol buffer binary format based on the schema.
+- **`proto.decode(data bytes, schema string) map`**: Decodes protocol buffer binary data to map based on the schema.
+
+```serv
+let schema = "syntax = \"proto3\"; message User { string name = 1; int32 age = 2; }"
+let binary = proto.encode({ "name": "alice", "age": 30 }, schema)
+```
+
+## Extern Block Declarations (`extern from`)
+
+Group multiple bindings from the same package and resolve method receivers or aliased packages:
+
+```serv
+extern from "go:github.com/google/uuid" {
+    fn new_string() from "NewString"
+    fn parse(str) from "Parse"
+}
+```
+
+Method receivers can be bound using the `TypeName.MethodName` syntax:
+
+```serv
+extern from "go:serv/runtime" {
+    fn mock_meth(obj, val) from "MockReceiver.MockMethod"
+}
+```
+
+

@@ -42,11 +42,37 @@ func (c *Codegen) genExternFnStmt(s *ExternFnStmt) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("missing go call mapping for extern fn: %s", s.Name)
 		}
-		var callArgs []string
-		for _, p := range s.Params {
-			callArgs = append(callArgs, p)
+		if strings.Contains(goCall, ":") {
+			parts := strings.Split(goCall, ":")
+			pkgAlias := parts[0]
+			typeMethod := parts[1]
+
+			subParts := strings.Split(typeMethod, ".")
+			typeName := subParts[0]
+			methodName := subParts[1]
+
+			if len(s.Params) == 0 {
+				return "", fmt.Errorf("method receiver extern fn %s requires at least 1 parameter (the receiver)", s.Name)
+			}
+
+			recv := s.Params[0]
+			var callArgs []string
+			for _, p := range s.Params[1:] {
+				callArgs = append(callArgs, p)
+			}
+
+			out.WriteString(fmt.Sprintf("\tif r, ok := %s.(*%s.%s); ok {\n", recv, pkgAlias, typeName))
+			out.WriteString(fmt.Sprintf("\t\treturn r.%s(%s)\n", methodName, strings.Join(callArgs, ", ")))
+			out.WriteString("\t}\n")
+			out.WriteString(fmt.Sprintf("\tval := %s.(%s.%s)\n", recv, pkgAlias, typeName))
+			out.WriteString(fmt.Sprintf("\treturn val.%s(%s)\n", methodName, strings.Join(callArgs, ", ")))
+		} else {
+			var callArgs []string
+			for _, p := range s.Params {
+				callArgs = append(callArgs, p)
+			}
+			out.WriteString(fmt.Sprintf("\treturn %s(%s)\n", goCall, strings.Join(callArgs, ", ")))
 		}
-		out.WriteString(fmt.Sprintf("\treturn %s(%s)\n", goCall, strings.Join(callArgs, ", ")))
 	} else if strings.HasPrefix(s.Source, "python:") {
 		parts := strings.Split(strings.TrimPrefix(s.Source, "python:"), ":")
 		if len(parts) >= 2 {

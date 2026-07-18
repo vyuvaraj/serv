@@ -51,6 +51,33 @@ func (p *Parser) parseImportStatement() Statement {
 }
 
 func (p *Parser) parseExternStatement() Statement {
+	if p.peekToken.Type == TOKEN_FROM {
+		p.nextToken() // move to FROM
+		if !p.expectPeek(TOKEN_STRING) {
+			return nil
+		}
+		sourcePkg := p.curToken.Literal
+
+		if !p.expectPeek(TOKEN_LBRACE) {
+			return nil
+		}
+
+		block := &BlockStmt{Token: p.curToken}
+		p.nextToken() // consume '{'
+
+		for p.curToken.Type != TOKEN_RBRACE && p.curToken.Type != TOKEN_EOF {
+			if p.curToken.Type == TOKEN_FN {
+				stmt := p.parseExternBlockFn(sourcePkg)
+				if stmt != nil {
+					block.Statements = append(block.Statements, stmt)
+				}
+			}
+			p.nextToken()
+		}
+
+		return block
+	}
+
 	stmt := &ExternFnStmt{Token: p.curToken}
 
 	if !p.expectPeek(TOKEN_FN) {
@@ -91,6 +118,47 @@ func (p *Parser) parseExternStatement() Statement {
 	}
 	stmt.Source = p.curToken.Literal
 
+	return stmt
+}
+
+func (p *Parser) parseExternBlockFn(sourcePkg string) *ExternFnStmt {
+	stmt := &ExternFnStmt{Token: p.curToken}
+
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LPAREN) {
+		return nil
+	}
+
+	stmt.Params = []string{}
+	if p.peekToken.Type != TOKEN_RPAREN {
+		p.nextToken()
+		stmt.Params = append(stmt.Params, p.curToken.Literal)
+
+		for p.peekToken.Type == TOKEN_COMMA {
+			p.nextToken()
+			p.nextToken()
+			stmt.Params = append(stmt.Params, p.curToken.Literal)
+		}
+	}
+
+	if !p.expectPeek(TOKEN_RPAREN) {
+		return nil
+	}
+
+	goFuncName := capitalizeFirst(stmt.Name)
+	if p.peekToken.Type == TOKEN_FROM {
+		p.nextToken() // FROM
+		if !p.expectPeek(TOKEN_STRING) {
+			return nil
+		}
+		goFuncName = p.curToken.Literal
+	}
+
+	stmt.Source = sourcePkg + ":" + goFuncName
 	return stmt
 }
 

@@ -393,3 +393,12 @@ let list = file.list(".")
 
 - **`multipart.parse(req Request) map`**: Parses multipart body of Request, returning `{ fields, files }`.
 
+## diff — Differences and Patching
+
+- **`diff.text(a string, b string) string`**: Generates a unified diff string.
+- **`diff.json(a map, b map) array`**: Returns array of differences between maps.
+
+## proto — Protocol Buffers
+
+- **`proto.encode(payload map, schema string) bytes`**: Encodes payload map into protobuf bytes.
+- **`proto.decode(data bytes, schema string) map`**: Decodes protobuf bytes into a map.

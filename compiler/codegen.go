@@ -22,6 +22,7 @@ type Codegen struct {
 	funcReturnTypes     map[string]string // fnName -> return type
 	funcParamTypes      map[string][]string // fnName -> param types
 	goPackageAliases    map[string]string // alias -> Go package name (e.g. "uuid" -> "uuid")
+	packageAliases      map[string]string // pkgPath -> alias
 	declaredGoFuncs     map[string]string // "pkg:FuncName" -> "pkgname.FuncName"
 	goMultiReturnFuncs  map[string]bool   // "pkgname.FuncName" -> true (multi-return)
 	beforeEachBlocks    []string          // collected beforeEach bodies for tests
@@ -58,6 +59,7 @@ func NewCodegen(program *Program) *Codegen {
 		funcReturnTypes: make(map[string]string),
 		funcParamTypes:  make(map[string][]string),
 		goPackageAliases: make(map[string]string),
+		packageAliases:   make(map[string]string),
 		declaredGoFuncs:  make(map[string]string),
 		goMultiReturnFuncs: make(map[string]bool),
 		actorFields: make(map[string]bool),
@@ -102,6 +104,12 @@ func (c *Codegen) RunPrePass() {
 
 		case *ExternFnStmt:
 			c.extractGoExtern(s)
+		case *BlockStmt:
+			for _, stmt := range s.Statements {
+				if ext, ok := stmt.(*ExternFnStmt); ok {
+					c.extractGoExtern(ext)
+				}
+			}
 		case *DeclareModuleStmt:
 			c.extractDeclareModule(s)
 		case *ExportStmt:
@@ -142,17 +150,73 @@ func (c *Codegen) extractDeclareModule(s *DeclareModuleStmt) {
 	}
 }
 
+func (c *Codegen) getPackageAlias(pkgPath string) string {
+	if alias, ok := c.packageAliases[pkgPath]; ok {
+		return alias
+	}
+	base := filepath.Base(pkgPath)
+	var sb strings.Builder
+	for _, r := range base {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			sb.WriteRune(r)
+		}
+	}
+	sanitizedBase := sb.String()
+	if sanitizedBase == "" {
+		sanitizedBase = "pkg"
+	}
+
+	used := false
+	for _, a := range c.packageAliases {
+		if a == sanitizedBase {
+			used = true
+			break
+		}
+	}
+
+	alias := sanitizedBase
+	if used {
+		counter := 1
+		for {
+			candidate := fmt.Sprintf("%s_%d", sanitizedBase, counter)
+			conflict := false
+			for _, a := range c.packageAliases {
+				if a == candidate {
+					conflict = true
+					break
+				}
+			}
+			if !conflict {
+				alias = candidate
+				break
+			}
+			counter++
+		}
+	}
+	c.packageAliases[pkgPath] = alias
+	if alias == sanitizedBase {
+		c.imports[fmt.Sprintf(`"%s"`, pkgPath)] = true
+	} else {
+		c.imports[fmt.Sprintf(`%s "%s"`, alias, pkgPath)] = true
+	}
+	return alias
+}
+
 func (c *Codegen) extractGoExtern(ext *ExternFnStmt) {
 	if strings.HasPrefix(ext.Source, "go:") {
 		// Format: "go:importPath:FunctionName"
 		parts := strings.Split(strings.TrimPrefix(ext.Source, "go:"), ":")
 		if len(parts) >= 2 {
 			pkgPath := parts[0]
-			// Add package import
-			c.imports[`"`+pkgPath+`"`] = true
-			// Extract package name from path
-			pkgName := filepath.Base(pkgPath)
-			c.goExterns[ext.Name] = pkgName + "." + parts[1]
+			funcPart := parts[1]
+
+			pkgAlias := c.getPackageAlias(pkgPath)
+
+			if strings.Contains(funcPart, ".") {
+				c.goExterns[ext.Name] = pkgAlias + ":" + funcPart
+			} else {
+				c.goExterns[ext.Name] = pkgAlias + "." + funcPart
+			}
 		}
 	}
 }
@@ -566,50 +630,64 @@ return c.genAfterEachStmt(s)
 		return c.genExprStmt(s)
 	case *GoInlineFnStmt:
 		return c.genGoInlineFnStmt(s)
+	case *BlockStmt:
+		return c.genBlockStatement(s)
 	default:
 		return "", fmt.Errorf("unknown statement type: %T", stmt)
 	}
 }
 
 func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
-oldInFunc := c.inFunction
-c.inFunction = true
-defer func() { c.inFunction = oldInFunc }()
+	oldInFunc := c.inFunction
+	if oldInFunc {
+		c.inFunction = true
+	}
+	defer func() { c.inFunction = oldInFunc }()
 
-oldDeclared := c.declaredVars
-c.declaredVars = NewScope(c.declaredVars)
+	oldDeclared := c.declaredVars
+	c.declaredVars = NewScope(c.declaredVars)
 
-oldVarTypes := c.varTypes
-c.varTypes = make(map[string]string)
-for k, v := range oldVarTypes {
-	c.varTypes[k] = v
-}
-defer func() {
-	c.declaredVars = oldDeclared
-	c.varTypes = oldVarTypes
-}()
+	oldVarTypes := c.varTypes
+	c.varTypes = make(map[string]string)
+	for k, v := range oldVarTypes {
+		c.varTypes[k] = v
+	}
+	defer func() {
+		c.declaredVars = oldDeclared
+		c.varTypes = oldVarTypes
+	}()
 
 	var out bytes.Buffer
-	out.WriteString("{\n")
+	if oldInFunc {
+		out.WriteString("{\n")
+	}
 	for _, s := range block.Statements {
 		if tok := stmtToken(s); tok.Line > 0 {
-			out.WriteString(fmt.Sprintf("\t// .srv line %d\n", tok.Line))
+			if oldInFunc {
+				out.WriteString(fmt.Sprintf("\t// .srv line %d\n", tok.Line))
+			} else {
+				out.WriteString(fmt.Sprintf("// .srv line %d\n", tok.Line))
+			}
 		}
 		gen, err := c.genStatement(s)
-if err != nil {
-return "", err
-}
-lines := strings.Split(gen, "\n")
-for _, line := range lines {
+		if err != nil {
+			return "", err
+		}
+		lines := strings.Split(gen, "\n")
+		for _, line := range lines {
 			if strings.TrimSpace(line) != "" {
-				out.WriteString("\t")
+				if oldInFunc {
+					out.WriteString("\t")
+				}
 				out.WriteString(line)
 				out.WriteString("\n")
 			}
-}
-}
-out.WriteString("}")
-return out.String(), nil
+		}
+	}
+	if oldInFunc {
+		out.WriteString("}")
+	}
+	return out.String(), nil
 }
 
 func (c *Codegen) GenerateFileHeader(fileImports map[string]bool) string {

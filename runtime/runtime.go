@@ -904,3 +904,20 @@ func handleChangelog(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(changes)
 }
 
+// Mock structures and functions for testing externs
+type MockReceiver struct {
+	Val string
+}
+
+func (m *MockReceiver) MockMethod(suffix interface{}) interface{} {
+	return m.Val + toString(suffix)
+}
+
+func NewMockReceiver(val interface{}) interface{} {
+	return &MockReceiver{Val: toString(val)}
+}
+
+func MockFunc(val interface{}) interface{} {
+	return "mock:" + toString(val)
+}
+
