@@ -691,6 +691,15 @@ on "user.signup" (event) {
     sendWelcomeEmail(event.email)
 }
 
+## Environment Variables & Secrets Lookup
+
+Read environment variables and secure secrets dynamically:
+
+```serv
+let port = env("PORT")                   // Standard env lookup
+let dbPassword = env.secret("DB_PASS")  // Safe retrieval from configured secret manager
+```
+
 ## Inline Go Integration (`@inline go`)
 
 Write raw Go functions directly inside `.srv` source files. This provides an escape hatch for raw performance or utilizing package features that aren't fully wrapped by the compiler yet:

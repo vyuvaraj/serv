@@ -77,10 +77,11 @@ let ts = time.unix()       // Unix timestamp (int)
 time.sleep(1000)           // Sleep milliseconds
 ```
 
-## env — Environment Variables
+## env — Environment Variables & Secrets
 
 ```serv
-let port = env("PORT")     // Read env var (empty string if not set)
+let port = env("PORT")            // Read env var (empty string if not set)
+let password = env.secret("DB_PASSWORD") // Retrieve secret value dynamically from KMS/vault
 ```
 
 ## config — Configuration
