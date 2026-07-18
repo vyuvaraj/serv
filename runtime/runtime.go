@@ -599,8 +599,9 @@ func StartServer() interface{} {
 	if flag.Lookup("test.v") != nil || os.Getenv("SERV_ENV") == "test" || os.Getenv("TESTING") == "true" {
 		host = "127.0.0.1"
 	}
+	cleanPort := strings.TrimPrefix(serverPort, ":")
 	srv := &http.Server{
-		Addr:    host + ":" + serverPort,
+		Addr:    host + ":" + cleanPort,
 		Handler: mux,
 	}
 

@@ -1249,6 +1249,9 @@ func runServHot(srvFile string, env string) {
 	if !strings.HasPrefix(listenAddr, ":") {
 		listenAddr = ":8080"
 	}
+	if os.Getenv("TESTING") == "true" || os.Getenv("SERV_ENV") == "test" {
+		listenAddr = "127.0.0.1" + listenAddr
+	}
 
 	fmt.Printf("[HOT] Proxy will listen on %s\n", listenAddr)
 
