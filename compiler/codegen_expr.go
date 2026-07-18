@@ -49,7 +49,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 
-		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path")
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path" || objStr == "regex" || objStr == "math" || objStr == "encoding" || objStr == "hash" || objStr == "runtime.EncodingBase64Namespace{}" || objStr == "runtime.EncodingHexNamespace{}")
 		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
 			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
 		}
@@ -195,6 +195,72 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.PathExt", nil
 			case "abs":
 				return "runtime.PathAbs", nil
+			}
+		}
+		if objStr == "regex" {
+			switch e.Field {
+			case "match":
+				return "runtime.RegexMatch", nil
+			case "find":
+				return "runtime.RegexFind", nil
+			case "replace":
+				return "runtime.RegexReplace", nil
+			}
+		}
+		if objStr == "math" {
+			switch e.Field {
+			case "floor":
+				return "runtime.MathFloor", nil
+			case "ceil":
+				return "runtime.MathCeil", nil
+			case "round":
+				return "runtime.MathRound", nil
+			case "abs":
+				return "runtime.MathAbs", nil
+			case "pow":
+				return "runtime.MathPow", nil
+			case "sqrt":
+				return "runtime.MathSqrt", nil
+			case "min":
+				return "runtime.MathMin", nil
+			case "max":
+				return "runtime.MathMax", nil
+			}
+		}
+		if objStr == "encoding" {
+			switch e.Field {
+			case "base64":
+				return "runtime.EncodingBase64Namespace{}", nil
+			case "hex":
+				return "runtime.EncodingHexNamespace{}", nil
+			}
+		}
+		if objStr == "runtime.EncodingBase64Namespace{}" {
+			switch e.Field {
+			case "encode":
+				return "runtime.Base64Encode", nil
+			case "decode":
+				return "runtime.Base64Decode", nil
+			}
+		}
+		if objStr == "runtime.EncodingHexNamespace{}" {
+			switch e.Field {
+			case "encode":
+				return "runtime.HexEncode", nil
+			case "decode":
+				return "runtime.HexDecode", nil
+			}
+		}
+		if objStr == "hash" {
+			switch e.Field {
+			case "md5":
+				return "runtime.HashMD5", nil
+			case "sha256":
+				return "runtime.HashSHA256", nil
+			case "sha512":
+				return "runtime.HashSHA512", nil
+			case "hmac":
+				return "runtime.HashHMAC", nil
 			}
 		}
 		if objStr == "db" {

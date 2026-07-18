@@ -242,5 +242,56 @@ let list = file.list(".")
 - **`file.exists(path string) bool`**: Checks if file or directory exists.
 - **`file.list(path string) []string`**: Lists directory items.
 
+## csv — CSV Parsing & Stringification
 
-```
+- **`csv.parse(content string) [][]string`**: Parses CSV content to a list of row arrays.
+- **`csv.stringify(rows [][]string, headers []string) string`**: Stringifies matrix rows and optional headers to CSV format.
+
+## xml — XML Parsing & Serialization
+
+- **`xml.parse(content string) map`**: Parses XML document into a nested map structure.
+- **`xml.stringify(obj map/slice) string`**: Encodes nested map/slice structure into XML string.
+
+## yaml — YAML Parsing & Serialization
+
+- **`yaml.parse(content string) map/slice`**: Unmarshals YAML string to generic structure.
+- **`yaml.stringify(obj map/slice) string`**: Marshals generic structure to YAML string.
+
+## path — File Path Utilities
+
+- **`path.join(args... string) string`**: Joins path components using the OS separator.
+- **`path.dirname(p string) string`**: Returns directory portion of path.
+- **`path.basename(p string) string`**: Returns last element of path.
+- **`path.ext(p string) string`**: Returns file extension.
+- **`path.abs(p string) string`**: Returns absolute representation of path.
+
+## regex — Regular Expressions
+
+- **`regex.match(pattern string, value string) bool`**: Checks if pattern matches value.
+- **`regex.find(pattern string, value string) string`**: Returns first match text.
+- **`regex.replace(pattern string, value string, replacement string) string`**: Replaces all matches in value with replacement.
+
+## math — Math Functions
+
+- **`math.floor(x float) float`**: Returns greatest integer less than or equal to x.
+- **`math.ceil(x float) float`**: Returns least integer greater than or equal to x.
+- **`math.round(x float) float`**: Returns nearest integer.
+- **`math.abs(x float) float`**: Returns absolute value of x.
+- **`math.pow(base float, exp float) float`**: Returns base raised to exp.
+- **`math.sqrt(x float) float`**: Returns square root of x.
+- **`math.min(a float, b float) float`**: Returns minimum of two numbers.
+- **`math.max(a float, b float) float`**: Returns maximum of two numbers.
+
+## encoding — Base64 & Hex
+
+- **`encoding.base64.encode(str string) string`**: Encodes string to base64.
+- **`encoding.base64.decode(str string) string`**: Decodes base64 string.
+- **`encoding.hex.encode(str string) string`**: Encodes string to hex.
+- **`encoding.hex.decode(str string) string`**: Decodes hex string.
+
+## hash — Cryptographic Digests
+
+- **`hash.md5(str string) string`**: Generates MD5 hex hash.
+- **`hash.sha256(str string) string`**: Generates SHA-256 hex hash.
+- **`hash.sha512(str string) string`**: Generates SHA-512 hex hash.
+- **`hash.hmac(key string, data string, algo string) string`**: Computes HMAC hex signature using specified algorithm (`"md5"`, `"sha256"`, `"sha512"`).

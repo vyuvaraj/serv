@@ -508,3 +508,85 @@ func PathAbs(path string) interface{} {
 	return [2]interface{}{nil, "PathAbs is not supported in the sandboxed WebAssembly target"}
 }
 
+// ── Regex, Math, Encoding, and Hash Stubs ──────────────────────────────────────
+
+func RegexMatch(pattern interface{}, value interface{}) interface{} {
+	return false
+}
+
+func RegexFind(pattern interface{}, value interface{}) interface{} {
+	return ""
+}
+
+func RegexReplace(pattern interface{}, value interface{}, replacement interface{}) interface{} {
+	return value
+}
+
+func MathFloor(x interface{}) interface{} {
+	return 0.0
+}
+
+func MathCeil(x interface{}) interface{} {
+	return 0.0
+}
+
+func MathRound(x interface{}) interface{} {
+	return 0.0
+}
+
+func MathAbs(x interface{}) interface{} {
+	return 0.0
+}
+
+func MathPow(base, exp interface{}) interface{} {
+	return 0.0
+}
+
+func MathSqrt(x interface{}) interface{} {
+	return 0.0
+}
+
+func MathMin(a, b interface{}) interface{} {
+	return a
+}
+
+func MathMax(a, b interface{}) interface{} {
+	return b
+}
+
+type EncodingBase64Namespace struct{}
+type EncodingHexNamespace struct{}
+
+func Base64Encode(str interface{}) interface{} {
+	return ""
+}
+
+func Base64Decode(str interface{}) interface{} {
+	return [2]interface{}{nil, "Base64Decode is not supported in the sandboxed WebAssembly target"}
+}
+
+func HexEncode(str interface{}) interface{} {
+	return ""
+}
+
+func HexDecode(str interface{}) interface{} {
+	return [2]interface{}{nil, "HexDecode is not supported in the sandboxed WebAssembly target"}
+}
+
+func HashMD5(str interface{}) interface{} {
+	return ""
+}
+
+func HashSHA256(str interface{}) interface{} {
+	return ""
+}
+
+func HashSHA512(str interface{}) interface{} {
+	return ""
+}
+
+func HashHMAC(key interface{}, data interface{}, algo interface{}) interface{} {
+	return [2]interface{}{nil, "HashHMAC is not supported in the sandboxed WebAssembly target"}
+}
+
+

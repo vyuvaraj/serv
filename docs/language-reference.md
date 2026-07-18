@@ -748,5 +748,38 @@ let allFiles = file.list(".")
 - **`file.exists(path)`**: Returns `true` if file/directory exists, `false` otherwise.
 - **`file.list(path)`**: Returns an array of file/folder names inside the directory.
 
-```
+### 3. CSV Parsing (`csv` namespace)
+- **`csv.parse(content)`**: Parses raw CSV string to a matrix array of rows.
+- **`csv.stringify(rows, headers)`**: Serializes array of rows and optional headers to a CSV formatted string.
 
+### 4. XML Serialization (`xml` namespace)
+- **`xml.parse(content)`**: Parses XML string into a nested map structure.
+- **`xml.stringify(obj)`**: Converts map/slice structure into XML string.
+
+### 5. YAML Serialization (`yaml` namespace)
+- **`yaml.parse(content)`**: Parses YAML string to nested maps/lists.
+- **`yaml.stringify(obj)`**: Serializes maps/lists to YAML format string.
+
+### 6. Path Helpers (`path` namespace)
+- **`path.join(args...)`**: Joins path components.
+- **`path.dirname(p)`**: Returns directory part.
+- **`path.basename(p)`**: Returns last component.
+- **`path.ext(p)`**: Returns extension.
+- **`path.abs(p)`**: Returns absolute path.
+
+### 7. Regular Expressions (`regex` namespace)
+- **`regex.match(pattern, val)`**: Returns `true` if regex matches the string.
+- **`regex.find(pattern, val)`**: Returns first match text.
+- **`regex.replace(pattern, val, repl)`**: Replaces pattern matches.
+
+### 8. Math Utilities (`math` namespace)
+- **`math.floor(x)`**, **`math.ceil(x)`**, **`math.round(x)`**, **`math.abs(x)`**, **`math.pow(base, exp)`**, **`math.sqrt(x)`**: Basic floating-point operations.
+- **`math.min(a, b)`**, **`math.max(a, b)`**: Min/max values of two numbers.
+
+### 9. Encoding (`encoding` namespace)
+- **`encoding.base64.encode(str)`** / **`encoding.base64.decode(str)`**: Base64 conversions.
+- **`encoding.hex.encode(str)`** / **`encoding.hex.decode(str)`**: Hexadecimal conversions.
+
+### 10. Hashing (`hash` namespace)
+- **`hash.md5(str)`**, **`hash.sha256(str)`**, **`hash.sha512(str)`**: Cryptographic digests.
+- **`hash.hmac(key, data, algo)`**: Generates HMAC signature.
