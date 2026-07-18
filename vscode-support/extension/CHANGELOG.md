@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.3.0
+
+### Added
+- **Phase 35 Built-in Namespace Support**: Integrated autocomplete suggestion lists, signature helper tooltips, and hover documentation for all 23 new Phase 35 built-in utility namespaces (including `exec`, `csv`, `yaml`, `diff`, `proto`, etc.) and their sub-namespaces (e.g. `encoding.base64`, `encoding.hex`).
+
 ## 3.2.0
 
 ### Added
