@@ -792,3 +792,24 @@ let allFiles = file.list(".")
 ### 10. Hashing (`hash` namespace)
 - **`hash.md5(str)`**, **`hash.sha256(str)`**, **`hash.sha512(str)`**: Cryptographic digests.
 - **`hash.hmac(key, data, algo)`**: Generates HMAC signature.
+
+### 11. UUID Generation (`uuid` namespace)
+- **`uuid.v4()`**: Generates random UUID v4.
+- **`uuid.v7()`**: Generates time-ordered UUID v7.
+
+### 12. Randomness (`rand` namespace)
+- **`rand.int(min, max)`**: Secure random integer in the range.
+- **`rand.float()`**: Secure random float in `[0.0, 1.0)`.
+- **`rand.string(n)`**: Secure random alphanumeric string of length `n`.
+- **`rand.bool()`**: Secure random boolean.
+
+### 13. URL Utilities (`url` namespace)
+- **`url.parse(urlStr)`**: Parses URL to map of scheme, host, path, query.
+- **`url.encode(str)`** / **`url.decode(str)`**: Escapes/unescapes URL components.
+
+### 14. Environment Variables (`env` namespace)
+- **`env.get(key)`**: Reads environment variable.
+- **`env.require(key)`**: Reads environment variable or panics if empty/unset.
+- **`env.int(key, default)`**: Reads environment variable parsed as integer.
+- **`env.bool(key, default)`**: Reads environment variable parsed as boolean.
+

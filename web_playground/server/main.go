@@ -86,7 +86,7 @@ func main() {
 	http.HandleFunc("/api/run", handleRun)
 
 	log.Printf("Serv Playground Server started on http://localhost:%d\n", *port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), nil); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", *port), nil); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }

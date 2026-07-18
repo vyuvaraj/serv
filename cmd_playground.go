@@ -88,7 +88,7 @@ func runPlayground() {
 	mux.HandleFunc("/api/run", handlePgRun)
 
 	fmt.Printf("🚀 Serv Playground Web IDE started at http://localhost:%d\n", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), mux); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil {
 		log.Fatalf("Playground server failed to start: %v", err)
 	}
 }

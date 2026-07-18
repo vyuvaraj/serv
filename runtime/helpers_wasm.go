@@ -589,4 +589,59 @@ func HashHMAC(key interface{}, data interface{}, algo interface{}) interface{} {
 	return [2]interface{}{nil, "HashHMAC is not supported in the sandboxed WebAssembly target"}
 }
 
+// ── UUID, Rand, URL, and Env Stubs ───────────────────────────────────────────
+
+func UUIDv4() interface{} {
+	return ""
+}
+
+func UUIDv7() interface{} {
+	return [2]interface{}{nil, "UUIDv7 is not supported in the sandboxed WebAssembly target"}
+}
+
+func RandInt(min, max interface{}) interface{} {
+	return min
+}
+
+func RandFloat() interface{} {
+	return 0.0
+}
+
+func RandString(n interface{}) interface{} {
+	return ""
+}
+
+func RandBool() interface{} {
+	return false
+}
+
+func URLParse(urlStr interface{}) interface{} {
+	return [2]interface{}{nil, "URLParse is not supported in the sandboxed WebAssembly target"}
+}
+
+func URLEncode(str interface{}) interface{} {
+	return ""
+}
+
+func URLDecode(str interface{}) interface{} {
+	return [2]interface{}{nil, "URLDecode is not supported in the sandboxed WebAssembly target"}
+}
+
+func EnvGet(key interface{}) interface{} {
+	return ""
+}
+
+func EnvRequire(key interface{}) interface{} {
+	panic("EnvRequire is not supported in the sandboxed WebAssembly target")
+}
+
+func EnvInt(key interface{}, defaultValue interface{}) interface{} {
+	return defaultValue
+}
+
+func EnvBool(key interface{}, defaultValue interface{}) interface{} {
+	return defaultValue
+}
+
+
 

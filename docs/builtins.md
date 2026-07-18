@@ -296,3 +296,29 @@ let list = file.list(".")
 - **`hash.sha256(str string) string`**: Generates SHA-256 hex hash.
 - **`hash.sha512(str string) string`**: Generates SHA-512 hex hash.
 - **`hash.hmac(key string, data string, algo string) string`**: Computes HMAC hex signature using specified algorithm (`"md5"`, `"sha256"`, `"sha512"`).
+
+## uuid — Unique ID Generation
+
+- **`uuid.v4() string`**: Generates random UUID v4 string.
+- **`uuid.v7() string`**: Generates time-ordered UUID v7 string.
+
+## rand — Random Value Generation
+
+- **`rand.int(min int/float, max int/float) float`**: Generates secure random integer between min and max (inclusive).
+- **`rand.float() float`**: Generates secure random float in `[0.0, 1.0)`.
+- **`rand.string(n int) string`**: Generates secure random alphanumeric string of length `n`.
+- **`rand.bool() bool`**: Generates secure random boolean.
+
+## url — URL Utilities
+
+- **`url.parse(urlStr string) map`**: Parses a URL into component scheme, host, path, and query parameters.
+- **`url.encode(str string) string`**: Escapes query string components.
+- **`url.decode(str string) string`**: Unescapes query string components.
+
+## env — Environment Variables (Extended)
+
+- **`env.get(key string) string`**: Reads environment variable (empty string if not set).
+- **`env.require(key string) string`**: Reads environment variable, panicking with detail if unset/empty.
+- **`env.int(key string, default int) float`**: Reads environment variable as integer, returning default if unset/invalid.
+- **`env.bool(key string, default bool) bool`**: Reads environment variable as boolean, returning default if unset/invalid.
+
