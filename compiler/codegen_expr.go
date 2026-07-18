@@ -49,7 +49,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 
-		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file")
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path")
 		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
 			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
 		}
@@ -157,6 +157,44 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.FileExists", nil
 			case "list":
 				return "runtime.FileList", nil
+			}
+		}
+		if objStr == "csv" {
+			switch e.Field {
+			case "parse":
+				return "runtime.CSVParse", nil
+			case "stringify":
+				return "runtime.CSVStringify", nil
+			}
+		}
+		if objStr == "xml" {
+			switch e.Field {
+			case "parse":
+				return "runtime.XMLParse", nil
+			case "stringify":
+				return "runtime.XMLStringify", nil
+			}
+		}
+		if objStr == "yaml" {
+			switch e.Field {
+			case "parse":
+				return "runtime.YAMLParse", nil
+			case "stringify":
+				return "runtime.YAMLStringify", nil
+			}
+		}
+		if objStr == "path" {
+			switch e.Field {
+			case "join":
+				return "runtime.PathJoin", nil
+			case "dirname":
+				return "runtime.PathDirname", nil
+			case "basename":
+				return "runtime.PathBasename", nil
+			case "ext":
+				return "runtime.PathExt", nil
+			case "abs":
+				return "runtime.PathAbs", nil
 			}
 		}
 		if objStr == "db" {

@@ -141,6 +141,36 @@ func runTestsWithWriter(srvFile string, withCoverage bool, filter string, stdout
 	testErr := cmd.Wait()
 	wg.Wait()
 
+	if testErr != nil {
+		// Self-healing: if tests failed (possibly due to go.mod tidy requirement), run go mod tidy and retry once
+		if tidyErr := runGoModTidy(buildDir); tidyErr == nil {
+			retryCmd := exec.Command(goPath, testArgs...)
+			retryCmd.Dir = buildDir
+			retryCmd.Env = filterEnv(os.Environ(), "GOWORK")
+			retryCmd.Env = append(retryCmd.Env, "GOWORK=off")
+			
+			retryStdoutPipe, outErr := retryCmd.StdoutPipe()
+			retryStderrPipe, sErr := retryCmd.StderrPipe()
+			if outErr == nil && sErr == nil {
+				if startErr := retryCmd.Start(); startErr == nil {
+					var retryWg sync.WaitGroup
+					retryWg.Add(2)
+					go func() {
+						rewriter.Rewrite(retryStdoutPipe, stdoutWriter)
+						retryWg.Done()
+					}()
+					go func() {
+						rewriter.Rewrite(retryStderrPipe, stderrWriter)
+						retryWg.Done()
+					}()
+					testErr = retryCmd.Wait()
+					retryWg.Wait()
+				}
+			}
+		}
+	}
+
+
 	// Show coverage summary if requested
 	if withCoverage {
 		coverFile := filepath.Join(buildDir, "coverage.out")

@@ -461,3 +461,50 @@ func FileExists(path string) interface{} {
 func FileList(path string) interface{} {
 	return [2]interface{}{nil, "FileList is not supported in the sandboxed WebAssembly target"}
 }
+
+// ── Utility Namespaces Stubs ──────────────────────────────────────────────────
+
+func CSVParse(content string) interface{} {
+	return [2]interface{}{nil, "CSVParse is not supported in the sandboxed WebAssembly target"}
+}
+
+func CSVStringify(rows interface{}, headers interface{}) interface{} {
+	return [2]interface{}{nil, "CSVStringify is not supported in the sandboxed WebAssembly target"}
+}
+
+func XMLParse(content string) interface{} {
+	return [2]interface{}{nil, "XMLParse is not supported in the sandboxed WebAssembly target"}
+}
+
+func XMLStringify(obj interface{}) interface{} {
+	return [2]interface{}{nil, "XMLStringify is not supported in the sandboxed WebAssembly target"}
+}
+
+func YAMLParse(content string) interface{} {
+	return [2]interface{}{nil, "YAMLParse is not supported in the sandboxed WebAssembly target"}
+}
+
+func YAMLStringify(obj interface{}) interface{} {
+	return [2]interface{}{nil, "YAMLStringify is not supported in the sandboxed WebAssembly target"}
+}
+
+func PathJoin(args ...interface{}) interface{} {
+	return ""
+}
+
+func PathDirname(path string) interface{} {
+	return "."
+}
+
+func PathBasename(path string) interface{} {
+	return path
+}
+
+func PathExt(path string) interface{} {
+	return ""
+}
+
+func PathAbs(path string) interface{} {
+	return [2]interface{}{nil, "PathAbs is not supported in the sandboxed WebAssembly target"}
+}
+
