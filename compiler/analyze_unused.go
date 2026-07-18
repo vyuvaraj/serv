@@ -282,6 +282,13 @@ func analyzeStmtUnused(stmt Statement, scope *Scope, diags *[]Diagnostic) {
 		}
 	case *AgentDecl:
 		// Agent declaration registers symbols. Validate referenced tools if necessary
+	case *GoInlineFnStmt:
+		scope.Insert(&Symbol{
+			Name:  s.Name,
+			Type:  "function",
+			Token: s.Token,
+			Used:  true,
+		})
 	}
 }
 

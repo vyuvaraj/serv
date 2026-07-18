@@ -1736,5 +1736,43 @@ func (c *Codegen) genEventStoreStmt(s *EventStoreStmt) (string, error) {
 	return out.String(), nil
 }
 
+func (c *Codegen) genGoInlineFnStmt(s *GoInlineFnStmt) (string, error) {
+	lines := strings.Split(s.Body, "\n")
+	var cleanBody []string
+	inImportBlock := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "import") {
+			if strings.Contains(trimmed, "\"") {
+				parts := strings.Split(trimmed, "\"")
+				if len(parts) >= 3 {
+					c.imports[`"`+parts[1]+`"`] = true
+				}
+				continue
+			} else if strings.HasSuffix(trimmed, "(") {
+				inImportBlock = true
+				continue
+			}
+		}
+		if inImportBlock {
+			if trimmed == ")" {
+				inImportBlock = false
+				continue
+			}
+			if strings.Contains(trimmed, "\"") {
+				parts := strings.Split(trimmed, "\"")
+				if len(parts) >= 3 {
+					c.imports[`"`+parts[1]+`"`] = true
+				}
+			}
+			continue
+		}
+		cleanBody = append(cleanBody, line)
+	}
+
+	return fmt.Sprintf("func %s%s {\n%s\n}\n", s.Name, s.Signature, strings.Join(cleanBody, "\n")), nil
+}
+
 
 

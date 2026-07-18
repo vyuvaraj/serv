@@ -875,11 +875,43 @@ func (p *Parser) parseGraphQLStatement() Statement {
 }
 
 func (p *Parser) parseMacroStatement() Statement {
-	stmt := &MacroStmt{Token: p.curToken}
+	macroToken := p.curToken
 	if !p.expectPeek(TOKEN_IDENT) {
 		return nil
 	}
-	stmt.Name = p.curToken.Literal
+	name := p.curToken.Literal
+
+	if name == "inline" && p.peekToken.Literal == "go" {
+		p.nextToken() // consume 'go'
+		if p.peekToken.Type != TOKEN_FN && p.peekToken.Literal != "fn" {
+			p.errors = append(p.errors, "expected 'fn' after @inline go")
+			return nil
+		}
+		p.nextToken() // consume 'fn'
+
+		if !p.expectPeek(TOKEN_IDENT) {
+			return nil
+		}
+		fnName := p.curToken.Literal
+
+		sig, body, err := p.l.ReadGoInlineSignatureAndBody()
+		if err != nil {
+			p.errors = append(p.errors, err.Error())
+			return nil
+		}
+
+		p.curToken = Token{Type: TOKEN_RBRACE, Literal: "}", Line: macroToken.Line, Col: macroToken.Col}
+		p.peekToken = p.l.NextToken()
+
+		return &GoInlineFnStmt{
+			Token:     macroToken,
+			Name:      fnName,
+			Signature: sig,
+			Body:      body,
+		}
+	}
+
+	stmt := &MacroStmt{Token: macroToken, Name: name}
 
 	// Optional arguments: @derive(Serialize, Validate)
 	if p.peekToken.Type == TOKEN_LPAREN {

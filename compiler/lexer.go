@@ -1,5 +1,10 @@
 package compiler
 
+import (
+	"fmt"
+	"strings"
+)
+
 
 type TokenType string
 
@@ -682,3 +687,123 @@ func isKeywordToken(t TokenType) bool {
 	}
 	return false
 }
+
+// ReadGoInlineSignatureAndBody scans the raw Go function signature and body from the input.
+func (l *Lexer) ReadGoInlineSignatureAndBody() (string, string, error) {
+	// Walk backward to find the '(' that the parser already peeked
+	pos := l.position - 1
+	for pos >= 0 && l.input[pos] != '(' {
+		pos--
+	}
+	if pos < 0 {
+		return "", "", fmt.Errorf("expected '(' for inline Go function signature")
+	}
+	sigStart := pos
+
+	// Scan forward until we find the '{' character
+	for l.ch != '{' && l.ch != 0 {
+		if l.ch == '\n' {
+			l.line++
+			l.col = 0
+		}
+		l.readChar()
+	}
+	if l.ch == 0 {
+		return "", "", fmt.Errorf("expected '{' after inline Go function signature")
+	}
+	sigEnd := l.position
+	signature := strings.TrimSpace(l.input[sigStart:sigEnd])
+
+	// Consume '{'
+	l.readChar()
+
+	// Now scan the body until matching '}'
+	bodyStart := l.position
+	braceCount := 1
+	for braceCount > 0 && l.ch != 0 {
+		if l.ch == '\n' {
+			l.line++
+			l.col = 0
+		}
+
+		// Handle comments to avoid counting braces inside them
+		if l.ch == '/' && l.peekChar() == '/' {
+			l.readChar()
+			l.readChar()
+			for l.ch != '\n' && l.ch != 0 {
+				l.readChar()
+			}
+			continue
+		}
+		if l.ch == '/' && l.peekChar() == '*' {
+			l.readChar()
+			l.readChar()
+			for !(l.ch == '*' && l.peekChar() == '/') && l.ch != 0 {
+				if l.ch == '\n' {
+					l.line++
+					l.col = 0
+				}
+				l.readChar()
+			}
+			if l.ch != 0 {
+				l.readChar()
+				l.readChar()
+			}
+			continue
+		}
+		// Handle string literals
+		if l.ch == '"' {
+			l.readChar()
+			for l.ch != '"' && l.ch != 0 {
+				if l.ch == '\n' {
+					l.line++
+					l.col = 0
+				}
+				if l.ch == '\\' {
+					l.readChar()
+				}
+				l.readChar()
+			}
+			if l.ch == '"' {
+				l.readChar()
+			}
+			continue
+		}
+		if l.ch == '`' {
+			l.readChar()
+			for l.ch != '`' && l.ch != 0 {
+				if l.ch == '\n' {
+					l.line++
+					l.col = 0
+				}
+				l.readChar()
+			}
+			if l.ch == '`' {
+				l.readChar()
+			}
+			continue
+		}
+
+		if l.ch == '{' {
+			braceCount++
+		} else if l.ch == '}' {
+			braceCount--
+		}
+		if braceCount > 0 {
+			l.readChar()
+		}
+	}
+
+	if braceCount > 0 {
+		return "", "", fmt.Errorf("unmatched '{' in inline Go function body")
+	}
+
+	bodyEnd := l.position
+	body := l.input[bodyStart:bodyEnd]
+
+	// Consume the closing '}'
+	l.readChar()
+
+	return signature, body, nil
+}
+

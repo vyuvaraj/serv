@@ -562,11 +562,13 @@ case *BeforeEachStmt:
 return c.genBeforeEachStmt(s)
 case *AfterEachStmt:
 return c.genAfterEachStmt(s)
-case *ExprStmt:
-return c.genExprStmt(s)
-default:
-return "", fmt.Errorf("unknown statement type: %T", stmt)
-}
+	case *ExprStmt:
+		return c.genExprStmt(s)
+	case *GoInlineFnStmt:
+		return c.genGoInlineFnStmt(s)
+	default:
+		return "", fmt.Errorf("unknown statement type: %T", stmt)
+	}
 }
 
 func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {

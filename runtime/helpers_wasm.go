@@ -433,4 +433,31 @@ func HTMLRedirect(url interface{}, code interface{}) interface{} { return nil }
 func ParseFormBody(body string) interface{}                       { return map[string]interface{}{} }
 func RequestParam(req Request, key interface{}) interface{}       { return nil }
 
+
 // ── Metrics Stubs ────────────────────────────────────────────────────────────
+
+// ── Exec and File Stubs ───────────────────────────────────────────────────────
+
+func ExecRun(cmdStr string) interface{} {
+	return map[string]interface{}{
+		"stdout":   "",
+		"stderr":   "ExecRun is not supported in the sandboxed WebAssembly target",
+		"exitCode": float64(-1),
+	}
+}
+
+func FileRead(path string) interface{} {
+	return [2]interface{}{nil, "FileRead is not supported in the sandboxed WebAssembly target"}
+}
+
+func FileWrite(path string, content string) interface{} {
+	return [2]interface{}{nil, "FileWrite is not supported in the sandboxed WebAssembly target"}
+}
+
+func FileExists(path string) interface{} {
+	return false
+}
+
+func FileList(path string) interface{} {
+	return [2]interface{}{nil, "FileList is not supported in the sandboxed WebAssembly target"}
+}

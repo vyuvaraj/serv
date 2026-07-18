@@ -73,6 +73,20 @@ func (e *ExternFnStmt) String() string {
 	return "extern fn " + e.Name + "(" + strings.Join(e.Params, ", ") + ") from \"" + e.Source + "\"\n"
 }
 
+// GoInlineFnStmt represents an inline Go function block (@inline go fn ...)
+type GoInlineFnStmt struct {
+	Token     Token // '@'
+	Name      string
+	Signature string // e.g. "(input string) string"
+	Body      string // raw Go body string
+}
+
+func (g *GoInlineFnStmt) statementNode()       {}
+func (g *GoInlineFnStmt) TokenLiteral() string { return g.Token.Literal }
+func (g *GoInlineFnStmt) String() string {
+	return "@inline go fn " + g.Name + g.Signature + " {\n" + g.Body + "\n}\n"
+}
+
 // Broker Statement
 type BrokerStmt struct {
 	Token Token

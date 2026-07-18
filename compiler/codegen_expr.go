@@ -49,7 +49,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 
-		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html")
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file")
 		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
 			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
 		}
@@ -139,6 +139,24 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.JSONParse", nil
 			case "stringify":
 				return "runtime.JSONStringify", nil
+			}
+		}
+		if objStr == "exec" {
+			switch e.Field {
+			case "run":
+				return "runtime.ExecRun", nil
+			}
+		}
+		if objStr == "file" {
+			switch e.Field {
+			case "read":
+				return "runtime.FileRead", nil
+			case "write":
+				return "runtime.FileWrite", nil
+			case "exists":
+				return "runtime.FileExists", nil
+			case "list":
+				return "runtime.FileList", nil
 			}
 		}
 		if objStr == "db" {
