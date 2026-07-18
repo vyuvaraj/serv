@@ -45,7 +45,6 @@ export fn toRow(values) {
     // or we can construct it manually
     let result = ""
     let i = 0
-    let len = parts.length()
     for p in parts {
         if i > 0 {
             result = result + ","
