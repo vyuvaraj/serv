@@ -631,6 +631,17 @@ return c.genAfterEachStmt(s)
 	case *GoInlineFnStmt:
 		return c.genGoInlineFnStmt(s)
 	case *BlockStmt:
+		if !c.inFunction {
+			var out bytes.Buffer
+			for _, sub := range s.Statements {
+				gen, err := c.genStatement(sub)
+				if err != nil {
+					return "", err
+				}
+				out.WriteString(gen)
+			}
+			return out.String(), nil
+		}
 		return c.genBlockStatement(s)
 	default:
 		return "", fmt.Errorf("unknown statement type: %T", stmt)
@@ -639,9 +650,7 @@ return c.genAfterEachStmt(s)
 
 func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
 	oldInFunc := c.inFunction
-	if oldInFunc {
-		c.inFunction = true
-	}
+	c.inFunction = true
 	defer func() { c.inFunction = oldInFunc }()
 
 	oldDeclared := c.declaredVars
@@ -658,16 +667,10 @@ func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
 	}()
 
 	var out bytes.Buffer
-	if oldInFunc {
-		out.WriteString("{\n")
-	}
+	out.WriteString("{\n")
 	for _, s := range block.Statements {
 		if tok := stmtToken(s); tok.Line > 0 {
-			if oldInFunc {
-				out.WriteString(fmt.Sprintf("\t// .srv line %d\n", tok.Line))
-			} else {
-				out.WriteString(fmt.Sprintf("// .srv line %d\n", tok.Line))
-			}
+			out.WriteString(fmt.Sprintf("\t// .srv line %d\n", tok.Line))
 		}
 		gen, err := c.genStatement(s)
 		if err != nil {
@@ -676,17 +679,13 @@ func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
 		lines := strings.Split(gen, "\n")
 		for _, line := range lines {
 			if strings.TrimSpace(line) != "" {
-				if oldInFunc {
-					out.WriteString("\t")
-				}
+				out.WriteString("\t")
 				out.WriteString(line)
 				out.WriteString("\n")
 			}
 		}
 	}
-	if oldInFunc {
-		out.WriteString("}")
-	}
+	out.WriteString("}")
 	return out.String(), nil
 }
 
