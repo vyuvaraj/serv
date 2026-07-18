@@ -169,6 +169,17 @@ func (s *EncryptedFileStore) Get(tenantID, key string) (string, error) {
 	}
 
 	if key == "db-credentials" {
+		data, err := s.readData()
+		if err == nil {
+			tenantData, ok := data[tenantID]
+			if ok {
+				history, found := tenantData[key]
+				if found && len(history) > 0 {
+					LogAuditEvent(tenantID, "GET", key)
+					return history[len(history)-1], nil
+				}
+			}
+		}
 		LogAuditEvent(tenantID, "DYNAMIC_DB_CRED_GEN", key)
 		return "db_user_temp_abc:temp_pass_xyz_998", nil
 	}
