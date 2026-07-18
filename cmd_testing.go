@@ -108,7 +108,13 @@ func runTestsWithWriter(srvFile string, withCoverage bool, filter string, stdout
 	cmd := exec.Command(goPath, testArgs...)
 	cmd.Dir = buildDir
 	cmd.Env = filterEnv(os.Environ(), "GOWORK")
-	cmd.Env = append(cmd.Env, "GOWORK=off", "SERV_ENV=test", "TESTING=true")
+	cmd.Env = append(cmd.Env, "GOWORK=off")
+	if os.Getenv("SERV_ENV") == "" {
+		cmd.Env = append(cmd.Env, "SERV_ENV=test")
+	}
+	if os.Getenv("TESTING") == "" {
+		cmd.Env = append(cmd.Env, "TESTING=true")
+	}
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Fprintf(stderrWriter, "Failed to create stdout pipe: %v\n", err)
@@ -147,7 +153,13 @@ func runTestsWithWriter(srvFile string, withCoverage bool, filter string, stdout
 			retryCmd := exec.Command(goPath, testArgs...)
 			retryCmd.Dir = buildDir
 			retryCmd.Env = filterEnv(os.Environ(), "GOWORK")
-			retryCmd.Env = append(retryCmd.Env, "GOWORK=off", "SERV_ENV=test", "TESTING=true")
+			retryCmd.Env = append(retryCmd.Env, "GOWORK=off")
+			if os.Getenv("SERV_ENV") == "" {
+				retryCmd.Env = append(retryCmd.Env, "SERV_ENV=test")
+			}
+			if os.Getenv("TESTING") == "" {
+				retryCmd.Env = append(retryCmd.Env, "TESTING=true")
+			}
 			
 			retryStdoutPipe, outErr := retryCmd.StdoutPipe()
 			retryStderrPipe, sErr := retryCmd.StderrPipe()
