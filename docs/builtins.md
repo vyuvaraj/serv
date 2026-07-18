@@ -368,3 +368,28 @@ let list = file.list(".")
 - **`duration.parse(dur string) float`**: Parses human-readable duration strings (like `"2h30m"`) to float seconds.
 - **`duration.format(seconds float) string`**: Formats float seconds into human-readable duration string.
 - **`duration.since(ts time) float`**: Returns float seconds elapsed since a past timestamp.
+
+## format — Value Formatting
+
+- **`format.bytes(val int) string`**: Formats byte count to string.
+- **`format.number(val float) string`**: Formats large numbers to shorthand.
+- **`format.percent(val float) string`**: Formats fraction to percentage.
+- **`format.plural(count float, singular string, plural string) string`**: Formats count with noun.
+
+## ip — IP Addresses
+
+- **`ip.parse(val string) map`**: Parses IP address to `{ version, octets }` map.
+- **`ip.isPrivate(val string) bool`**: Checks if IP is in private subnet range.
+- **`ip.inCIDR(ipVal string, cidrVal string) bool`**: Checks if IP is inside CIDR block.
+- **`ip.version(val string) string`**: Returns `"ipv4"` or `"ipv6"`.
+
+## dns — Domain Name Resolution
+
+- **`dns.lookup(host string) string`**: Resolves domain to its first IP string.
+- **`dns.txt(host string) string`**: Resolves domain TXT records.
+- **`dns.srv(service string) map`**: Resolves SRV record to `{ host, port, priority }` map.
+
+## multipart — Multipart Request Parsing
+
+- **`multipart.parse(req Request) map`**: Parses multipart body of Request, returning `{ fields, files }`.
+

@@ -749,6 +749,66 @@ func DurationSince(ts interface{}) interface{} {
 	return 0.0
 }
 
+// ── Format Stubs ────────────────────────────────────────────────────────────
+
+func FormatBytes(val interface{}) interface{} {
+	return ""
+}
+
+func FormatNumber(val interface{}) interface{} {
+	return ""
+}
+
+func FormatPercent(val interface{}) interface{} {
+	return ""
+}
+
+func FormatPlural(count, singular, plural interface{}) interface{} {
+	return ""
+}
+
+// ── IP Stubs ────────────────────────────────────────────────────────────────
+
+func IPParse(val interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
+func IPIsPrivate(val interface{}) interface{} {
+	return false
+}
+
+func IPInCIDR(ipVal, cidrVal interface{}) interface{} {
+	return false
+}
+
+func IPVersion(val interface{}) interface{} {
+	return ""
+}
+
+// ── DNS Stubs ───────────────────────────────────────────────────────────────
+
+func DNSLookup(host interface{}) interface{} {
+	return ""
+}
+
+func DNSTXT(host interface{}) interface{} {
+	return ""
+}
+
+func DNSSRV(service interface{}) interface{} {
+	return map[string]interface{}{}
+}
+
+// ── Multipart Stubs ──────────────────────────────────────────────────────────
+
+func MultipartParse(req interface{}) interface{} {
+	return map[string]interface{}{
+		"fields": map[string]interface{}{},
+		"files":  []interface{}{},
+	}
+}
+
+
 
 
 

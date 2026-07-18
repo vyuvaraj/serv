@@ -79,7 +79,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			return "", err
 		}
 
-		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path" || objStr == "regex" || objStr == "math" || objStr == "encoding" || objStr == "hash" || objStr == "runtime.EncodingBase64Namespace{}" || objStr == "runtime.EncodingHexNamespace{}" || objStr == "uuid" || objStr == "rand" || objStr == "url" || objStr == "env" || objStr == "jwt" || objStr == "compress" || objStr == "semver" || objStr == "duration")
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path" || objStr == "regex" || objStr == "math" || objStr == "encoding" || objStr == "hash" || objStr == "runtime.EncodingBase64Namespace{}" || objStr == "runtime.EncodingHexNamespace{}" || objStr == "uuid" || objStr == "rand" || objStr == "url" || objStr == "env" || objStr == "jwt" || objStr == "compress" || objStr == "semver" || objStr == "duration" || objStr == "format" || objStr == "ip" || objStr == "dns" || objStr == "multipart")
 		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
 			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
 		}
@@ -407,6 +407,46 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 				return "runtime.DurationFormat", nil
 			case "since":
 				return "runtime.DurationSince", nil
+			}
+		}
+		if objStr == "format" {
+			switch e.Field {
+			case "bytes":
+				return "runtime.FormatBytes", nil
+			case "number":
+				return "runtime.FormatNumber", nil
+			case "percent":
+				return "runtime.FormatPercent", nil
+			case "plural":
+				return "runtime.FormatPlural", nil
+			}
+		}
+		if objStr == "ip" {
+			switch e.Field {
+			case "parse":
+				return "runtime.IPParse", nil
+			case "isPrivate":
+				return "runtime.IPIsPrivate", nil
+			case "inCIDR":
+				return "runtime.IPInCIDR", nil
+			case "version":
+				return "runtime.IPVersion", nil
+			}
+		}
+		if objStr == "dns" {
+			switch e.Field {
+			case "lookup":
+				return "runtime.DNSLookup", nil
+			case "txt":
+				return "runtime.DNSTXT", nil
+			case "srv":
+				return "runtime.DNSSRV", nil
+			}
+		}
+		if objStr == "multipart" {
+			switch e.Field {
+			case "parse":
+				return "runtime.MultipartParse", nil
 			}
 		}
 		if objStr == "db" {

@@ -916,3 +916,54 @@ Simplifies operations on human-readable time spans:
 ```serv
 let secs = duration.parse("1h15m")
 ```
+
+## Value Formatting Namespace (`format`)
+
+Provides human-readable value formatting:
+
+- **`format.bytes(size int) string`**: Formats byte count to string (e.g. `1048576` -> `"1 MB"`).
+- **`format.number(num float) string`**: Formats large numbers to shorthand (e.g. `1500000` -> `"1.5M"`).
+- **`format.percent(val float) string`**: Formats fraction to percentage (e.g. `0.856` -> `"85.6%"`).
+- **`format.plural(count float, singular string, plural string) string`**: Formats count with noun (e.g. `1` -> `"1 item"`, `5` -> `"5 items"`).
+
+```serv
+let label = format.plural(3, "item", "items") // "3 items"
+```
+
+## IP Address Namespace (`ip`)
+
+Provides IP address parsing and classifications:
+
+- **`ip.parse(ipStr string) map`**: Parses IP address to `{ version, octets }` map.
+- **`ip.isPrivate(ipStr string) bool`**: Checks if IP falls inside private subnets.
+- **`ip.inCIDR(ipStr string, cidr string) bool`**: Checks if IP is within specified subnet range.
+- **`ip.version(ipStr string) string`**: Returns `"ipv4"`, `"ipv6"`, or `""`.
+
+```serv
+let private = ip.isPrivate("192.168.1.1") // true
+```
+
+## DNS Resolver Namespace (`dns`)
+
+Exposes basic network lookup functions:
+
+- **`dns.lookup(host string) string`**: Resolves domain to its first IP string.
+- **`dns.txt(host string) string`**: Returns resolved TXT strings joined by spaces.
+- **`dns.srv(service string) map`**: Resolves SRV record to `{ host, port, priority }` map.
+
+```serv
+let ip = dns.lookup("example.com")
+```
+
+## Multipart Form Parsing (`multipart`)
+
+Parses multipart form payload from HTTP request body:
+
+- **`multipart.parse(req Request) map`**: Parses request, returning `{ fields: {...}, files: [{ name, filename, size, content }] }`.
+
+```serv
+let form = multipart.parse(req)
+let username = form.fields.username
+let avatarFile = form.files[0]
+```
+

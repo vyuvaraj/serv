@@ -1,0 +1,5 @@
+server "8080"
+test "failing test" {
+	let x = 1
+	assert x == 2
+}
