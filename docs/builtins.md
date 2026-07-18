@@ -215,4 +215,32 @@ let claims = auth.claims(req)
 let valid = auth.verify(req)  // Returns true if authenticated
 ```
 
+## exec — Shell Command Execution
+
+Runs shell commands natively:
+
+```serv
+let result = exec.run("echo 'Hello'")
+// result = { stdout: "Hello\n", stderr: "", exitCode: 0 }
+```
+
+- **`exec.run(cmdStr string) map`**: Runs `cmdStr` under `powershell` (Windows) or `sh` (Linux). Returns a map with `stdout`, `stderr`, and `exitCode`.
+
+## file — Direct File I/O
+
+Enables reading and writing files directly:
+
+```serv
+let ok = file.write("./log.txt", "data")
+let content = file.read("./log.txt")
+let exists = file.exists("./log.txt")
+let list = file.list(".")
+```
+
+- **`file.read(path string) string`**: Reads file contents to string.
+- **`file.write(path string, content string) bool`**: Writes content to file.
+- **`file.exists(path string) bool`**: Checks if file or directory exists.
+- **`file.list(path string) []string`**: Lists directory items.
+
+
 ```

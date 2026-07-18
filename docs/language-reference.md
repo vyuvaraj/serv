@@ -690,5 +690,63 @@ on "user.signup" (event) {
     log.info("New signup recorded: ", event.email)
     sendWelcomeEmail(event.email)
 }
+
+## Inline Go Integration (`@inline go`)
+
+Write raw Go functions directly inside `.srv` source files. This provides an escape hatch for raw performance or utilizing package features that aren't fully wrapped by the compiler yet:
+
+```serv
+@inline go fn sha256sum(input string) string {
+    import "crypto/sha256"
+    import "encoding/hex"
+
+    h := sha256.New()
+    h.Write([]byte(input))
+    return hex.EncodeToString(h.Sum(nil))
+}
+
+test "test inline Go code" {
+    let hash = sha256sum("hello")
+    assert hash == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+}
+```
+
+*Note: Any `import` statements declared inside the `@inline go` block are automatically hoisted by the compiler and added as top-level package imports in the compiled Go artifact.*
+
+## Built-in Utility Namespaces
+
+Phase 35 introduces native namespaces for shell execution and direct file system access:
+
+### 1. Shell Command Execution (`exec` namespace)
+Runs a shell command and returns output streams and exit codes:
+
+```serv
+let result = exec.run("echo 'hello world'")
+assert result.exitCode == 0
+assert result.stdout.trim() == "hello world"
+```
+
+- **`exec.run(commandString)`**: Runs command under `powershell` (Windows) or `sh` (Linux). Returns a map: `{ stdout: string, stderr: string, exitCode: int }`.
+
+### 2. Direct File I/O (`file` namespace)
+Enables reading and writing files directly from the filesystem without registering a `store` block:
+
+```serv
+let tempFile = "./log.txt"
+file.write(tempFile, "Servverse success")
+
+if file.exists(tempFile) {
+    let contents = file.read(tempFile)
+    log.info("File contents: " + contents)
+}
+
+let allFiles = file.list(".")
+```
+
+- **`file.read(path)`**: Reads whole file to string.
+- **`file.write(path, content)`**: Writes string content to a file (creates if not exists, overwrites).
+- **`file.exists(path)`**: Returns `true` if file/directory exists, `false` otherwise.
+- **`file.list(path)`**: Returns an array of file/folder names inside the directory.
+
 ```
 
