@@ -381,6 +381,34 @@ func TestLSPCompletionContextAware(t *testing.T) {
 			wantLabels:    []string{"get", "post", "put", "delete", "patch", "static"},
 			notWantLabels: []string{"fn", "log.info", "query"},
 		},
+		{
+			name:          "exec dot triggers exec-only members",
+			content:       "exec.",
+			charPos:       5,
+			wantLabels:    []string{"run"},
+			notWantLabels: []string{"fn", "log.info", "get"},
+		},
+		{
+			name:          "diff dot triggers diff-only members",
+			content:       "diff.",
+			charPos:       5,
+			wantLabels:    []string{"text", "json"},
+			notWantLabels: []string{"fn", "log.info", "get"},
+		},
+		{
+			name:          "proto dot triggers proto-only members",
+			content:       "proto.",
+			charPos:       6,
+			wantLabels:    []string{"encode", "decode"},
+			notWantLabels: []string{"fn", "log.info", "get"},
+		},
+		{
+			name:          "encoding.base64 dot triggers base64 members",
+			content:       "encoding.base64.",
+			charPos:       16,
+			wantLabels:    []string{"encode", "decode"},
+			notWantLabels: []string{"fn", "log.info", "get"},
+		},
 	}
 
 	for _, tc := range tests {

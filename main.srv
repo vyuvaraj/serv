@@ -1,5 +1,0 @@
-server "8080"
-test "passing test" {
-	let x = 1
-	assert x == 1
-}

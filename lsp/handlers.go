@@ -128,6 +128,29 @@ func builtinHover(word string) string {
 		"config":   "```serv\nfn config(key: string) -> string\n```\nRead from config.yml or env var",
 		"validate": "```serv\nfn validate(body, schema) -> []string | nil\n```\nValidate request body against schema",
 		"wasm":     "WebAssembly guest execution helpers\n\nMethods: `.readInput()`, `.writeOutput(data)`",
+		"exec":     "Native command execution namespace\n\nMethods: `.run(cmd)`",
+		"csv":      "CSV parsing and serialization namespace\n\nMethods: `.parse(content)`, `.stringify(rows, headers)`",
+		"xml":      "XML parsing and serialization namespace\n\nMethods: `.parse(content)`, `.stringify(obj)`",
+		"yaml":     "YAML parsing and serialization namespace\n\nMethods: `.parse(content)`, `.stringify(obj)`",
+		"file":     "Direct local file system access\n\nMethods: `.read(path)`, `.write(path, content)`, `.exists(path)`, `.list(dir)`",
+		"path":     "File path manipulations\n\nMethods: `.join(parts)`, `.dirname(path)`, `.basename(path)`, `.ext(path)`, `.abs(path)`",
+		"regex":    "Regular expression helpers\n\nMethods: `.match(pattern, str)`, `.find(pattern, str)`, `.replace(pattern, str, repl)`",
+		"math":     "Math functions\n\nMethods: `.floor()`, `.ceil()`, `.round()`, `.abs()`, `.pow()`, `.sqrt()`, `.min()`, `.max()`",
+		"encoding": "Data encoding sub-namespaces\n\nMembers: `.base64`, `.hex`",
+		"hash":     "Cryptographic hash algorithms\n\nMethods: `.md5(str)`, `.sha256(str)`, `.sha512(str)`, `.hmac(key, data, algo)`",
+		"uuid":     "Unique identifier generator\n\nMethods: `.v4()`, `.v7()`",
+		"rand":     "Random value generation\n\nMethods: `.int(min, max)`, `.float()`, `.string(n)`, `.bool()`",
+		"url":      "URL parser and encoder\n\nMethods: `.parse(url)`, `.encode(str)`, `.decode(str)`",
+		"jwt":      "JSON Web Token encoding and verification\n\nMethods: `.sign(payload, secret)`, `.verify(token, secret)`, `.decode(token)`",
+		"compress": "Compression and decompression\n\nMethods: `.gzip(data)`, `.ungzip(bytes)`, `.deflate(data)`, `.inflate(bytes)`",
+		"semver":   "Semantic version parser\n\nMethods: `.parse(ver)`, `.compare(v1, v2)`, `.satisfies(constraint, ver)`",
+		"duration": "Time duration parser and formatter\n\nMethods: `.parse(str)`, `.format(secs)`, `.since(time)`",
+		"format":   "Value formatters\n\nMethods: `.bytes(n)`, `.number(n)`, `.percent(f)`, `.plural(cnt, singular, plural)`",
+		"ip":       "IP address and CIDR utilities\n\nMethods: `.parse(ip)`, `.isPrivate(ip)`, `.inCIDR(ip, cidr)`, `.version(ip)`",
+		"dns":      "DNS record lookup utilities\n\nMethods: `.lookup(host)`, `.txt(host)`, `.srv(service)`",
+		"multipart": "HTTP multipart payload parser\n\nMethods: `.parse(req)`",
+		"diff":     "Text and JSON diffing\n\nMethods: `.text(a, b)`, `.json(a, b)`",
+		"proto":    "Dynamic Protocol Buffers\n\nMethods: `.encode(obj, schema)`, `.decode(bytes, schema)`",
 	}
 	if hover, ok := builtins[word]; ok {
 		return hover
@@ -912,6 +935,131 @@ var namespaceMembers = map[string][]CompletionItem{
 		{Label: "embed", Kind: 3, Detail: "Generate embedding vector", InsertText: `embed("$1")`, InsertTextFormat: 2, SortText: "1_ai_embed", Documentation: "```serv\nai.embed(text: string) -> []float\n```\nGenerate a semantic embedding vector."},
 		{Label: "classify", Kind: 3, Detail: "Classify text", InsertText: `classify("$1", $2)`, InsertTextFormat: 2, SortText: "1_ai_classify", Documentation: "```serv\nai.classify(text: string, labels: []string) -> string\n```\nClassify text into one of the provided labels."},
 		{Label: "summarize", Kind: 3, Detail: "Summarize text", InsertText: `summarize("$1")`, InsertTextFormat: 2, SortText: "1_ai_summarize", Documentation: "```serv\nai.summarize(text: string) -> string\n```\nGenerate a concise summary of a long text."},
+	},
+	"exec": {
+		{Label: "run", Kind: 3, Detail: "Run shell command", InsertText: `run("$1")`, InsertTextFormat: 2, SortText: "1_exec_run", Documentation: "Run a shell/system command and get output.\n\n```serv\nlet res = exec.run(\"echo hello\")\n```"},
+	},
+	"csv": {
+		{Label: "parse", Kind: 3, Detail: "Parse CSV content", InsertText: `parse($1)`, InsertTextFormat: 2, SortText: "1_csv_parse", Documentation: "Parse CSV string into a list of maps."},
+		{Label: "stringify", Kind: 3, Detail: "Stringify to CSV", InsertText: `stringify($1, $2)`, InsertTextFormat: 2, SortText: "1_csv_stringify", Documentation: "Serialize array of maps/rows into a CSV string."},
+	},
+	"xml": {
+		{Label: "parse", Kind: 3, Detail: "Parse XML content", InsertText: `parse($1)`, InsertTextFormat: 2, SortText: "1_xml_parse", Documentation: "Parse XML string into a map."},
+		{Label: "stringify", Kind: 3, Detail: "Stringify to XML", InsertText: `stringify($1)`, InsertTextFormat: 2, SortText: "1_xml_stringify", Documentation: "Serialize map/object to an XML string."},
+	},
+	"yaml": {
+		{Label: "parse", Kind: 3, Detail: "Parse YAML content", InsertText: `parse($1)`, InsertTextFormat: 2, SortText: "1_yaml_parse", Documentation: "Parse YAML string into a map."},
+		{Label: "stringify", Kind: 3, Detail: "Stringify to YAML", InsertText: `stringify($1)`, InsertTextFormat: 2, SortText: "1_yaml_stringify", Documentation: "Serialize map/object to a YAML string."},
+	},
+	"file": {
+		{Label: "read", Kind: 3, Detail: "Read file contents", InsertText: `read("$1")`, InsertTextFormat: 2, SortText: "1_file_read", Documentation: "Read contents of a file."},
+		{Label: "write", Kind: 3, Detail: "Write file contents", InsertText: `write("$1", $2)`, InsertTextFormat: 2, SortText: "1_file_write", Documentation: "Write contents to a file."},
+		{Label: "exists", Kind: 3, Detail: "Check if file exists", InsertText: `exists("$1")`, InsertTextFormat: 2, SortText: "1_file_exists", Documentation: "Check if a file or directory exists."},
+		{Label: "list", Kind: 3, Detail: "List directory files", InsertText: `list("$1")`, InsertTextFormat: 2, SortText: "1_file_list", Documentation: "List all files in a directory."},
+	},
+	"path": {
+		{Label: "join", Kind: 3, Detail: "Join path parts", InsertText: `join($1, $2)`, InsertTextFormat: 2, SortText: "1_path_join", Documentation: "Join path parts dynamically."},
+		{Label: "dirname", Kind: 3, Detail: "Get directory path", InsertText: `dirname("$1")`, InsertTextFormat: 2, SortText: "1_path_dirname", Documentation: "Get the directory component of a path."},
+		{Label: "basename", Kind: 3, Detail: "Get file base name", InsertText: `basename("$1")`, InsertTextFormat: 2, SortText: "1_path_basename", Documentation: "Get the base name of a path."},
+		{Label: "ext", Kind: 3, Detail: "Get file extension", InsertText: `ext("$1")`, InsertTextFormat: 2, SortText: "1_path_ext", Documentation: "Get the file extension of a path."},
+		{Label: "abs", Kind: 3, Detail: "Get absolute path", InsertText: `abs("$1")`, InsertTextFormat: 2, SortText: "1_path_abs", Documentation: "Get the absolute representation of a path."},
+	},
+	"regex": {
+		{Label: "match", Kind: 3, Detail: "Match regex pattern", InsertText: `match("$1", $2)`, InsertTextFormat: 2, SortText: "1_regex_match", Documentation: "Check if a value matches a regex pattern."},
+		{Label: "find", Kind: 3, Detail: "Find regex matches", InsertText: `find("$1", $2)`, InsertTextFormat: 2, SortText: "1_regex_find", Documentation: "Find all regex matches in a string."},
+		{Label: "replace", Kind: 3, Detail: "Replace regex matches", InsertText: `replace("$1", $2, "$3")`, InsertTextFormat: 2, SortText: "1_regex_replace", Documentation: "Replace regex matches with a replacement string."},
+	},
+	"math": {
+		{Label: "floor", Kind: 3, Detail: "Floor float to int", InsertText: `floor($1)`, InsertTextFormat: 2, SortText: "1_math_floor", Documentation: "Floor float to int."},
+		{Label: "ceil", Kind: 3, Detail: "Ceil float to int", InsertText: `ceil($1)`, InsertTextFormat: 2, SortText: "1_math_ceil", Documentation: "Ceil float to int."},
+		{Label: "round", Kind: 3, Detail: "Round float to nearest", InsertText: `round($1)`, InsertTextFormat: 2, SortText: "1_math_round", Documentation: "Round float to nearest integer."},
+		{Label: "abs", Kind: 3, Detail: "Absolute value", InsertText: `abs($1)`, InsertTextFormat: 2, SortText: "1_math_abs", Documentation: "Absolute value."},
+		{Label: "pow", Kind: 3, Detail: "Power exponent", InsertText: `pow($1, $2)`, InsertTextFormat: 2, SortText: "1_math_pow", Documentation: "Compute base raised to power exponent."},
+		{Label: "sqrt", Kind: 3, Detail: "Square root", InsertText: `sqrt($1)`, InsertTextFormat: 2, SortText: "1_math_sqrt", Documentation: "Square root of value."},
+		{Label: "min", Kind: 3, Detail: "Minimum value", InsertText: `min($1, $2)`, InsertTextFormat: 2, SortText: "1_math_min", Documentation: "Minimum of two values."},
+		{Label: "max", Kind: 3, Detail: "Maximum value", InsertText: `max($1, $2)`, InsertTextFormat: 2, SortText: "1_math_max", Documentation: "Maximum of two values."},
+	},
+	"encoding": {
+		{Label: "base64", Kind: 9, Detail: "Base64 sub-namespace", InsertText: "base64", SortText: "1_encoding_base64", Documentation: "Base64 encoding utilities."},
+		{Label: "hex", Kind: 9, Detail: "Hex sub-namespace", InsertText: "hex", SortText: "1_encoding_hex", Documentation: "Hex encoding utilities."},
+	},
+	"base64": {
+		{Label: "encode", Kind: 3, Detail: "Base64 encode", InsertText: `encode($1)`, InsertTextFormat: 2, SortText: "1_base64_encode", Documentation: "Encode string to Base64."},
+		{Label: "decode", Kind: 3, Detail: "Base64 decode", InsertText: `decode($1)`, InsertTextFormat: 2, SortText: "1_base64_decode", Documentation: "Decode Base64 string."},
+	},
+	"hex": {
+		{Label: "encode", Kind: 3, Detail: "Hex encode", InsertText: `encode($1)`, InsertTextFormat: 2, SortText: "1_hex_encode", Documentation: "Encode bytes/string to hex."},
+		{Label: "decode", Kind: 3, Detail: "Hex decode", InsertText: `decode($1)`, InsertTextFormat: 2, SortText: "1_hex_decode", Documentation: "Decode hex string."},
+	},
+	"hash": {
+		{Label: "md5", Kind: 3, Detail: "MD5 hash", InsertText: `md5($1)`, InsertTextFormat: 2, SortText: "1_hash_md5", Documentation: "Compute MD5 hash."},
+		{Label: "sha256", Kind: 3, Detail: "SHA256 hash", InsertText: `sha256($1)`, InsertTextFormat: 2, SortText: "1_hash_sha256", Documentation: "Compute SHA256 hash."},
+		{Label: "sha512", Kind: 3, Detail: "SHA512 hash", InsertText: `sha512($1)`, InsertTextFormat: 2, SortText: "1_hash_sha512", Documentation: "Compute SHA512 hash."},
+		{Label: "hmac", Kind: 3, Detail: "HMAC signature", InsertText: `hmac($1, $2, "$3")`, InsertTextFormat: 2, SortText: "1_hash_hmac", Documentation: "Compute HMAC signature."},
+	},
+	"uuid": {
+		{Label: "v4", Kind: 3, Detail: "Generate UUID v4", InsertText: `v4()`, InsertTextFormat: 2, SortText: "1_uuid_v4", Documentation: "Generate random UUID v4."},
+		{Label: "v7", Kind: 3, Detail: "Generate UUID v7", InsertText: `v7()`, InsertTextFormat: 2, SortText: "1_uuid_v7", Documentation: "Generate time-ordered UUID v7."},
+	},
+	"rand": {
+		{Label: "int", Kind: 3, Detail: "Random integer", InsertText: `int($1, $2)`, InsertTextFormat: 2, SortText: "1_rand_int", Documentation: "Generate random integer."},
+		{Label: "float", Kind: 3, Detail: "Random float", InsertText: `float()`, InsertTextFormat: 2, SortText: "1_rand_float", Documentation: "Generate random float."},
+		{Label: "string", Kind: 3, Detail: "Random string", InsertText: `string($1)`, InsertTextFormat: 2, SortText: "1_rand_string", Documentation: "Generate random alphanumeric string."},
+		{Label: "bool", Kind: 3, Detail: "Random boolean", InsertText: `bool()`, InsertTextFormat: 2, SortText: "1_rand_bool", Documentation: "Generate random boolean."},
+	},
+	"url": {
+		{Label: "parse", Kind: 3, Detail: "Parse URL", InsertText: `parse($1)`, InsertTextFormat: 2, SortText: "1_url_parse", Documentation: "Parse URL string into a map."},
+		{Label: "encode", Kind: 3, Detail: "URL encode", InsertText: `encode($1)`, InsertTextFormat: 2, SortText: "1_url_encode", Documentation: "Encode URL path/query component."},
+		{Label: "decode", Kind: 3, Detail: "URL decode", InsertText: `decode($1)`, InsertTextFormat: 2, SortText: "1_url_decode", Documentation: "Decode URL-encoded string."},
+	},
+	"jwt": {
+		{Label: "sign", Kind: 3, Detail: "Sign JWT token", InsertText: `sign($1, "$2")`, InsertTextFormat: 2, SortText: "1_jwt_sign", Documentation: "Sign JWT payload."},
+		{Label: "verify", Kind: 3, Detail: "Verify JWT token", InsertText: `verify($1, "$2")`, InsertTextFormat: 2, SortText: "1_jwt_verify", Documentation: "Verify and parse JWT token."},
+		{Label: "decode", Kind: 3, Detail: "Decode JWT token payload", InsertText: `decode($1)`, InsertTextFormat: 2, SortText: "1_jwt_decode", Documentation: "Decode JWT token payload without verification."},
+	},
+	"compress": {
+		{Label: "gzip", Kind: 3, Detail: "Gzip data", InsertText: `gzip($1)`, InsertTextFormat: 2, SortText: "1_compress_gzip", Documentation: "Compress data using Gzip."},
+		{Label: "ungzip", Kind: 3, Detail: "Ungzip data", InsertText: `ungzip($1)`, InsertTextFormat: 2, SortText: "1_compress_ungzip", Documentation: "Decompress Gzip data."},
+		{Label: "deflate", Kind: 3, Detail: "Deflate data", InsertText: `deflate($1)`, InsertTextFormat: 2, SortText: "1_compress_deflate", Documentation: "Compress data using Deflate."},
+		{Label: "inflate", Kind: 3, Detail: "Inflate data", InsertText: `inflate($1)`, InsertTextFormat: 2, SortText: "1_compress_inflate", Documentation: "Decompress Deflate data."},
+	},
+	"semver": {
+		{Label: "parse", Kind: 3, Detail: "Parse semver string", InsertText: `parse("$1")`, InsertTextFormat: 2, SortText: "1_semver_parse", Documentation: "Parse version string."},
+		{Label: "compare", Kind: 3, Detail: "Compare versions", InsertText: `compare("$1", "$2")`, InsertTextFormat: 2, SortText: "1_semver_compare", Documentation: "Compare two version strings (-1, 0, 1)."},
+		{Label: "satisfies", Kind: 3, Detail: "Check version constraint", InsertText: `satisfies("$1", "$2")`, InsertTextFormat: 2, SortText: "1_semver_satisfies", Documentation: "Check if version satisfies a constraint."},
+	},
+	"duration": {
+		{Label: "parse", Kind: 3, Detail: "Parse duration string", InsertText: `parse("$1")`, InsertTextFormat: 2, SortText: "1_duration_parse", Documentation: "Parse duration string to seconds."},
+		{Label: "format", Kind: 3, Detail: "Format duration to string", InsertText: `format($1)`, InsertTextFormat: 2, SortText: "1_duration_format", Documentation: "Format duration in seconds to string."},
+		{Label: "since", Kind: 3, Detail: "Time elapsed since", InsertText: `since($1)`, InsertTextFormat: 2, SortText: "1_duration_since", Documentation: "Compute seconds elapsed since a time."},
+	},
+	"format": {
+		{Label: "bytes", Kind: 3, Detail: "Format bytes size", InsertText: `bytes($1)`, InsertTextFormat: 2, SortText: "1_format_bytes", Documentation: "Format bytes to human-readable size."},
+		{Label: "number", Kind: 3, Detail: "Format number shorthand", InsertText: `number($1)`, InsertTextFormat: 2, SortText: "1_format_number", Documentation: "Format number with metric shorthand."},
+		{Label: "percent", Kind: 3, Detail: "Format percentage", InsertText: `percent($1)`, InsertTextFormat: 2, SortText: "1_format_percent", Documentation: "Format float to percentage string."},
+		{Label: "plural", Kind: 3, Detail: "Pluralize word", InsertText: `plural($1, "$2", "$3")`, InsertTextFormat: 2, SortText: "1_format_plural", Documentation: "Choose singular or plural word based on count."},
+	},
+	"ip": {
+		{Label: "parse", Kind: 3, Detail: "Parse IP address", InsertText: `parse("$1")`, InsertTextFormat: 2, SortText: "1_ip_parse", Documentation: "Parse IP address to details map."},
+		{Label: "isPrivate", Kind: 3, Detail: "Check if private IP", InsertText: `isPrivate("$1")`, InsertTextFormat: 2, SortText: "1_ip_isPrivate", Documentation: "Check if IP is in private subnet."},
+		{Label: "inCIDR", Kind: 3, Detail: "Check IP in CIDR block", InsertText: `inCIDR("$1", "$2")`, InsertTextFormat: 2, SortText: "1_ip_inCIDR", Documentation: "Check if IP is inside a CIDR block."},
+		{Label: "version", Kind: 3, Detail: "Get IP version", InsertText: `version("$1")`, InsertTextFormat: 2, SortText: "1_ip_version", Documentation: "Get version of IP address."},
+	},
+	"dns": {
+		{Label: "lookup", Kind: 3, Detail: "Lookup IP address", InsertText: `lookup("$1")`, InsertTextFormat: 2, SortText: "1_dns_lookup", Documentation: "Resolve domain to its first IP."},
+		{Label: "txt", Kind: 3, Detail: "Resolve TXT records", InsertText: `txt("$1")`, InsertTextFormat: 2, SortText: "1_dns_txt", Documentation: "Resolve domain TXT records."},
+		{Label: "srv", Kind: 3, Detail: "Resolve SRV record", InsertText: `srv("$1")`, InsertTextFormat: 2, SortText: "1_dns_srv", Documentation: "Resolve domain SRV record details."},
+	},
+	"multipart": {
+		{Label: "parse", Kind: 3, Detail: "Parse multipart request", InsertText: `parse($1)`, InsertTextFormat: 2, SortText: "1_multipart_parse", Documentation: "Parse multipart body of HTTP Request."},
+	},
+	"diff": {
+		{Label: "text", Kind: 3, Detail: "Text unified diff", InsertText: `text($1, $2)`, InsertTextFormat: 2, SortText: "1_diff_text", Documentation: "Generate a unified diff between two text strings."},
+		{Label: "json", Kind: 3, Detail: "JSON map patch diff", InsertText: `json($1, $2)`, InsertTextFormat: 2, SortText: "1_diff_json", Documentation: "Compute RFC 6902-like patch operations between two maps."},
+	},
+	"proto": {
+		{Label: "encode", Kind: 3, Detail: "Protobuf encode", InsertText: `encode($1, "$2")`, InsertTextFormat: 2, SortText: "1_proto_encode", Documentation: "Encode map to protobuf bytes based on schema."},
+		{Label: "decode", Kind: 3, Detail: "Protobuf decode", InsertText: `decode($1, "$2")`, InsertTextFormat: 2, SortText: "1_proto_decode", Documentation: "Decode protobuf bytes to map based on schema."},
 	},
 }
 
