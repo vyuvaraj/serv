@@ -48,7 +48,7 @@ route "GET" "/hello" (req) {
 
 	// Start the service in hot watch mode
 	cmd := exec.Command(servBin, "run", "--hot", srvFile)
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(), "TESTING=true", "SERV_ENV=test")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
