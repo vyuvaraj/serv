@@ -1,6 +1,6 @@
 module servlock
 
-go 1.26.4
+go 1.23.0
 
 require github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
 
