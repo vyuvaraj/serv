@@ -83,10 +83,18 @@ Write-Host "Phase 2: Unit Tests (serv test)" -ForegroundColor White
 Write-Host "--------------------------------"
 
 $testFiles = @(
+    "11_concurrent_maps.srv",
     "12_static_types.srv",
+    "13_phase1_features.srv",
     "14_phase3_features.srv",
+    "15_mcp_support.srv",
+    "18_python_pool.srv",
+    "19_rate_limiting.srv",
     "20_raw_strings.srv",
-    "50_new_features.srv"
+    "22_query_hooks.srv",
+    "24_migrations.srv",
+    "50_new_features.srv",
+    "52_event_sourcing.srv"
 )
 
 foreach ($name in $testFiles) {

@@ -785,6 +785,7 @@ func (c *Codegen) genSpawnStmt(s *SpawnStmt) (string, error) {
 	}
 
 	var spawnCode string
+	traceVar := fmt.Sprintf("_spawnTrace_%d_%d", s.Token.Line, s.Token.Col)
 	if s.Limit != nil {
 		limStr, err := c.genExpression(s.Limit)
 		if err != nil {
@@ -793,7 +794,7 @@ func (c *Codegen) genSpawnStmt(s *SpawnStmt) (string, error) {
 		semID := fmt.Sprintf("spawn_%d_%d", s.Token.Line, s.Token.Col)
 		c.imports[`"fmt"`] = true
 		c.imports[`"strconv"`] = true
-		spawnCode = fmt.Sprintf(`_spawnTrace := runtime.GetActiveTrace()
+		spawnCode = fmt.Sprintf(`%s := runtime.GetActiveTrace()
 		runtime.AcquireSemaphore(%q, func() int {
 			val, _ := strconv.Atoi(fmt.Sprint(%s))
 			if val <= 0 { return 1 }
@@ -801,8 +802,8 @@ func (c *Codegen) genSpawnStmt(s *SpawnStmt) (string, error) {
 		}())
 go func() {
 		defer runtime.ReleaseSemaphore(%q)
-		if _spawnTrace != nil {
-			runtime.SetActiveTrace(_spawnTrace)
+		if %s != nil {
+			runtime.SetActiveTrace(%s)
 			defer runtime.ClearActiveTrace()
 		}
 		_endSpan := runtime.TraceSpawn(%q)
@@ -814,12 +815,12 @@ go func() {
 		}()
 		%s
 	}()
-`, semID, limStr, semID, taskName, call)
+`, traceVar, semID, limStr, semID, traceVar, traceVar, taskName, call)
 	} else {
-		spawnCode = fmt.Sprintf(`_spawnTrace := runtime.GetActiveTrace()
+		spawnCode = fmt.Sprintf(`%s := runtime.GetActiveTrace()
 go func() {
-		if _spawnTrace != nil {
-			runtime.SetActiveTrace(_spawnTrace)
+		if %s != nil {
+			runtime.SetActiveTrace(%s)
 			defer runtime.ClearActiveTrace()
 		}
 		_endSpan := runtime.TraceSpawn(%q)
@@ -831,7 +832,7 @@ go func() {
 		}()
 		%s
 	}()
-`, taskName, call)
+`, traceVar, traceVar, traceVar, taskName, call)
 	}
 	if !c.inFunction {
 		return fmt.Sprintf("func init() {\n\t%s}\n\n", spawnCode), nil
