@@ -319,21 +319,22 @@ func installPackageWithDeps(pkgName string, visited map[string]bool, depth int) 
 	}
 
 	resp, err := http.Get(url)
-	if err != nil {
-		fmt.Printf("%sError connecting to registry: %v\n", indent, err)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		if err != nil {
+			fmt.Printf("%sError connecting to registry: %v\n", indent, err)
+		} else {
+			fmt.Printf("%sRegistry returned status %d for package '%s'\n", indent, resp.StatusCode, name)
+		}
+		if tryGitFallback(name, targetDir, indent) {
+			resolveTransitiveDeps(targetDir, visited, depth, indent)
+			return
+		}
 		if depth == 0 {
 			os.Exit(1)
 		}
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("%sRegistry returned status %d for package '%s'\n", indent, resp.StatusCode, name)
-		if depth == 0 {
-			os.Exit(1)
-		}
-		return
-	}
 
 	// Read full body to memory (needed for tar extraction)
 	bodyData, err := io.ReadAll(resp.Body)
@@ -410,8 +411,45 @@ func installPackageWithDeps(pkgName string, visited map[string]bool, depth int) 
 	}
 
 	fmt.Printf("%s✓ Package '%s' installed to %s/\n", indent, name, targetDir)
+	resolveTransitiveDeps(targetDir, visited, depth, indent)
+}
 
-	// Resolve transitive dependencies from the installed package's serv.toml
+// tryGitFallback attempts to clone the package from a Git repository when the registry is down
+func tryGitFallback(name string, targetDir string, indent string) bool {
+	var gitURL string
+	if strings.Contains(name, "/") {
+		gitURL = "https://" + name
+	} else {
+		gitURL = fmt.Sprintf("https://github.com/vyuvaraj/serv-%s.git", name)
+	}
+
+	fmt.Printf("%sRegistry unavailable. Trying Git fallback: %s ...\n", indent, gitURL)
+
+	tempCloneDir := targetDir + "_git_temp"
+	_ = os.RemoveAll(tempCloneDir)
+
+	cmd := exec.Command("git", "clone", "--depth", "1", gitURL, tempCloneDir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("%sGit clone failed: %s\n", indent, strings.TrimSpace(stderr.String()))
+		_ = os.RemoveAll(tempCloneDir)
+		return false
+	}
+
+	_ = os.RemoveAll(targetDir)
+	if err := os.Rename(tempCloneDir, targetDir); err != nil {
+		fmt.Printf("%sFailed to rename git clone directory: %v\n", indent, err)
+		_ = os.RemoveAll(tempCloneDir)
+		return false
+	}
+
+	_ = os.RemoveAll(filepath.Join(targetDir, ".git"))
+	fmt.Printf("%s✓ Package '%s' installed via Git fallback\n", indent, name)
+	return true
+}
+
+func resolveTransitiveDeps(targetDir string, visited map[string]bool, depth int, indent string) {
 	deps := readPackageDependencies(targetDir)
 	if len(deps) > 0 {
 		fmt.Printf("%s  Resolving %d dependenc%s...\n", indent, len(deps), pluralSuffix(len(deps)))

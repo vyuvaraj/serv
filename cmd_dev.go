@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // servDevServices defines the default services to start in dev mode.
@@ -262,80 +264,121 @@ func startWorkspaceWatcher(procs []*devProcess) {
 	}
 	parentDir := filepath.Dir(wd)
 
-	dirMap := make(map[string]string)
-	for _, proc := range procs {
-		dirMap[proc.name] = filepath.Join(parentDir, proc.name)
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("[WORKSPACE HOT-RELOAD] Failed to create fsnotify watcher: %v", err)
+		return
 	}
 
-	getModTimes := func(dir string) map[string]time.Time {
-		times := make(map[string]time.Time)
-		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil
-			}
-			if !info.IsDir() && filepath.Ext(path) == ".go" {
-				times[path] = info.ModTime()
+	dirToProc := make(map[string]*devProcess)
+
+	addWatcherDirs := func(root string, proc *devProcess) {
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err == nil && info.IsDir() {
+				base := filepath.Base(path)
+				if base == ".git" || base == ".build" || base == "node_modules" {
+					return filepath.SkipDir
+				}
+				_ = watcher.Add(path)
+				dirToProc[path] = proc
 			}
 			return nil
 		})
-		return times
 	}
 
-	lastMods := make(map[string]map[string]time.Time)
-	for name, dir := range dirMap {
-		lastMods[name] = getModTimes(dir)
+	for _, proc := range procs {
+		svcDir := filepath.Join(parentDir, proc.name)
+		addWatcherDirs(svcDir, proc)
 	}
 
 	go func() {
+		defer watcher.Close()
+		var (
+			mu           sync.Mutex
+			lastTriggers = make(map[string]time.Time)
+			triggerDelay = 500 * time.Millisecond
+		)
+
 		for {
-			time.Sleep(1 * time.Second)
-			for _, proc := range procs {
-				dir, exists := dirMap[proc.name]
-				if !exists {
-					continue
-				}
-				current := getModTimes(dir)
-				changed := false
-				for path, mtime := range current {
-					oldTime, ok := lastMods[proc.name][path]
-					if !ok || mtime.After(oldTime) {
-						changed = true
-						break
-					}
-				}
-				if !changed && len(current) != len(lastMods[proc.name]) {
-					changed = true
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
 				}
 
-				if changed {
-					lastMods[proc.name] = current
-					log.Printf("[WORKSPACE HOT-RELOAD] Change detected in %s. Rebuilding service...", proc.name)
-
-					buildCmd := exec.Command("go", "build", "-o", proc.binary+".exe")
-					buildCmd.Dir = dir
-					buildCmd.Env = append(os.Environ(), "GOWORK=off")
-					if err := buildCmd.Run(); err != nil {
-						log.Printf("[WORKSPACE HOT-RELOAD] Build failed for %s: %v", proc.name, err)
-						continue
+				if filepath.Ext(event.Name) == ".go" && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+					// Resolve the directory to the proc
+					dir := filepath.Dir(event.Name)
+					proc, exists := dirToProc[dir]
+					// Fallback: search parent directories if not found
+					if !exists {
+						for pDir, pProc := range dirToProc {
+							if strings.HasPrefix(dir, pDir) {
+								proc = pProc
+								exists = true
+								break
+							}
+						}
 					}
 
-					if proc.cmd != nil && proc.cmd.Process != nil {
-						proc.cmd.Process.Kill()
-						proc.cmd.Wait()
-					}
+					if exists {
+						mu.Lock()
+						now := time.Now()
+						lastTrigger := lastTriggers[proc.name]
+						if now.Sub(lastTrigger) > triggerDelay {
+							lastTriggers[proc.name] = now
+							mu.Unlock()
 
-					binaryPath := filepath.Join(dir, proc.binary+".exe")
-					newCmd := exec.Command(binaryPath, proc.args...)
-					newCmd.Stdout = nil
-					newCmd.Stderr = nil
-					newCmd.Env = append(os.Environ(), proc.envVars...)
-					if err := newCmd.Start(); err != nil {
-						log.Printf("[WORKSPACE HOT-RELOAD] Restart failed for %s: %v", proc.name, err)
-					} else {
-						proc.cmd = newCmd
-						log.Printf("[WORKSPACE HOT-RELOAD] Successfully restarted %s", proc.name)
+							log.Printf("[WORKSPACE HOT-RELOAD] Change detected in %s (%s). Rebuilding service...", proc.name, filepath.Base(event.Name))
+
+							svcDir := filepath.Join(parentDir, proc.name)
+							buildCmd := exec.Command("go", "build", "-o", proc.binary+".exe")
+							buildCmd.Dir = svcDir
+							buildCmd.Env = append(os.Environ(), "GOWORK=off")
+							if err := buildCmd.Run(); err != nil {
+								log.Printf("[WORKSPACE HOT-RELOAD] Build failed for %s: %v", proc.name, err)
+								continue
+							}
+
+							if proc.cmd != nil && proc.cmd.Process != nil {
+								proc.cmd.Process.Kill()
+								proc.cmd.Wait()
+							}
+
+							binaryPath := filepath.Join(svcDir, proc.binary+".exe")
+							newCmd := exec.Command(binaryPath, proc.args...)
+							newCmd.Stdout = nil
+							newCmd.Stderr = nil
+							newCmd.Env = append(os.Environ(), proc.envVars...)
+							if err := newCmd.Start(); err != nil {
+								log.Printf("[WORKSPACE HOT-RELOAD] Restart failed for %s: %v", proc.name, err)
+							} else {
+								proc.cmd = newCmd
+								log.Printf("[WORKSPACE HOT-RELOAD] Successfully restarted %s", proc.name)
+							}
+						} else {
+							mu.Unlock()
+						}
 					}
 				}
+
+				if event.Has(fsnotify.Create) {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						// Find which process this directory belongs to
+						for pDir, pProc := range dirToProc {
+							if strings.HasPrefix(event.Name, pDir) {
+								addWatcherDirs(event.Name, pProc)
+								break
+							}
+						}
+					}
+				}
+
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Printf("[WORKSPACE HOT-RELOAD] Watcher error: %v", err)
 			}
 		}
 	}()
