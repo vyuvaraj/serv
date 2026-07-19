@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 )
 
@@ -747,6 +748,10 @@ func (c *Codegen) findReferencedIdentifiers(node Node) map[string]bool {
 	var walk func(n Node)
 	walk = func(n Node) {
 		if n == nil {
+			return
+		}
+		val := reflect.ValueOf(n)
+		if val.Kind() == reflect.Ptr && val.IsNil() {
 			return
 		}
 		switch nd := n.(type) {
