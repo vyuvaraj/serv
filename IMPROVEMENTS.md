@@ -103,7 +103,7 @@ Generated Go has `// .srv line N` comments but no DWARF mapping or source maps. 
 | **Low** | Source maps for debugger integration | Pending | Large | Production debugging |
 | **Low** | Build a real package registry (or Git URLs) | **Done (Git Fallback)** | Medium | Ecosystem growth |
 | **Low** | LSP completion/hover using symbol table | Pending | Medium | Editor integration |
-| **Low** | Remove `_ = x` noise from generated code | Pending | Small | Cleaner output |
+| **Low** | Remove `_ = x` noise from generated code | **Done** | Small | Cleaner output |
 
 ---
 
