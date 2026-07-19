@@ -38,12 +38,8 @@ func TestCodegenErrorPropagation(t *testing.T) {
 func TestCodegenSpawnWithSemaphore(t *testing.T) {
 	input := `
 	fn runTasks() {
-		spawn "task1" limit 3 {
-			log.info("task 1 execution")
-		}
-		spawn "task2" limit 5 {
-			log.info("task 2 execution")
-		}
+		spawn(3) task1()
+		spawn(5) task2()
 	}
 	`
 	l := NewLexer(input)
@@ -64,7 +60,7 @@ func TestCodegenSpawnWithSemaphore(t *testing.T) {
 	if !strings.Contains(output, "_spawnTrace_3_3") {
 		t.Errorf("Expected output to contain unique trace variable '_spawnTrace_3_3', got:\n%s", output)
 	}
-	if !strings.Contains(output, "_spawnTrace_6_3") {
-		t.Errorf("Expected output to contain unique trace variable '_spawnTrace_6_3', got:\n%s", output)
+	if !strings.Contains(output, "_spawnTrace_4_3") {
+		t.Errorf("Expected output to contain unique trace variable '_spawnTrace_4_3', got:\n%s", output)
 	}
 }

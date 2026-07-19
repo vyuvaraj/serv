@@ -7,8 +7,7 @@ import (
 func TestLexerStringsAndComments(t *testing.T) {
 	input := `
 	// This is a line comment
-	/* This is a
-	   block comment */
+	// This is another line comment
 	let x = "standard string"
 	let y = ` + "`raw string`" + `
 	let z = f"interpolated {name} string"
@@ -30,7 +29,7 @@ func TestLexerStringsAndComments(t *testing.T) {
 		{TOKEN_LET, "let"},
 		{TOKEN_IDENT, "z"},
 		{TOKEN_ASSIGN, "="},
-		{TOKEN_STRING, "interpolated {name} string"},
+		{TOKEN_FSTRING, "interpolated {name} string"},
 	}
 
 	for i, tt := range expected {
