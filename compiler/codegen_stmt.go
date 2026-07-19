@@ -1031,7 +1031,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 					retStmt = "return nil"
 				}
 			} else if retType == "error" {
-				retStmt = fmt.Sprintf("return [2]interface{}{nil, %s}", tmpErr)
+				retStmt = fmt.Sprintf("return %s", tmpErr)
 			} else if strings.HasSuffix(retType, "?") {
 				retStmt = "return nil"
 			} else {
