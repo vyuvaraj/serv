@@ -44,6 +44,7 @@ type Codegen struct {
 	currentWorkflow     *WorkflowDecl
 	dbTables            map[string]DBTable
 	Filename            string
+	blockRefs           []map[string]bool
 }
 
 func NewCodegen(program *Program) *Codegen {
@@ -656,6 +657,9 @@ func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
 	oldDeclared := c.declaredVars
 	c.declaredVars = NewScope(c.declaredVars)
 
+	refs := c.findReferencedIdentifiers(block)
+	c.blockRefs = append(c.blockRefs, refs)
+
 	oldVarTypes := c.varTypes
 	c.varTypes = make(map[string]string)
 	for k, v := range oldVarTypes {
@@ -664,6 +668,7 @@ func (c *Codegen) genBlockStatement(block *BlockStmt) (string, error) {
 	defer func() {
 		c.declaredVars = oldDeclared
 		c.varTypes = oldVarTypes
+		c.blockRefs = c.blockRefs[:len(c.blockRefs)-1]
 	}()
 
 	var out bytes.Buffer
@@ -726,4 +731,79 @@ func (c *Codegen) GenerateFileHeader(fileImports map[string]bool) string {
 		out.WriteString("var _ = json.Marshal // ensure json is used\n\n")
 	}
 	return out.String()
+}
+
+func (c *Codegen) isVarReferenced(name string) bool {
+	for i := len(c.blockRefs) - 1; i >= 0; i-- {
+		if c.blockRefs[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Codegen) findReferencedIdentifiers(node Node) map[string]bool {
+	refs := make(map[string]bool)
+	var walk func(n Node)
+	walk = func(n Node) {
+		if n == nil {
+			return
+		}
+		switch nd := n.(type) {
+		case *Identifier:
+			refs[nd.Value] = true
+		case *LetStmt:
+			walk(nd.Value)
+		case *FnDecl:
+			walk(nd.Body)
+		case *BlockStmt:
+			for _, stmt := range nd.Statements {
+				walk(stmt)
+			}
+		case *RouteStmt:
+			walk(nd.Body)
+		case *ExprStmt:
+			walk(nd.Value)
+		case *PrefixExpr:
+			walk(nd.Right)
+		case *InfixExpr:
+			walk(nd.Left)
+			walk(nd.Right)
+		case *CallExpr:
+			walk(nd.Function)
+			for _, arg := range nd.Arguments {
+				walk(arg)
+			}
+		case *IfStmt:
+			walk(nd.Condition)
+			walk(nd.Body)
+			walk(nd.ElseBody)
+		case *ForStmt:
+			walk(nd.Iterable)
+			walk(nd.Body)
+		case *ReturnStmt:
+			walk(nd.Value)
+		case *TryCatchStmt:
+			walk(nd.TryBody)
+			walk(nd.CatchBody)
+		case *AssignExpr:
+			walk(nd.Value)
+		case *MemberAssignExpr:
+			walk(nd.Object)
+			walk(nd.Value)
+		case *IndexAssignExpr:
+			walk(nd.Left)
+			walk(nd.Value)
+		case *CompoundAssignExpr:
+			refs[nd.Name] = true
+			walk(nd.Value)
+		case *MemberExpr:
+			walk(nd.Object)
+		case *IndexExpr:
+			walk(nd.Left)
+			walk(nd.Index)
+		}
+	}
+	walk(node)
+	return refs
 }

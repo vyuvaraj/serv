@@ -1044,8 +1044,12 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			retStmt = "return"
 		}
 
-		return fmt.Sprintf("%s, %s := runtime.TryCallWithError(func() interface{} { return %s })\nif %s != nil {\n\t%s\n}\nvar %s interface{} = %s\n_ = %s\n",
-			tmpVal, tmpErr, innerVal, tmpErr, retStmt, s.Name, tmpVal, s.Name), nil
+		blankStmt := ""
+		if !c.isVarReferenced(s.Name) {
+			blankStmt = fmt.Sprintf("_ = %s\n", s.Name)
+		}
+		return fmt.Sprintf("%s, %s := runtime.TryCallWithError(func() interface{} { return %s })\nif %s != nil {\n\t%s\n}\nvar %s interface{} = %s\n%s",
+			tmpVal, tmpErr, innerVal, tmpErr, retStmt, s.Name, tmpVal, blankStmt), nil
 	}
 
 	val, err := c.genExpression(s.Value)
@@ -1072,13 +1076,21 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			}
 		}
 
+		var blanks []string
+		for _, name := range s.Names {
+			if !c.isVarReferenced(name) {
+				blanks = append(blanks, fmt.Sprintf("_ = %s\n", name))
+			}
+		}
+		blankStr := strings.Join(blanks, "")
+
 		if isDbQueryCall {
-			return fmt.Sprintf("%s, %s := safeCall(func() interface{} { r, e := %s; return [2]interface{}{r, e} })\n_ = %s\n_ = %s\n",
-				s.Names[0], s.Names[1], val, s.Names[0], s.Names[1]), nil
+			return fmt.Sprintf("%s, %s := safeCall(func() interface{} { r, e := %s; return [2]interface{}{r, e} })\n%s",
+				s.Names[0], s.Names[1], val, blankStr), nil
 		}
 
-		return fmt.Sprintf("%s, %s := safeCall(func() interface{} { return %s })\n_ = %s\n_ = %s\n",
-			s.Names[0], s.Names[1], val, s.Names[0], s.Names[1]), nil
+		return fmt.Sprintf("%s, %s := safeCall(func() interface{} { return %s })\n%s",
+			s.Names[0], s.Names[1], val, blankStr), nil
 	}
 
 	if c.isDeclared(s.Name) {
@@ -1109,7 +1121,11 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 		} else if inferred != "interface{}" {
 			c.varTypes[s.Name] = inferred
 		}
-		return fmt.Sprintf("%s = %s\n_ = %s\n", s.Name, val, s.Name), nil
+		blankStmt := ""
+		if !c.isVarReferenced(s.Name) {
+			blankStmt = fmt.Sprintf("_ = %s\n", s.Name)
+		}
+		return fmt.Sprintf("%s = %s\n%s", s.Name, val, blankStmt), nil
 	}
 	c.declareVar(s.Name)
 	goType := "interface{}"
@@ -1177,7 +1193,11 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 		}
 	}
 	if c.inFunction {
-		return fmt.Sprintf("var %s %s = %s\n_ = %s\n", s.Name, goType, val, s.Name), nil
+		blankStmt := ""
+		if !c.isVarReferenced(s.Name) {
+			blankStmt = fmt.Sprintf("_ = %s\n", s.Name)
+		}
+		return fmt.Sprintf("var %s %s = %s\n%s", s.Name, goType, val, blankStmt), nil
 	}
 	return fmt.Sprintf("var %s %s = %s\n", s.Name, goType, val), nil
 }
