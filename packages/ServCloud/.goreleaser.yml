@@ -1,0 +1,99 @@
+project_name: servcloud
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servcloud
+    main: .
+    binary: servcloud
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servcloud
+    builds: [servcloud]
+    name_template: "servcloud_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servcloud:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servcloud:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServCloud"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServCloud"
+
+brews:
+  - name: servcloud
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServCloud"
+    description: "Cloud infrastructure orchestration service from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servcloud"
+    test: |
+      system "#{bin}/servcloud", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServCloud"
+    description: "Cloud infrastructure orchestration service from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servcloud-pkg
+    package_name: servcloud
+    builds: [servcloud]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServCloud
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Branch preview deployments and cloud orchestration from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servcloud/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
