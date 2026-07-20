@@ -49,8 +49,8 @@ github.com/sijms/go-ora/v2/network
 github.com/sijms/go-ora/v2/network/security
 github.com/sijms/go-ora/v2/network/security/md4
 github.com/sijms/go-ora/v2/trace
-# github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
-## explicit; go 1.26.4
+# github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198 => ../ServShared
+## explicit; go 1.23.0
 github.com/vyuvaraj/ServShared
 github.com/vyuvaraj/ServShared/pkg/middleware
 # golang.org/x/sys v0.44.0
@@ -93,3 +93,4 @@ modernc.org/memory
 # modernc.org/sqlite v1.28.0
 ## explicit; go 1.19
 modernc.org/sqlite/lib
+# github.com/vyuvaraj/ServShared => ../ServShared

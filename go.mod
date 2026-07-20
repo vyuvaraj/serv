@@ -1,13 +1,13 @@
 module servconsole
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/lib/pq v1.12.3
 	github.com/sijms/go-ora/v2 v2.9.0
-	github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
+	github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198
 )
 
 require (
@@ -24,3 +24,5 @@ require (
 	modernc.org/memory v1.7.2 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
 )
+
+replace github.com/vyuvaraj/ServShared => ../ServShared
