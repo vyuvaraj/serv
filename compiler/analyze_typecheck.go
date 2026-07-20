@@ -36,6 +36,8 @@ func analyzeTypeMismatches(fn *FnDecl, program *Program) []Diagnostic {
 		diags = append(diags, checkNullSafety(stmt)...)
 	}
 
+	diags = append(diags, analyzeVariableTypes(fn, program)...)
+
 	return diags
 }
 
@@ -536,4 +538,134 @@ func analyzeInterfaceSatisfaction(program *Program) []Diagnostic {
 
 	return diags
 }
+
+func analyzeVariableTypes(fn *FnDecl, program *Program) []Diagnostic {
+	var diags []Diagnostic
+	if fn == nil || fn.Body == nil {
+		return diags
+	}
+	rootScope := NewScope(nil)
+	
+	// Add parameters to root scope
+	for i, param := range fn.Params {
+		var pType string
+		if i < len(fn.ParamTypes) {
+			pType = fn.ParamTypes[i]
+		}
+		rootScope.Insert(&Symbol{Name: param, Type: "parameter", DataType: pType})
+	}
+
+	var walk func(statements []Statement, s *Scope)
+	walk = func(statements []Statement, s *Scope) {
+		for _, stmt := range statements {
+			if stmt == nil {
+				continue
+			}
+			switch nd := stmt.(type) {
+			case *LetStmt:
+				inferred := inferExpressionType(nd.Value, s, program)
+				declared := nd.Type
+				if declared != "" {
+					if inferred != "" && inferred != "interface{}" && !typesCompatible(inferred, declared) {
+						diags = append(diags, Diagnostic{
+							Line:     nd.Token.Line,
+							Col:      nd.Token.Col,
+							Severity: "error",
+							Message:  fmt.Sprintf("cannot assign type '%s' to variable '%s' of declared type '%s'", inferred, nd.Name, declared),
+						})
+					}
+					s.Insert(&Symbol{Name: nd.Name, Type: "variable", DataType: declared})
+				} else {
+					if inferred == "" {
+						inferred = "interface{}"
+					}
+					s.Insert(&Symbol{Name: nd.Name, Type: "variable", DataType: inferred})
+				}
+			case *ExprStmt:
+				if assign, ok := nd.Value.(*AssignExpr); ok {
+					if sym, found := s.Lookup(assign.Name); found {
+						inferred := inferExpressionType(assign.Value, s, program)
+						if sym.DataType != "" && sym.DataType != "interface{}" && inferred != "" && inferred != "interface{}" && !typesCompatible(inferred, sym.DataType) {
+							diags = append(diags, Diagnostic{
+								Line:     assign.Token.Line,
+								Col:      assign.Token.Col,
+								Severity: "error",
+								Message:  fmt.Sprintf("cannot assign type '%s' to variable '%s' of type '%s'", inferred, assign.Name, sym.DataType),
+							})
+						}
+					}
+				}
+			case *ReturnStmt:
+				if enclosingFn := fn; enclosingFn != nil && enclosingFn.ReturnType != "" && enclosingFn.ReturnType != "any" && enclosingFn.ReturnType != "nil" {
+					if nd.Value == nil {
+						diags = append(diags, Diagnostic{
+							Line:     nd.Token.Line,
+							Col:      nd.Token.Col,
+							Severity: "error",
+							Message:  fmt.Sprintf("function '%s' expects return type '%s', got empty return", enclosingFn.Name, enclosingFn.ReturnType),
+						})
+					} else {
+						inferred := inferExpressionType(nd.Value, s, program)
+						if inferred != "" && inferred != "interface{}" && !typesCompatible(inferred, enclosingFn.ReturnType) {
+							diags = append(diags, Diagnostic{
+								Line:     nd.Token.Line,
+								Col:      nd.Token.Col,
+								Severity: "error",
+								Message:  fmt.Sprintf("function '%s' expects return type '%s', got '%s'", enclosingFn.Name, enclosingFn.ReturnType, inferred),
+							})
+						}
+					}
+				}
+			case *IfStmt:
+				ifBodyScope := NewScope(s)
+				if nd.Body != nil {
+					walk(nd.Body.Statements, ifBodyScope)
+				}
+				if nd.ElseBody != nil {
+					elseBodyScope := NewScope(s)
+					walk(nd.ElseBody.Statements, elseBodyScope)
+				}
+			case *ForStmt:
+				forScope := NewScope(s)
+				if nd.Body != nil {
+					walk(nd.Body.Statements, forScope)
+				}
+			}
+		}
+	}
+	walk(fn.Body.Statements, rootScope)
+	return diags
+}
+
+func inferExpressionType(expr Expression, s *Scope, program *Program) string {
+	if expr == nil {
+		return ""
+	}
+	switch e := expr.(type) {
+	case *IntegerLiteral:
+		return "int"
+	case *FloatLiteral:
+		return "float"
+	case *StringLiteral, *FStringLiteral:
+		return "string"
+	case *BooleanLiteral:
+		return "bool"
+	case *NilLiteral:
+		return "nil"
+	case *Identifier:
+		if sym, found := s.Lookup(e.Value); found {
+			return sym.DataType
+		}
+	case *CallExpr:
+		if ident, ok := e.Function.(*Identifier); ok {
+			for _, stmt := range program.Statements {
+				if fn, ok := stmt.(*FnDecl); ok && fn.Name == ident.Value {
+					return fn.ReturnType
+				}
+			}
+		}
+	}
+	return ""
+}
+
 
