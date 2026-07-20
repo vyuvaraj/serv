@@ -1,3 +1,3 @@
-module servlockctl
+module github.com/vyuvaraj/serv/packages/servlockctl
 
-go 1.23.0
+go 1.26.3

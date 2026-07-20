@@ -20,4 +20,6 @@ use (
 	./packages/ServStore
 	./packages/ServTrace
 	./packages/ServTunnel
+	./packages/servlockctl
+	./packages/servsecretctl
 )
