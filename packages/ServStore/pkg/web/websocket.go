@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"servstore/pkg/cluster"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/cluster"
 )
 
 // UpgradeToWebSocket upgrades the HTTP connection to a WebSocket connection (RFC 6455).

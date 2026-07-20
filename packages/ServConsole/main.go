@@ -23,17 +23,17 @@ import (
 	_ "github.com/lib/pq"
 	_ "github.com/sijms/go-ora/v2"
 
-	"github.com/vyuvaraj/ServShared"
-	pkgalerts "servconsole/pkg/alerts"
-	"servconsole/pkg/auth"
-	"servconsole/pkg/config"
-	pkgdashboards "servconsole/pkg/dashboards"
-	"servconsole/pkg/launcher"
-	"servconsole/pkg/provision"
-	"servconsole/pkg/proxy"
-	"servconsole/pkg/tabs"
-	"servconsole/pkg/topology"
-	"servconsole/pkg/ws"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	pkgalerts "github.com/vyuvaraj/serv/packages/ServConsole/pkg/alerts"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
+	pkgdashboards "github.com/vyuvaraj/serv/packages/ServConsole/pkg/dashboards"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/launcher"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/provision"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/proxy"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/tabs"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/topology"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/ws"
 )
 
 //go:embed web/*
@@ -84,10 +84,10 @@ var (
 			CreatedAt:   "2026-06-01T00:00:00Z",
 			UpdatedAt:   "2026-06-01T00:00:00Z",
 			Widgets: []pkgdashboards.DashboardWidget{
-				{ID: "w1", Title: "Gateway Latency", Metric: "latency", ChartType: "line", TimeRange: "1h", Service: "ServGate", PositionX: 0, PositionY: 0, Width: 6, Height: 4},
-				{ID: "w2", Title: "Queue Throughput", Metric: "throughput", ChartType: "bar", TimeRange: "1h", Service: "ServQueue", PositionX: 6, PositionY: 0, Width: 6, Height: 4},
-				{ID: "w3", Title: "Storage Error Rate", Metric: "error_rate", ChartType: "gauge", TimeRange: "6h", Service: "ServStore", PositionX: 0, PositionY: 4, Width: 4, Height: 3},
-				{ID: "w4", Title: "Active Connections", Metric: "connections", ChartType: "line", TimeRange: "24h", Service: "ServTunnel", PositionX: 4, PositionY: 4, Width: 4, Height: 3},
+				{ID: "w1", Title: "Gateway Latency", Metric: "latency", ChartType: "line", TimeRange: "1h", Service: "github.com/vyuvaraj/serv/packages/ServGate", PositionX: 0, PositionY: 0, Width: 6, Height: 4},
+				{ID: "w2", Title: "Queue Throughput", Metric: "throughput", ChartType: "bar", TimeRange: "1h", Service: "github.com/vyuvaraj/serv/packages/ServQueue", PositionX: 6, PositionY: 0, Width: 6, Height: 4},
+				{ID: "w3", Title: "Storage Error Rate", Metric: "error_rate", ChartType: "gauge", TimeRange: "6h", Service: "github.com/vyuvaraj/serv/packages/ServStore", PositionX: 0, PositionY: 4, Width: 4, Height: 3},
+				{ID: "w4", Title: "Active Connections", Metric: "connections", ChartType: "line", TimeRange: "24h", Service: "github.com/vyuvaraj/serv/packages/ServTunnel", PositionX: 4, PositionY: 4, Width: 4, Height: 3},
 				{ID: "w5", Title: "Service Health", Metric: "health", ChartType: "table", TimeRange: "1h", Service: "all", PositionX: 8, PositionY: 4, Width: 4, Height: 3},
 			},
 			SharedWith: []string{"platform-team", "sre-team"},
@@ -210,7 +210,7 @@ func main() {
 	// Proxy Downstream Mappings
 	registerProxies(mux)
 
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servconsole", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServConsole", "1.0.0"))
 
 	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
 	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +227,7 @@ func main() {
 	}
 
 	// Middlewares chain: Trace -> RateLimit -> CORS -> MaxBytes -> v1Wrapper
-	handlerChain := ServShared.TraceMiddleware("servconsole",
+	handlerChain := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServConsole",
 		ServShared.RateLimitMiddleware(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(v1Wrapper),

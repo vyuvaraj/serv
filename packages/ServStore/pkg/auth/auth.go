@@ -187,7 +187,7 @@ func (ap *AuthProvider) AuthenticateConsole(username, password string) (string, 
 				Username:  username,
 				Role:      "admin",
 				ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
-				Issuer:    "servstore",
+				Issuer:    "github.com/vyuvaraj/serv/packages/ServStore",
 			}
 			return GenerateToken(claims, ap.jwtSecret)
 		}
@@ -204,7 +204,7 @@ func (ap *AuthProvider) AuthenticateConsole(username, password string) (string, 
 				Username:  username,
 				Role:      "ldap-user",
 				ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
-				Issuer:    "servstore",
+				Issuer:    "github.com/vyuvaraj/serv/packages/ServStore",
 			}
 			return GenerateToken(claims, ap.jwtSecret)
 		}

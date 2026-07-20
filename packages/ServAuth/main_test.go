@@ -18,13 +18,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"github.com/vyuvaraj/ServShared/pkg/middleware"
-	"servauth/pkg/handlers"
-	"servauth/pkg/kms"
-	"servauth/pkg/mfa"
-	"servauth/pkg/sessions"
-	"servauth/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared/pkg/middleware"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/kms"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/mfa"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/sessions"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/store"
 )
 
 func generateTOTP(secret string) string {
@@ -455,7 +455,7 @@ type mockSocialProvider struct{}
 
 func (m *mockSocialProvider) Redirect(w http.ResponseWriter, r *http.Request, provider string) {
 	redirectURL := fmt.Sprintf("https://auth.provider.com/%s/authorize?client_id=mock-client&redirect_uri=mock-redirect&response_type=code", provider)
-	_ = ServShared.EmitAuditEvent("ServAuth", "SOCIAL_LOGIN_REDIRECT", "guest", map[string]interface{}{"provider": provider})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "SOCIAL_LOGIN_REDIRECT", "guest", map[string]interface{}{"provider": provider})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -786,7 +786,7 @@ func TestTraceparentPropagation(t *testing.T) {
 	ServShared.InitTrace("servauth-test")
 
 	// Set up the trace middleware wrapped handler
-	handler := ServShared.TraceMiddleware("servauth", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServAuth", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Inside the handler, traceparent header must be set
 		tp := r.Header.Get("traceparent")
 		if !strings.Contains(tp, "4fa3b1234567890abcdef1234567890a") {

@@ -28,7 +28,7 @@ func (c *Codegen) GenerateTests() string {
 	if c.imports[`"time"`] {
 		out.WriteString("var _ = time.Second\n")
 	}
-	if c.imports[`"serv/runtime"`] {
+	if c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] {
 		out.WriteString("var _ = runtime.Noop\n")
 	}
 	if c.imports[`"strconv"`] {

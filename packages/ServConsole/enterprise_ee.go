@@ -5,10 +5,10 @@ package main
 import (
 	"net/http"
 
-	pkgdashboards "servconsole/pkg/dashboards"
-	"servconsole/pkg/incidents"
-	"servconsole/pkg/provision"
-	"servconsole/pkg/tabs"
+	pkgdashboards "github.com/vyuvaraj/serv/packages/ServConsole/pkg/dashboards"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/incidents"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/provision"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/tabs"
 )
 
 // registerEnterpriseHandlers registers all enterprise-only endpoints in the EE build.

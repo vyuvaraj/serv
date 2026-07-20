@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 // SyslogEmitFunc is overridable for testing or custom syslog transports.

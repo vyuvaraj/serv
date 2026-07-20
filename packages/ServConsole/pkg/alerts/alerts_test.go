@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 func TestAlertsAddingUpdatingClearing(t *testing.T) {
@@ -25,16 +25,16 @@ func TestAlertsAddingUpdatingClearing(t *testing.T) {
 	Init(&alertsList, &mu, checkStatus, writeError)
 
 	// 1. Add alert
-	AddOrUpdateAlert("ServGate", "offline", "ServGate offline msg", "critical")
+	AddOrUpdateAlert("github.com/vyuvaraj/serv/packages/ServGate", "offline", "ServGate offline msg", "critical")
 	if len(alertsList) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alertsList))
 	}
-	if alertsList[0].Component != "ServGate" || alertsList[0].Severity != "critical" {
+	if alertsList[0].Component != "github.com/vyuvaraj/serv/packages/ServGate" || alertsList[0].Severity != "critical" {
 		t.Errorf("alert field mismatch")
 	}
 
 	// 2. Update alert
-	AddOrUpdateAlert("ServGate", "offline", "ServGate is definitely offline", "critical")
+	AddOrUpdateAlert("github.com/vyuvaraj/serv/packages/ServGate", "offline", "ServGate is definitely offline", "critical")
 	if len(alertsList) != 1 {
 		t.Fatalf("expected 1 alert after update, got %d", len(alertsList))
 	}
@@ -43,7 +43,7 @@ func TestAlertsAddingUpdatingClearing(t *testing.T) {
 	}
 
 	// 3. Clear alert
-	ClearAlert("ServGate", "offline")
+	ClearAlert("github.com/vyuvaraj/serv/packages/ServGate", "offline")
 	if len(alertsList) != 0 {
 		t.Errorf("expected 0 alerts, got %d", len(alertsList))
 	}
@@ -51,7 +51,7 @@ func TestAlertsAddingUpdatingClearing(t *testing.T) {
 
 func TestHandleAlertsEndpoint(t *testing.T) {
 	alertsList := []Alert{
-		{ID: "alert-1", Component: "ServStore", Type: "disk_full", Message: "Disk 95%", Severity: "warning"},
+		{ID: "alert-1", Component: "github.com/vyuvaraj/serv/packages/ServStore", Type: "disk_full", Message: "Disk 95%", Severity: "warning"},
 	}
 	var mu sync.Mutex
 
@@ -76,7 +76,7 @@ func TestHandleAlertsEndpoint(t *testing.T) {
 
 func TestHandleAlertAckEndpoint(t *testing.T) {
 	alertsList := []Alert{
-		{ID: "alert-100", Component: "ServQueue", Type: "queue_oom", Message: "OOM", Severity: "critical", Acknowledged: false},
+		{ID: "alert-100", Component: "github.com/vyuvaraj/serv/packages/ServQueue", Type: "queue_oom", Message: "OOM", Severity: "critical", Acknowledged: false},
 	}
 	var mu sync.Mutex
 	writeError := func(w http.ResponseWriter, r *http.Request, msg, code string, status int) {

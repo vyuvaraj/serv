@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
 
-	"serv/dap"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/dap"
 )
 
 var stackLineRegex = regexp.MustCompile(`^(\s+)(.*?(?:main|service|serv_test)\.go):(\d+)(.*)$`)

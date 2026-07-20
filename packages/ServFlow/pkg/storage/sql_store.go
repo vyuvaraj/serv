@@ -9,7 +9,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	_ "modernc.org/sqlite"
 )
 

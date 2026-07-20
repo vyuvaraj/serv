@@ -189,7 +189,7 @@ func AIStream(args ...interface{}) interface{} {
 	}
 
 	// Simple streaming simulation for test/mock environment
-	chunks := []string{"Hello", " ", "from", " ", "Serv", " ", "AI", " ", "stream!"}
+	chunks := []string{"Hello", " ", "from", " ", "github.com/vyuvaraj/serv/packages/Serv-lang", " ", "AI", " ", "stream!"}
 	for _, chunk := range chunks {
 		callback(chunk)
 		time.Sleep(50 * time.Millisecond)

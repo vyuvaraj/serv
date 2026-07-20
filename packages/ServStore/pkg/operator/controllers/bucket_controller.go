@@ -11,7 +11,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operv1 "servstore/pkg/operator"
+	operv1 "github.com/vyuvaraj/serv/packages/ServStore/pkg/operator"
 )
 
 // ServStoreBucketReconciler reconciles a ServStoreBucket object

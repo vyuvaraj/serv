@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func runDocs() {

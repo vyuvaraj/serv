@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"servqueue/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/otel"
 )
 
 type Offloader struct {

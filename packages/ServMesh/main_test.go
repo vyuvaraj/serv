@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"servmesh/pkg/client"
-	"servmesh/pkg/registry"
-	"servmesh/pkg/resilience"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/client"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/resilience"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/resolver"
@@ -1059,7 +1059,7 @@ func TestGRPCResolverAndInterceptor(t *testing.T) {
 	registerInstance(t, regURL, "grpc-service", "localhost:50051")
 
 	// Verify builder scheme
-	if builder.Scheme() != "serv" {
+	if builder.Scheme() != "github.com/vyuvaraj/serv/packages/Serv-lang" {
 		t.Errorf("expected scheme 'serv', got '%s'", builder.Scheme())
 	}
 

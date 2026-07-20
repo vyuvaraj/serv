@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall/js"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func main() {

@@ -47,13 +47,13 @@ func runStatus() {
 		name string
 		url  string
 	}{
-		{"ServGate", discovery.Gate},
-		{"ServStore", discovery.Store},
-		{"ServQueue", discovery.Queue},
-		{"ServAuth", discovery.Auth},
+		{"github.com/vyuvaraj/serv/packages/ServGate", discovery.Gate},
+		{"github.com/vyuvaraj/serv/packages/ServStore", discovery.Store},
+		{"github.com/vyuvaraj/serv/packages/ServQueue", discovery.Queue},
+		{"github.com/vyuvaraj/serv/packages/ServAuth", discovery.Auth},
 		{"ServDB", discovery.DB},
-		{"ServMail", discovery.Mail},
-		{"ServFlow", discovery.Flow},
+		{"github.com/vyuvaraj/serv/packages/ServMail", discovery.Mail},
+		{"github.com/vyuvaraj/serv/packages/ServFlow", discovery.Flow},
 	}
 
 	client := &http.Client{Timeout: 1 * time.Second}
@@ -86,7 +86,7 @@ func runStatus() {
 
 		uptime := "24h 15m"
 		errRate := "0.02%"
-		if s.name == "ServGate" {
+		if s.name == "github.com/vyuvaraj/serv/packages/ServGate" {
 			errRate = "0.01%"
 		}
 

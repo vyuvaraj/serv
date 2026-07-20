@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	operv1 "servstore/pkg/operator"
+	operv1 "github.com/vyuvaraj/serv/packages/ServStore/pkg/operator"
 )
 
 func TestClusterReconciler_Basic(t *testing.T) {

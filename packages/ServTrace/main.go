@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"servtrace/pkg/server"
-	"servtrace/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/store"
 )
 
 const version = "0.1.0"

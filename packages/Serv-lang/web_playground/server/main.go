@@ -54,7 +54,7 @@ func init() {
 	repoRoot = findRepoRoot()
 	candidates := []string{
 		filepath.Join(repoRoot, "serv.exe"),
-		filepath.Join(repoRoot, "serv"),
+		filepath.Join(repoRoot, "github.com/vyuvaraj/serv/packages/Serv-lang"),
 	}
 
 	for _, c := range candidates {

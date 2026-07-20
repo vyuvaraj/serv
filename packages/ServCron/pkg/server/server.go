@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"servcron/pkg/cron"
+	"github.com/vyuvaraj/serv/packages/ServCron/pkg/cron"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 var (
@@ -29,7 +29,7 @@ func NewServer(scheduler *cron.Scheduler, elector cron.LeaderElectionProvider) *
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcron", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServCron", "1.0.0"))
 	mux.HandleFunc("/health", s.handleHealth)
 
 	mux.HandleFunc("/api/jobs", s.handleJobsCollection)

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"servconsole/pkg/alerts"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/alerts"
 )
 
 type Deployment struct {
@@ -62,10 +62,10 @@ var (
 	EnvMu             sync.Mutex
 
 	Runbooks = []RunbookAction{
-		{ID: "rb-gate-restart", Name: "Restart ServGate Instance", Description: "Drain connections and perform graceful restart of the Gateway process", Component: "ServGate", Command: "serv gate restart --graceful"},
-		{ID: "rb-gate-cache", Name: "Clear ServGate Router Cache", Description: "Purge all compiled semantic cache entries in Gateway memory", Component: "ServGate", Command: "serv gate cache purge"},
-		{ID: "rb-store-heal", Name: "Rebalance ServStore Storage Shards", Description: "Initiate P2P healing across active data shards and rebuild parity partitions", Component: "ServStore", Command: "serv store heal --shards=all"},
-		{ID: "rb-queue-purge", Name: "Flush Dead Letter Queue (DLQ)", Description: "Clear stale or rejected messages in ServQueue DLQ namespaces", Component: "ServQueue", Command: "serv queue purge dlq"},
+		{ID: "rb-gate-restart", Name: "Restart ServGate Instance", Description: "Drain connections and perform graceful restart of the Gateway process", Component: "github.com/vyuvaraj/serv/packages/ServGate", Command: "serv gate restart --graceful"},
+		{ID: "rb-gate-cache", Name: "Clear ServGate Router Cache", Description: "Purge all compiled semantic cache entries in Gateway memory", Component: "github.com/vyuvaraj/serv/packages/ServGate", Command: "serv gate cache purge"},
+		{ID: "rb-store-heal", Name: "Rebalance ServStore Storage Shards", Description: "Initiate P2P healing across active data shards and rebuild parity partitions", Component: "github.com/vyuvaraj/serv/packages/ServStore", Command: "serv store heal --shards=all"},
+		{ID: "rb-queue-purge", Name: "Flush Dead Letter Queue (DLQ)", Description: "Clear stale or rejected messages in ServQueue DLQ namespaces", Component: "github.com/vyuvaraj/serv/packages/ServQueue", Command: "serv queue purge dlq"},
 	}
 	RunbooksMu sync.Mutex
 

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 func HandleConsoleCronJobs(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,7 @@ func HandleConsoleCacheStats(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", targetURL, nil)
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -163,7 +163,7 @@ func HandleConsoleCacheClear(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("DELETE", targetURL, nil)
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -196,7 +196,7 @@ func HandleConsoleMeshInstances(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", targetURL, nil)
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -226,7 +226,7 @@ func HandleConsoleRegistryPackages(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", targetURL, nil)
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -256,7 +256,7 @@ func HandleConsoleCloudServices(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", targetURL, nil)
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -317,7 +317,7 @@ func HandleConsoleCloudServicesItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -354,7 +354,7 @@ func HandleConsoleCloudDeploy(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -387,7 +387,7 @@ func HandleConsoleCloudHistory(w http.ResponseWriter, r *http.Request) {
 	req, _ := http.NewRequest("GET", targetURL, nil)
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -416,10 +416,10 @@ func HandleDocsSpec(w http.ResponseWriter, r *http.Request) {
 		name string
 		url  string
 	}{
-		{"ServGate", config.ActiveDiscovery.Gate},
-		{"ServStore", config.ActiveDiscovery.Store},
-		{"ServQueue", config.ActiveDiscovery.Queue},
-		{"ServAuth", config.ActiveDiscovery.Auth},
+		{"github.com/vyuvaraj/serv/packages/ServGate", config.ActiveDiscovery.Gate},
+		{"github.com/vyuvaraj/serv/packages/ServStore", config.ActiveDiscovery.Store},
+		{"github.com/vyuvaraj/serv/packages/ServQueue", config.ActiveDiscovery.Queue},
+		{"github.com/vyuvaraj/serv/packages/ServAuth", config.ActiveDiscovery.Auth},
 		{"ServDB", config.ActiveDiscovery.DB},
 	}
 

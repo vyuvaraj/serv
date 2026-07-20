@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 type TopologyNode struct {
@@ -126,10 +126,10 @@ func HandleTopology(w http.ResponseWriter, r *http.Request) {
 	nodesMap := make(map[string]*TopologyNode)
 	edgesMap := make(map[string]*TopologyEdge)
 
-	nodesMap["ServGate"] = &TopologyNode{ID: "ServGate", Label: "ServGate (Gateway)", Color: "#06b6d4", Online: true}
-	nodesMap["ServStore"] = &TopologyNode{ID: "ServStore", Label: "ServStore (Storage)", Color: "#10b981", Online: true}
-	nodesMap["ServQueue"] = &TopologyNode{ID: "ServQueue", Label: "ServQueue (Broker)", Color: "#f59e0b", Online: true}
-	nodesMap["ServTunnel"] = &TopologyNode{ID: "ServTunnel", Label: "ServTunnel (Relay)", Color: "#6366f1", Online: true}
+	nodesMap["github.com/vyuvaraj/serv/packages/ServGate"] = &TopologyNode{ID: "github.com/vyuvaraj/serv/packages/ServGate", Label: "ServGate (Gateway)", Color: "#06b6d4", Online: true}
+	nodesMap["github.com/vyuvaraj/serv/packages/ServStore"] = &TopologyNode{ID: "github.com/vyuvaraj/serv/packages/ServStore", Label: "ServStore (Storage)", Color: "#10b981", Online: true}
+	nodesMap["github.com/vyuvaraj/serv/packages/ServQueue"] = &TopologyNode{ID: "github.com/vyuvaraj/serv/packages/ServQueue", Label: "ServQueue (Broker)", Color: "#f59e0b", Online: true}
+	nodesMap["github.com/vyuvaraj/serv/packages/ServTunnel"] = &TopologyNode{ID: "github.com/vyuvaraj/serv/packages/ServTunnel", Label: "ServTunnel (Relay)", Color: "#6366f1", Online: true}
 
 	spanToService := make(map[string]string)
 	for _, span := range spans {
@@ -187,7 +187,7 @@ func HandleTopology(w http.ResponseWriter, r *http.Request) {
 			if _, exists := edgesMap[edgeKey]; !exists {
 				edgesMap[edgeKey] = &TopologyEdge{
 					From:      svc,
-					To:        "ServStore",
+					To:        "github.com/vyuvaraj/serv/packages/ServStore",
 					Label:     "S3",
 					LatencyMs: latMs,
 				}
@@ -198,7 +198,7 @@ func HandleTopology(w http.ResponseWriter, r *http.Request) {
 			if _, exists := edgesMap[edgeKey]; !exists {
 				edgesMap[edgeKey] = &TopologyEdge{
 					From:      svc,
-					To:        "ServQueue",
+					To:        "github.com/vyuvaraj/serv/packages/ServQueue",
 					Label:     "STOMP",
 					LatencyMs: latMs,
 				}
@@ -217,11 +217,11 @@ func HandleTopology(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, n := range nodes {
-		if n.ID != "ServGate" && n.ID != "ServStore" && n.ID != "ServQueue" && n.ID != "ServTunnel" {
+		if n.ID != "github.com/vyuvaraj/serv/packages/ServGate" && n.ID != "github.com/vyuvaraj/serv/packages/ServStore" && n.ID != "github.com/vyuvaraj/serv/packages/ServQueue" && n.ID != "github.com/vyuvaraj/serv/packages/ServTunnel" {
 			edgeKey := fmt.Sprintf("ServGate->%s", n.ID)
 			if _, exists := edgesMap[edgeKey]; !exists {
 				edges = append(edges, TopologyEdge{
-					From:      "ServGate",
+					From:      "github.com/vyuvaraj/serv/packages/ServGate",
 					To:        n.ID,
 					Label:     "HTTP",
 					LatencyMs: 10,
@@ -292,11 +292,11 @@ func HandleTopologyLive(w http.ResponseWriter, r *http.Request) {
 	nodesMap := make(map[string]*LiveTopologyNode)
 
 	serviceColors := map[string]string{
-		"ServGate":   "#06b6d4",
-		"ServStore":  "#10b981",
-		"ServQueue":  "#f59e0b",
-		"ServTunnel": "#6366f1",
-		"ServTrace":  "#a855f7",
+		"github.com/vyuvaraj/serv/packages/ServGate":   "#06b6d4",
+		"github.com/vyuvaraj/serv/packages/ServStore":  "#10b981",
+		"github.com/vyuvaraj/serv/packages/ServQueue":  "#f59e0b",
+		"github.com/vyuvaraj/serv/packages/ServTunnel": "#6366f1",
+		"github.com/vyuvaraj/serv/packages/ServTrace":  "#a855f7",
 	}
 
 	for svc, color := range serviceColors {
@@ -364,7 +364,7 @@ func HandleTopologyLive(w http.ResponseWriter, r *http.Request) {
 		latMs := span.DurationNs / 1e6
 
 		if strings.Contains(span.Name, "PUT") || strings.Contains(span.Name, "GET") || strings.Contains(span.Name, "DELETE") {
-			if svc != "ServStore" {
+			if svc != "github.com/vyuvaraj/serv/packages/ServStore" {
 				edgeKey := svc + "->ServStore"
 				if _, exists := edgeStatsMap[edgeKey]; !exists {
 					edgeStatsMap[edgeKey] = &edgeStats{totalLatency: latMs, requestCount: 1}
@@ -372,7 +372,7 @@ func HandleTopologyLive(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if strings.Contains(span.Name, "publish") || strings.Contains(span.Name, "subscribe") {
-			if svc != "ServQueue" {
+			if svc != "github.com/vyuvaraj/serv/packages/ServQueue" {
 				edgeKey := svc + "->ServQueue"
 				if _, exists := edgeStatsMap[edgeKey]; !exists {
 					edgeStatsMap[edgeKey] = &edgeStats{totalLatency: latMs, requestCount: 1}
@@ -417,11 +417,11 @@ func HandleTopologyLive(w http.ResponseWriter, r *http.Request) {
 		}
 
 		label := "Call"
-		if parts[1] == "ServStore" {
+		if parts[1] == "github.com/vyuvaraj/serv/packages/ServStore" {
 			label = "S3"
-		} else if parts[1] == "ServQueue" {
+		} else if parts[1] == "github.com/vyuvaraj/serv/packages/ServQueue" {
 			label = "STOMP"
-		} else if parts[0] == "ServGate" {
+		} else if parts[0] == "github.com/vyuvaraj/serv/packages/ServGate" {
 			label = "HTTP"
 		}
 

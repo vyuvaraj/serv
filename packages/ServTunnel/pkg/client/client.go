@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"encoding/json"
-	"servtunnel/pkg/inspector"
-	"servtunnel/pkg/tunnel"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/inspector"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/tunnel"
 
 	"github.com/gorilla/websocket"
 )

@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 
-	"servauth/pkg/handlers"
-	"servauth/pkg/kms"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/kms"
 )
 
 func main() {
@@ -41,8 +41,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servauth", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servauth", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServAuth", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServAuth", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -90,7 +90,7 @@ func main() {
 	})
 
 	// Wrap in ServShared middleware: OTel tracing → RateLimit → CORS → MaxBytes → JWT auth → tenant enforcement → handlers
-	serverHandler := ServShared.TraceMiddleware("servauth",
+	serverHandler := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServAuth",
 		ServShared.RateLimitMiddleware(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 	"testing"
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func TestORMUnitParser(t *testing.T) {

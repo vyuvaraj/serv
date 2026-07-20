@@ -14,13 +14,13 @@ import (
 	"syscall"
 	"time"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/cluster"
-	"servstore/pkg/otel"
-	"servstore/pkg/ratelimit"
-	"servstore/pkg/s3"
-	"servstore/pkg/storage"
-	"servstore/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/cluster"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/ratelimit"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/s3"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/web"
 )
 
 func main() {
@@ -61,7 +61,7 @@ func main() {
 	flag.Parse()
 
 	// Initialize OpenTelemetry Tracing (inspired by serv-lang)
-	otel.InitOtel("servstore")
+	otel.InitOtel("github.com/vyuvaraj/serv/packages/ServStore")
 
 	// Ensure data directory is absolute
 	absDataDir, err := filepath.Abs(*dataDir)

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 	
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func TestClientSDKGeneration(t *testing.T) {

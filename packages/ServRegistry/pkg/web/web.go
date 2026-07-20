@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"servregistry/pkg/registry"
-	"servregistry/pkg/resolution"
-	"servregistry/pkg/signing"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/resolution"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/signing"
 )
 
 var (

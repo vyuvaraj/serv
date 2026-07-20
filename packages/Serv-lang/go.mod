@@ -1,4 +1,4 @@
-module serv
+module github.com/vyuvaraj/serv/packages/Serv-lang
 
 go 1.25.0
 
@@ -60,6 +60,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
+	github.com/vyuvaraj/serv/packages/ServTunnel v0.0.0
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
@@ -74,7 +75,42 @@ require (
 	modernc.org/mathutil v1.6.0 // indirect
 	modernc.org/memory v1.7.2 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
-	servtunnel v0.0.0
 )
 
-replace servtunnel => ../ServTunnel
+replace github.com/vyuvaraj/serv/packages/Serv-lang => ../Serv-lang
+
+replace github.com/vyuvaraj/serv/packages/ServAuth => ../ServAuth
+
+replace github.com/vyuvaraj/serv/packages/ServCache => ../ServCache
+
+replace github.com/vyuvaraj/serv/packages/ServCloud => ../ServCloud
+
+replace github.com/vyuvaraj/serv/packages/ServConsole => ../ServConsole
+
+replace github.com/vyuvaraj/serv/packages/ServCron => ../ServCron
+
+replace github.com/vyuvaraj/serv/packages/ServFlow => ../ServFlow
+
+replace github.com/vyuvaraj/serv/packages/ServGate => ../ServGate
+
+replace github.com/vyuvaraj/serv/packages/ServLock => ../ServLock
+
+replace github.com/vyuvaraj/serv/packages/ServMail => ../ServMail
+
+replace github.com/vyuvaraj/serv/packages/ServMesh => ../ServMesh
+
+replace github.com/vyuvaraj/serv/packages/ServPool => ../ServPool
+
+replace github.com/vyuvaraj/serv/packages/ServQueue => ../ServQueue
+
+replace github.com/vyuvaraj/serv/packages/ServRegistry => ../ServRegistry
+
+replace github.com/vyuvaraj/serv/packages/ServSecret => ../ServSecret
+
+replace github.com/vyuvaraj/serv/packages/ServShared => ../ServShared
+
+replace github.com/vyuvaraj/serv/packages/ServStore => ../ServStore
+
+replace github.com/vyuvaraj/serv/packages/ServTrace => ../ServTrace
+
+replace github.com/vyuvaraj/serv/packages/ServTunnel => ../ServTunnel

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"servstore/pkg/pipeline"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/pipeline"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 // ── WASM helper ───────────────────────────────────────────────────────────────

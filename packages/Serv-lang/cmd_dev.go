@@ -25,16 +25,16 @@ var servDevServices = []struct {
 	Args    []string
 	EnvVars []string
 }{
-	{"ServStore", "8081", "servstore", []string{"--port", "8081", "--data-dir", ".servdev/store-data"}, nil},
-	{"ServQueue", "8082", "servqueue", nil, nil},
-	{"ServCache", "8086", "servcache", nil, nil},
-	{"ServCron", "8087", "servcron", nil, []string{"PORT=8087"}},
-	{"ServGate", "8080", "servgate", nil, nil},
-	{"ServTrace", "8090", "servtrace", nil, nil},
-	{"ServAuth", "8091", "servauth", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServStore", "8081", "github.com/vyuvaraj/serv/packages/ServStore", []string{"--port", "8081", "--data-dir", ".servdev/store-data"}, nil},
+	{"github.com/vyuvaraj/serv/packages/ServQueue", "8082", "github.com/vyuvaraj/serv/packages/ServQueue", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServCache", "8086", "github.com/vyuvaraj/serv/packages/ServCache", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServCron", "8087", "github.com/vyuvaraj/serv/packages/ServCron", nil, []string{"PORT=8087"}},
+	{"github.com/vyuvaraj/serv/packages/ServGate", "8080", "github.com/vyuvaraj/serv/packages/ServGate", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServTrace", "8090", "github.com/vyuvaraj/serv/packages/ServTrace", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServAuth", "8091", "github.com/vyuvaraj/serv/packages/ServAuth", nil, nil},
 	{"ServDB", "8092", "servdb", nil, nil},
-	{"ServMail", "8093", "servmail", nil, nil},
-	{"ServFlow", "8094", "servflow", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServMail", "8093", "github.com/vyuvaraj/serv/packages/ServMail", nil, nil},
+	{"github.com/vyuvaraj/serv/packages/ServFlow", "8094", "github.com/vyuvaraj/serv/packages/ServFlow", nil, nil},
 }
 
 func runDevCmd() {
@@ -69,13 +69,13 @@ func runDevCmd() {
 	for _, s := range detectRequiredServices(srvFile) {
 		switch s {
 		case "auth":
-			requestedServices["ServAuth"] = true
+			requestedServices["github.com/vyuvaraj/serv/packages/ServAuth"] = true
 		case "db":
 			requestedServices["ServDB"] = true
 		case "mail":
-			requestedServices["ServMail"] = true
+			requestedServices["github.com/vyuvaraj/serv/packages/ServMail"] = true
 		case "flow":
-			requestedServices["ServFlow"] = true
+			requestedServices["github.com/vyuvaraj/serv/packages/ServFlow"] = true
 		}
 	}
 
@@ -214,25 +214,25 @@ func parseServiceList(input string) map[string]bool {
 	for _, s := range splitComma(input) {
 		switch s {
 		case "store":
-			result["ServStore"] = true
+			result["github.com/vyuvaraj/serv/packages/ServStore"] = true
 		case "queue":
-			result["ServQueue"] = true
+			result["github.com/vyuvaraj/serv/packages/ServQueue"] = true
 		case "cache":
-			result["ServCache"] = true
+			result["github.com/vyuvaraj/serv/packages/ServCache"] = true
 		case "cron":
-			result["ServCron"] = true
+			result["github.com/vyuvaraj/serv/packages/ServCron"] = true
 		case "gate":
-			result["ServGate"] = true
+			result["github.com/vyuvaraj/serv/packages/ServGate"] = true
 		case "trace":
-			result["ServTrace"] = true
+			result["github.com/vyuvaraj/serv/packages/ServTrace"] = true
 		case "auth":
-			result["ServAuth"] = true
+			result["github.com/vyuvaraj/serv/packages/ServAuth"] = true
 		case "db":
 			result["ServDB"] = true
 		case "mail":
-			result["ServMail"] = true
+			result["github.com/vyuvaraj/serv/packages/ServMail"] = true
 		case "flow":
-			result["ServFlow"] = true
+			result["github.com/vyuvaraj/serv/packages/ServFlow"] = true
 		}
 	}
 	return result

@@ -13,10 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"servcache/pkg/cache"
-	"servcache/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/cache"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/otel"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type Server struct {
@@ -55,8 +55,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcache", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servcache", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServCache", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServCache", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))

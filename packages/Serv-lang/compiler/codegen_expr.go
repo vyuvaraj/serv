@@ -1237,7 +1237,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 			}
 		}
 
-		c.imports[`"serv/runtime"`] = true
+		c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 		return fmt.Sprintf("runtime.IndexAccess(%s, %s)", leftStr, indexStr), nil
 
 	case *InfixExpr:
@@ -1443,7 +1443,7 @@ func (c *Codegen) genExpression(expr Expression) (string, error) {
 		}
 		// SafeMap or regular map[string]interface{} setting
 		// If it's a map or SafeMap, use runtime.MapSet helper
-		c.imports[`"serv/runtime"`] = true
+		c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 		return fmt.Sprintf("runtime.MapSet(%s, %s, %s)", leftStr, idxStr, valStr), nil
 
 	case *CompoundAssignExpr:

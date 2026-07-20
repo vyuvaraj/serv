@@ -7,7 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func runGenerate() {

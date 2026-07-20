@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func deployServ(srvFile, target string) {

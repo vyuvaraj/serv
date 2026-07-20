@@ -11,8 +11,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 func TestE2EFederation(t *testing.T) {

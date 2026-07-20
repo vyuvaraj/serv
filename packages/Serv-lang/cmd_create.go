@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"serv/compiler"
-	"serv/runtime"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"
 )
 
 func runAIScaffold(prompt string, autoFix bool) {

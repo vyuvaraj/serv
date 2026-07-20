@@ -841,7 +841,7 @@ go func() {
 }
 
 func (c *Codegen) genTestStmt(s *TestStmt) (string, error) {
-	c.imports[`"serv/runtime"`] = true
+	c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 	c.inFunction = true
 	oldConcurrent := c.inConcurrentContext
 	c.inConcurrentContext = hasConcurrency(s.Body)
@@ -938,7 +938,7 @@ func (c *Codegen) genMockStmt(s *MockStmt) (string, error) {
 
 	keyExpr := strings.Join(keyParts, " + \":\" + ")
 
-	c.imports[`"serv/runtime"`] = true
+	c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 	c.imports[`"fmt"`] = true
 	bodyCode, err := c.genBlockStatement(s.Body)
 	if err != nil {

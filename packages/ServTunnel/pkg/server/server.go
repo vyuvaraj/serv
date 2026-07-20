@@ -26,12 +26,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"servtunnel/pkg/inspector"
-	"servtunnel/pkg/otel"
-	"servtunnel/pkg/tunnel"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/inspector"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/tunnel"
 
 	"github.com/gorilla/websocket"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	"golang.org/x/crypto/acme/autocert"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -190,8 +190,8 @@ func (s *Server) Start() error {
 	// Management endpoints (accessed directly, not via subdomain)
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servtunnel", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servtunnel", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServTunnel", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServTunnel", "1.0.0"))
 	mux.HandleFunc("/ws/connect", s.handleWebSocket)
 	mux.HandleFunc("/api/tunnels", s.handleListTunnels)
 	mux.HandleFunc("/api/tunnels/", s.handleTunnelsSubroutes)
@@ -217,7 +217,7 @@ func (s *Server) Start() error {
 		}
 	}
 
-	handlerChain := ServShared.TraceMiddleware("servtunnel",
+	handlerChain := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServTunnel",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(
@@ -628,7 +628,7 @@ func (s *Server) handleTunnelRequest(w http.ResponseWriter, r *http.Request) {
 			// Not a tunnel request — show a landing message.
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
-				"service": "ServTunnel",
+				"service": "github.com/vyuvaraj/serv/packages/ServTunnel",
 				"status":  "running",
 				"hint":    "Connect via: servtunnel client <port> --relay ws://" + r.Host + "/ws/connect",
 			})

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"servtrace/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/store"
 
 	"flag"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 // AnomalyExplainer defines pluggable hooks to explain trace anomaly root causes.
@@ -50,8 +50,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servtrace", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servtrace", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServTrace", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServTrace", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -130,7 +130,7 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> mux
-	return ServShared.TraceMiddleware("servtrace",
+	return ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServTrace",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

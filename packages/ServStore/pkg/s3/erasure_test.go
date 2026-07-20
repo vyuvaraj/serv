@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/cluster"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/cluster"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 type mockErasureNode struct {

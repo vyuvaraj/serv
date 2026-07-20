@@ -10,8 +10,8 @@ import (
     ctrl "sigs.k8s.io/controller-runtime"
     "sigs.k8s.io/controller-runtime/pkg/log/zap"
     ctrlhealthz "sigs.k8s.io/controller-runtime/pkg/healthz"
-    operv1 "servstore/pkg/operator"
-    "servstore/pkg/operator/controllers"
+    operv1 "github.com/vyuvaraj/serv/packages/ServStore/pkg/operator"
+    "github.com/vyuvaraj/serv/packages/ServStore/pkg/operator/controllers"
 )
 
 func main() {

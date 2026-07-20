@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"servtunnel/pkg/client"
-	"servtunnel/pkg/inspector"
-	"servtunnel/pkg/otel"
-	"servtunnel/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/client"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/inspector"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/server"
 
 	"gopkg.in/yaml.v3"
 )

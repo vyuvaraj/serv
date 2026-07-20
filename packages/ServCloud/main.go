@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"servcloud/pkg/orchestrator"
-	"servcloud/pkg/otel"
-	"servcloud/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/orchestrator"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/server"
 )
 
 const version = "0.1.0"

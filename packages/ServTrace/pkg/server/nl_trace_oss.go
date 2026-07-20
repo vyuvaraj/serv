@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"servtrace/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/store"
 )
 
 // handleNaturalLanguageSearch is the OSS implementation of AI.15.

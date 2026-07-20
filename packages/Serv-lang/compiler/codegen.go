@@ -257,13 +257,13 @@ func (c *Codegen) Generate() (string, error) {
 
 	// Only add runtime/time imports when there are actual service statements
 	if hasNonTestStmts {
-		c.imports[`"serv/runtime"`] = true
+		c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 		c.imports[`"time"`] = true
 	}
 
 	// fmt and runtime are always needed by helper functions and main()
 	c.imports[`"fmt"`] = true
-	c.imports[`"serv/runtime"`] = true
+	c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 	if len(c.dbTables) > 0 {
 		c.imports[`"strings"`] = true
 	}
@@ -300,7 +300,7 @@ func (c *Codegen) Generate() (string, error) {
 	if c.imports[`"fmt"`] {
 		out.WriteString("var _ = fmt.Sprintf // ensure fmt is used\n\n")
 	}
-	if c.imports[`"serv/runtime"`] {
+	if c.imports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] {
 		out.WriteString("var _ = runtime.Noop // ensure runtime is used\n\n")
 	}
 	if c.imports[`"strconv"`] {
@@ -716,7 +716,7 @@ func (c *Codegen) GenerateFileHeader(fileImports map[string]bool) string {
 	if fileImports[`"fmt"`] {
 		out.WriteString("var _ = fmt.Sprintf // ensure fmt is used\n\n")
 	}
-	if fileImports[`"serv/runtime"`] {
+	if fileImports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] {
 		out.WriteString("var _ = runtime.Noop // ensure runtime is used\n\n")
 	}
 	if fileImports[`"strconv"`] {

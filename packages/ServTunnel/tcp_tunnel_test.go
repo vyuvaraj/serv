@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"servtunnel/pkg/client"
-	"servtunnel/pkg/inspector"
-	"servtunnel/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/client"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/inspector"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/server"
 )
 
 func TestTCPTunneling(t *testing.T) {

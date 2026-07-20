@@ -1,11 +1,11 @@
-module servgate
+module github.com/vyuvaraj/serv/packages/ServGate
 
 go 1.25.0
 
 require (
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/tetratelabs/wazero v1.8.0
-	github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198
+	github.com/vyuvaraj/serv/packages/ServShared v0.0.0
 	golang.org/x/crypto v0.53.0
 )
 
@@ -17,4 +17,40 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 )
 
-replace github.com/vyuvaraj/ServShared => ../ServShared
+replace github.com/vyuvaraj/serv/packages/Serv-lang => ../Serv-lang
+
+replace github.com/vyuvaraj/serv/packages/ServAuth => ../ServAuth
+
+replace github.com/vyuvaraj/serv/packages/ServCache => ../ServCache
+
+replace github.com/vyuvaraj/serv/packages/ServCloud => ../ServCloud
+
+replace github.com/vyuvaraj/serv/packages/ServConsole => ../ServConsole
+
+replace github.com/vyuvaraj/serv/packages/ServCron => ../ServCron
+
+replace github.com/vyuvaraj/serv/packages/ServFlow => ../ServFlow
+
+replace github.com/vyuvaraj/serv/packages/ServGate => ../ServGate
+
+replace github.com/vyuvaraj/serv/packages/ServLock => ../ServLock
+
+replace github.com/vyuvaraj/serv/packages/ServMail => ../ServMail
+
+replace github.com/vyuvaraj/serv/packages/ServMesh => ../ServMesh
+
+replace github.com/vyuvaraj/serv/packages/ServPool => ../ServPool
+
+replace github.com/vyuvaraj/serv/packages/ServQueue => ../ServQueue
+
+replace github.com/vyuvaraj/serv/packages/ServRegistry => ../ServRegistry
+
+replace github.com/vyuvaraj/serv/packages/ServSecret => ../ServSecret
+
+replace github.com/vyuvaraj/serv/packages/ServShared => ../ServShared
+
+replace github.com/vyuvaraj/serv/packages/ServStore => ../ServStore
+
+replace github.com/vyuvaraj/serv/packages/ServTrace => ../ServTrace
+
+replace github.com/vyuvaraj/serv/packages/ServTunnel => ../ServTunnel

@@ -37,19 +37,19 @@ func runIntegrationTests(srvFile string, withCoverage bool, filter string) bool 
 
 	services := []integrationService{
 		{
-			Name:   "ServStore",
-			Binary: "servstore",
+			Name:   "github.com/vyuvaraj/serv/packages/ServStore",
+			Binary: "github.com/vyuvaraj/serv/packages/ServStore",
 			Port:   storePort,
 			Args:   []string{"--port", fmt.Sprintf("%d", storePort), "--data-dir", tmpDir + "/store"},
 		},
 		{
-			Name:   "ServQueue",
-			Binary: "servqueue",
+			Name:   "github.com/vyuvaraj/serv/packages/ServQueue",
+			Binary: "github.com/vyuvaraj/serv/packages/ServQueue",
 			Port:   queuePort,
 		},
 		{
-			Name:   "ServCache",
-			Binary: "servcache",
+			Name:   "github.com/vyuvaraj/serv/packages/ServCache",
+			Binary: "github.com/vyuvaraj/serv/packages/ServCache",
 			Port:   cachePort,
 		},
 	}

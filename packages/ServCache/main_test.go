@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"servcache/pkg/cache"
-	"servcache/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/cache"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/server"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 func TestInMemoryCacheOperations(t *testing.T) {

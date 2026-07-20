@@ -15,7 +15,7 @@ import (
 	"os"
 	"strings"
 
-	"servqueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
 )
 
 type Server struct {

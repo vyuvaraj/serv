@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	ServShared "github.com/vyuvaraj/ServShared"
+	ServShared "github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 // --- Fake mesh resolver for unit tests -------------------------------------

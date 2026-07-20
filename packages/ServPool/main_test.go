@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"servpool/pkg/analytics"
-	"servpool/pkg/migration"
-	"servpool/pkg/pool"
-	"servpool/pkg/routing"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/analytics"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/migration"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/pool"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/routing"
 )
 
 var (

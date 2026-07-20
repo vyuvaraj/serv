@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type contextKey string

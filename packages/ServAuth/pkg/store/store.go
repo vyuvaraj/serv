@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type User struct {

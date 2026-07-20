@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func TestActorUnitParser(t *testing.T) {

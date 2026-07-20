@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"servgate/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/wasm"
 )
 
 func TestAiPromptGuard(t *testing.T) {

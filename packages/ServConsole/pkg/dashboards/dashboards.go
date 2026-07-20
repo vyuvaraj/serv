@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 type LogEntry struct {
@@ -173,7 +173,7 @@ func HandleIngestLog(w http.ResponseWriter, r *http.Request) {
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
 				if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-					svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+					svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 					if svcToken != "" {
 						req.Header.Set("Authorization", "Bearer "+svcToken)
 					}
@@ -272,7 +272,7 @@ func HandleSLO(w http.ResponseWriter, r *http.Request) {
 
 	slos := []SLOIndicator{
 		{
-			ServiceID:              "ServGate",
+			ServiceID:              "github.com/vyuvaraj/serv/packages/ServGate",
 			Name:                   "Gateway Uptime (Success Rate)",
 			TargetPercent:          99.9,
 			ActualPercent:          99.95,
@@ -283,7 +283,7 @@ func HandleSLO(w http.ResponseWriter, r *http.Request) {
 			BurnRate:               1.0,
 		},
 		{
-			ServiceID:              "ServStore",
+			ServiceID:              "github.com/vyuvaraj/serv/packages/ServStore",
 			Name:                   "Storage Object Read Latency",
 			TargetPercent:          99.5,
 			ActualPercent:          99.62,
@@ -294,7 +294,7 @@ func HandleSLO(w http.ResponseWriter, r *http.Request) {
 			BurnRate:               1.1,
 		},
 		{
-			ServiceID:              "ServQueue",
+			ServiceID:              "github.com/vyuvaraj/serv/packages/ServQueue",
 			Name:                   "Queue Message Dispatch Success",
 			TargetPercent:          99.9,
 			ActualPercent:          99.99,
@@ -305,7 +305,7 @@ func HandleSLO(w http.ResponseWriter, r *http.Request) {
 			BurnRate:               0.8,
 		},
 		{
-			ServiceID:              "ServTunnel",
+			ServiceID:              "github.com/vyuvaraj/serv/packages/ServTunnel",
 			Name:                   "Tunnel Tunnel Connection Stability",
 			TargetPercent:          99.0,
 			ActualPercent:          99.2,
@@ -327,9 +327,9 @@ func HandleCostEstimation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gateStatus := CheckStatus("ServGate", *config.GateUrl)
-	storeStatus := CheckStatus("ServStore", *config.StoreUrl)
-	queueStatus := CheckStatus("ServQueue", *config.QueueUrl)
+	gateStatus := CheckStatus("github.com/vyuvaraj/serv/packages/ServGate", *config.GateUrl)
+	storeStatus := CheckStatus("github.com/vyuvaraj/serv/packages/ServStore", *config.StoreUrl)
+	queueStatus := CheckStatus("github.com/vyuvaraj/serv/packages/ServQueue", *config.QueueUrl)
 
 	var storageBytes int64 = 524288000
 	var bucketsCount int64 = 3
@@ -584,7 +584,7 @@ func HandleCorrelationTimeline(w http.ResponseWriter, r *http.Request) {
 			Type:        "deployment",
 			Title:       "Deployed ServGate v1.4.2",
 			Description: "Changelog: Optimize JSON marshal in proxy pipelines.",
-			Source:      "ServCloud",
+			Source:      "github.com/vyuvaraj/serv/packages/ServCloud",
 			Severity:    "info",
 		},
 		{
@@ -592,7 +592,7 @@ func HandleCorrelationTimeline(w http.ResponseWriter, r *http.Request) {
 			Type:        "alert",
 			Title:       "High Latency Alert: ServGate",
 			Description: "p99 latency spiked to 312ms.",
-			Source:      "ServConsole",
+			Source:      "github.com/vyuvaraj/serv/packages/ServConsole",
 			Severity:    "warning",
 		},
 		{
@@ -668,7 +668,7 @@ func HandleNLQ(w http.ResponseWriter, r *http.Request) {
 			TraceCount:  42,
 			ErrorCount:  17,
 			TotalSpans:  284,
-			Services:    []string{"ServGate", "ServStore", "ServDB"},
+			Services:    []string{"github.com/vyuvaraj/serv/packages/ServGate", "github.com/vyuvaraj/serv/packages/ServStore", "ServDB"},
 			Summary:     "Found 42 traces touching ServDB in the last hour. 17 contained errors (40%). Peak error rate at 14:03 UTC (p99 latency: 620ms). Most common error: 'context deadline exceeded' on SELECT queries. Likely correlated with ServStore v1.4.2 deploy at 13:58 UTC.",
 		}
 
@@ -734,12 +734,12 @@ func HandleMessageFlow(w http.ResponseWriter, r *http.Request) {
 		MessageID: msgID,
 		Topic:     "checkout.orders",
 		Steps: []FlowStep{
-			{Timestamp: now.Add(-10 * time.Second), Component: "ServGate", Action: "publish", Description: "Order checkout message received & published to broker", Status: "success"},
-			{Timestamp: now.Add(-8 * time.Second), Component: "ServQueue", Action: "transform", Description: "Payload transformation schema mapping applied", Status: "success"},
-			{Timestamp: now.Add(-6 * time.Second), Component: "ServStore", Action: "dlq", Description: "Database write deadlock; message routed to Dead Letter Queue (DLQ)", Status: "error"},
-			{Timestamp: now.Add(-3 * time.Second), Component: "ServQueue", Action: "retry", Description: "DLQ retry policy triggered; re-processing message", Status: "success"},
-			{Timestamp: now.Add(-1 * time.Second), Component: "ServFlow", Action: "consume", Description: "Saga runner consumed and processed order", Status: "success"},
-			{Timestamp: now, Component: "ServGate", Action: "ack", Description: "Consumer acknowledgment returned to broker", Status: "success"},
+			{Timestamp: now.Add(-10 * time.Second), Component: "github.com/vyuvaraj/serv/packages/ServGate", Action: "publish", Description: "Order checkout message received & published to broker", Status: "success"},
+			{Timestamp: now.Add(-8 * time.Second), Component: "github.com/vyuvaraj/serv/packages/ServQueue", Action: "transform", Description: "Payload transformation schema mapping applied", Status: "success"},
+			{Timestamp: now.Add(-6 * time.Second), Component: "github.com/vyuvaraj/serv/packages/ServStore", Action: "dlq", Description: "Database write deadlock; message routed to Dead Letter Queue (DLQ)", Status: "error"},
+			{Timestamp: now.Add(-3 * time.Second), Component: "github.com/vyuvaraj/serv/packages/ServQueue", Action: "retry", Description: "DLQ retry policy triggered; re-processing message", Status: "success"},
+			{Timestamp: now.Add(-1 * time.Second), Component: "github.com/vyuvaraj/serv/packages/ServFlow", Action: "consume", Description: "Saga runner consumed and processed order", Status: "success"},
+			{Timestamp: now, Component: "github.com/vyuvaraj/serv/packages/ServGate", Action: "ack", Description: "Consumer acknowledgment returned to broker", Status: "success"},
 		},
 	}
 

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 var (

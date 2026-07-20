@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"servmesh/pkg/lock"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/lock"
 )
 
 func TestAcquire_GrantsFreeLock(t *testing.T) {

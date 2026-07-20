@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"servtrace/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/store"
 )
 
 func TestTraceComparison(t *testing.T) {

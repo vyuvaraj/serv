@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 type BatchJob struct {

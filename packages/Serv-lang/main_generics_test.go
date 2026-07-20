@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func TestGenericsUnitParser(t *testing.T) {

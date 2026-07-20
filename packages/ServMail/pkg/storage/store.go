@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type SendRequest struct {

@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"time"
 
-	"servstore/pkg/storage"
-	"servstore/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/wasm"
 )
 
 const (

@@ -68,8 +68,8 @@ func NewOrchestrator(workDir string) (*Orchestrator, error) {
 	}
 
 	// Try to find the local 'serv' binary in workspace if not on path
-	servPath := "serv"
-	if localPath, err := exec.LookPath("serv"); err == nil {
+	servPath := "github.com/vyuvaraj/serv/packages/Serv-lang"
+	if localPath, err := exec.LookPath("github.com/vyuvaraj/serv/packages/Serv-lang"); err == nil {
 		servPath = localPath
 	} else if _, err := os.Stat("../Serv-lang/serv.exe"); err == nil {
 		servPath, _ = filepath.Abs("../Serv-lang/serv.exe")

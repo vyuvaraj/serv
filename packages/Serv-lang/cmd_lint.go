@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func runLint(srvFile string) {

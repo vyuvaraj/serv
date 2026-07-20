@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 // buildTestWASM compiles a Go source string to a wasip1 binary

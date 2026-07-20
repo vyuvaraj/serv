@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"servgate/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/wasm"
 )
 
 // Benchmark10KConcurrentConnections executes 10K simulated concurrent requests

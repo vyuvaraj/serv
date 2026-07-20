@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"servsecret/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServSecret/pkg/storage"
 )
 
 func TestScheduledBackupAndRotation(t *testing.T) {

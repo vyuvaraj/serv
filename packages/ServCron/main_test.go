@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"servcron/pkg/cron"
-	"servcron/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServCron/pkg/cron"
+	"github.com/vyuvaraj/serv/packages/ServCron/pkg/server"
 )
 
 func TestSchedulerOperations(t *testing.T) {

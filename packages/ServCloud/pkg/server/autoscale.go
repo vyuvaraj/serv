@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"servcloud/pkg/orchestrator"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/orchestrator"
 )
 
 const IsAutoscaleSupported = true

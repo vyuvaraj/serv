@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"servcloud/pkg/orchestrator"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/orchestrator"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type Server struct {
@@ -45,8 +45,8 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servcloud", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servcloud", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServCloud", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServCloud", "1.0.0"))
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/api/deploy", s.handleDeploy)
 	mux.HandleFunc("/api/services", s.handleListServices)
@@ -117,7 +117,7 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
-	return ServShared.TraceMiddleware("servcloud",
+	return ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServCloud",
 		ServShared.RateLimitMiddleware(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

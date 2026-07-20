@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/cluster"
-	"servstore/pkg/metrics"
-	"servstore/pkg/otel"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/cluster"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/metrics"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 //go:embed assets/*
@@ -62,7 +62,7 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "/api/version" {
-		ServShared.VersionHandler("servstore", "1.0.0")(w, r)
+		ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServStore", "1.0.0")(w, r)
 		return
 	}
 	if path == "/readyz" {
@@ -232,7 +232,7 @@ func (wc *WebConsole) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Username:  username,
 				Role:      "oidc-user",
 				ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
-				Issuer:    "servstore",
+				Issuer:    "github.com/vyuvaraj/serv/packages/ServStore",
 			}
 			jwtToken, err := auth.GenerateToken(claims, wc.auth.JWTSecret())
 			if err != nil {

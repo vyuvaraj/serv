@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 
 	// SQLite driver
 	_ "github.com/glebarez/go-sqlite"

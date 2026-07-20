@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/vyuvaraj/ServShared/pkg/middleware"
+	"github.com/vyuvaraj/serv/packages/ServShared/pkg/middleware"
 )
 
 // Re-expose standard JWT claims.

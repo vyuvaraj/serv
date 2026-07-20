@@ -23,10 +23,10 @@ import (
 	"sync"
 	"time"
 
-	"servmesh/pkg/pb"
-	"servmesh/pkg/registry"
-	"servmesh/pkg/resilience"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/pb"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/resilience"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
@@ -76,7 +76,7 @@ func NewMeshTransport(registryURL string, cacheTTL time.Duration) *MeshTransport
 }
 
 func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Scheme != "serv" {
+	if req.URL.Scheme != "github.com/vyuvaraj/serv/packages/Serv-lang" {
 		return t.base.RoundTrip(req)
 	}
 
@@ -844,7 +844,7 @@ func NewServResolverBuilder(transport *MeshTransport) *ServResolverBuilder {
 }
 
 func (b *ServResolverBuilder) Scheme() string {
-	return "serv"
+	return "github.com/vyuvaraj/serv/packages/Serv-lang"
 }
 
 func (b *ServResolverBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {

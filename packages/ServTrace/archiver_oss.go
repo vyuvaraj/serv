@@ -4,7 +4,7 @@ package main
 
 import (
 	"log"
-	"servtrace/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/store"
 )
 
 func SetupColdTierArchiver(ts *store.Store) {

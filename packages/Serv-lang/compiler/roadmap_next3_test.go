@@ -3,7 +3,7 @@ package compiler
 import (
 	"strings"
 	"testing"
-	"serv/runtime"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"
 )
 
 func TestWorkflowDAGCycleDetection(t *testing.T) {

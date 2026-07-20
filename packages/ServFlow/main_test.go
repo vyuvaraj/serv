@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"servflow/pkg/engine"
-	"servflow/pkg/handlers"
-	"servflow/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServFlow/pkg/engine"
+	"github.com/vyuvaraj/serv/packages/ServFlow/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServFlow/pkg/storage"
 )
 
 func setupTest() {

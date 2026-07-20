@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 
 	"github.com/hashicorp/raft"
 )

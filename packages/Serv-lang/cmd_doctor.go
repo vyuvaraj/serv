@@ -60,20 +60,20 @@ func runDoctor(integration bool) {
 		name string
 		url  string
 	}{
-		{"ServGate", discovery.Gate},
-		{"ServStore", discovery.Store},
-		{"ServQueue", discovery.Queue},
-		{"ServCache", discovery.Cache},
-		{"ServCron", discovery.Cron},
-		{"ServMesh", discovery.Mesh},
-		{"ServCloud", discovery.Cloud},
-		{"ServTunnel", discovery.Tunnel},
-		{"ServTrace", discovery.Trace},
-		{"ServRegistry", discovery.Registry},
-		{"ServAuth", discovery.Auth},
+		{"github.com/vyuvaraj/serv/packages/ServGate", discovery.Gate},
+		{"github.com/vyuvaraj/serv/packages/ServStore", discovery.Store},
+		{"github.com/vyuvaraj/serv/packages/ServQueue", discovery.Queue},
+		{"github.com/vyuvaraj/serv/packages/ServCache", discovery.Cache},
+		{"github.com/vyuvaraj/serv/packages/ServCron", discovery.Cron},
+		{"github.com/vyuvaraj/serv/packages/ServMesh", discovery.Mesh},
+		{"github.com/vyuvaraj/serv/packages/ServCloud", discovery.Cloud},
+		{"github.com/vyuvaraj/serv/packages/ServTunnel", discovery.Tunnel},
+		{"github.com/vyuvaraj/serv/packages/ServTrace", discovery.Trace},
+		{"github.com/vyuvaraj/serv/packages/ServRegistry", discovery.Registry},
+		{"github.com/vyuvaraj/serv/packages/ServAuth", discovery.Auth},
 		{"ServDB", discovery.DB},
-		{"ServMail", discovery.Mail},
-		{"ServFlow", discovery.Flow},
+		{"github.com/vyuvaraj/serv/packages/ServMail", discovery.Mail},
+		{"github.com/vyuvaraj/serv/packages/ServFlow", discovery.Flow},
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}

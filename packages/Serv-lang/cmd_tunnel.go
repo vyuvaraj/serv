@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"servtunnel/pkg/client"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/client"
 )
 
 func runTunnelCmd() {

@@ -18,10 +18,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	"gopkg.in/yaml.v3"
-	"servsecret/pkg/handlers"
-	"servsecret/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServSecret/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServSecret/pkg/storage"
 )
 
 type Config struct {
@@ -121,8 +121,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servsecret", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servsecret", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServSecret", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServSecret", "1.0.0"))
 
 	// Secret manager endpoints
 	mux.HandleFunc("/api/secrets", handlers.HandleSecretRoute)
@@ -180,7 +180,7 @@ func main() {
 				return next
 			}
 		}
-		serverHandler = ServShared.TraceMiddleware("servsecret",
+		serverHandler = ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServSecret",
 			rateLimiter(
 				ServShared.CORSMiddleware(
 					ServShared.MaxBytesMiddleware(10*1024*1024)(

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"servqueue/pkg/broker"
-	"servqueue/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/web"
 )
 
 // TestEventBusFederation verifies that publishing on engine1 causes the event to be

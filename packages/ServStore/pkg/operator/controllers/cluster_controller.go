@@ -15,7 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	operv1 "servstore/pkg/operator"
+	operv1 "github.com/vyuvaraj/serv/packages/ServStore/pkg/operator"
 )
 
 // ServStoreClusterReconciler reconciles a ServStoreCluster object
@@ -144,7 +144,7 @@ func (r *ServStoreClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 func (r *ServStoreClusterReconciler) newHeadlessService(c *operv1.ServStoreCluster) *corev1.Service {
 	labels := map[string]string{
-		"app.kubernetes.io/name":     "servstore",
+		"app.kubernetes.io/name":     "github.com/vyuvaraj/serv/packages/ServStore",
 		"app.kubernetes.io/instance": c.Name,
 	}
 	return &corev1.Service{
@@ -177,7 +177,7 @@ func (r *ServStoreClusterReconciler) newHeadlessService(c *operv1.ServStoreClust
 
 func (r *ServStoreClusterReconciler) newMainService(c *operv1.ServStoreCluster) *corev1.Service {
 	labels := map[string]string{
-		"app.kubernetes.io/name":     "servstore",
+		"app.kubernetes.io/name":     "github.com/vyuvaraj/serv/packages/ServStore",
 		"app.kubernetes.io/instance": c.Name,
 	}
 	return &corev1.Service{
@@ -206,7 +206,7 @@ func (r *ServStoreClusterReconciler) newMainService(c *operv1.ServStoreCluster) 
 
 func (r *ServStoreClusterReconciler) newPdb(c *operv1.ServStoreCluster) *policyv1.PodDisruptionBudget {
 	labels := map[string]string{
-		"app.kubernetes.io/name":     "servstore",
+		"app.kubernetes.io/name":     "github.com/vyuvaraj/serv/packages/ServStore",
 		"app.kubernetes.io/instance": c.Name,
 	}
 	minAvail := intstr.FromInt32(c.Spec.Replicas - 1)
@@ -233,7 +233,7 @@ func (r *ServStoreClusterReconciler) newPdb(c *operv1.ServStoreCluster) *policyv
 
 func (r *ServStoreClusterReconciler) newStatefulSet(c *operv1.ServStoreCluster) *appsv1.StatefulSet {
 	labels := map[string]string{
-		"app.kubernetes.io/name":     "servstore",
+		"app.kubernetes.io/name":     "github.com/vyuvaraj/serv/packages/ServStore",
 		"app.kubernetes.io/instance": c.Name,
 	}
 	replicas := c.Spec.Replicas
@@ -414,7 +414,7 @@ func (r *ServStoreClusterReconciler) newStatefulSet(c *operv1.ServStoreCluster) 
 					},
 					Containers: []corev1.Container{
 						{
-							Name:            "servstore",
+							Name:            "github.com/vyuvaraj/serv/packages/ServStore",
 							Image:           c.Spec.Image,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Args:            args,

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 func TestAuthJWTGenerationAndValidation(t *testing.T) {

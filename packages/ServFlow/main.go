@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"servflow/pkg/handlers"
-	"servflow/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServFlow/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServFlow/pkg/storage"
 )
 
 var (
@@ -152,8 +152,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servflow", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servflow", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServFlow", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServFlow", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -188,7 +188,7 @@ func main() {
 	}
 
 	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
-	serverHandler := ServShared.TraceMiddleware("servflow",
+	serverHandler := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServFlow",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

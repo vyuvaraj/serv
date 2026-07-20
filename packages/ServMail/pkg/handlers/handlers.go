@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"servmail/pkg/queue"
-	"servmail/pkg/storage"
-	mailtemplate "servmail/pkg/template"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/queue"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/storage"
+	mailtemplate "github.com/vyuvaraj/serv/packages/ServMail/pkg/template"
 )
 
 var (
@@ -306,7 +306,7 @@ func (ctx *HandlerContext) HandleRegisterTemplate(w http.ResponseWriter, r *http
 		_ = ctx.TemplateStore.SaveTemplates(copied)
 	}
 
-	_ = ServShared.EmitAuditEvent("ServMail", "TEMPLATE_REGISTER", "system", map[string]interface{}{"name": req.Name, "version": req.Version})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServMail", "TEMPLATE_REGISTER", "system", map[string]interface{}{"name": req.Name, "version": req.Version})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

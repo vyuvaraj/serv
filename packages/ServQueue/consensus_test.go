@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"servqueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
 )
 
 func getFreePort(t *testing.T) int {

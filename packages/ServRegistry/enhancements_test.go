@@ -15,8 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"servregistry/pkg/registry"
-	"servregistry/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/web"
 )
 
 func TestProvenanceAndUpstreamMirror(t *testing.T) {

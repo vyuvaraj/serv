@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyuvaraj/ServShared/pkg/middleware"
+	"github.com/vyuvaraj/serv/packages/ServShared/pkg/middleware"
 )
 
 // ContextKey is the type for context keys to avoid collisions.

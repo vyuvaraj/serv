@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"servtunnel/pkg/client"
-	"servtunnel/pkg/inspector"
-	"servtunnel/pkg/server"
-	"servtunnel/pkg/tunnel"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/client"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/inspector"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServTunnel/pkg/tunnel"
 
 	"github.com/gorilla/websocket"
 )

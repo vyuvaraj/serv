@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 var BuildOffline bool
@@ -101,7 +101,7 @@ func pingInfrastructure(kind string, expr compiler.Expression) error {
 			addr += ":6379"
 		case "memcached":
 			addr += ":11211"
-		case "servqueue":
+		case "github.com/vyuvaraj/serv/packages/ServQueue":
 			addr += ":8082"
 		case "mongodb":
 			addr += ":27017"
@@ -234,7 +234,7 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 
 		fileImports := make(map[string]bool)
 		if strings.Contains(fileGoCode, "runtime.") {
-			fileImports[`"serv/runtime"`] = true
+			fileImports[`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`] = true
 		}
 		if strings.Contains(fileGoCode, "time.") {
 			fileImports[`"time"`] = true
@@ -303,7 +303,7 @@ func buildServNoExit(srvFile, outputBinary, target, goos, goarch, tags string) (
 		if len(mappings) > 0 {
 			smCode := fmt.Sprintf(`package main
 
-import "serv/runtime"
+import "github.com/vyuvaraj/serv/packages/Serv-lang/runtime"
 
 func init() {
 	if runtime.SrvSourceMap == nil {
@@ -332,7 +332,7 @@ func init() {
 
 	mainImports := map[string]bool{
 		`"fmt"`:          true,
-		`"serv/runtime"`: true,
+		`"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"`: true,
 	}
 	hasNonTestStmts := false
 	for _, stmt := range program.Statements {

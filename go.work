@@ -1,0 +1,23 @@
+go 1.26.3
+
+use (
+	./packages/Serv-lang
+	./packages/ServAuth
+	./packages/ServCache
+	./packages/ServCloud
+	./packages/ServConsole
+	./packages/ServCron
+	./packages/ServFlow
+	./packages/ServGate
+	./packages/ServLock
+	./packages/ServMail
+	./packages/ServMesh
+	./packages/ServPool
+	./packages/ServQueue
+	./packages/ServRegistry
+	./packages/ServSecret
+	./packages/ServShared
+	./packages/ServStore
+	./packages/ServTrace
+	./packages/ServTunnel
+)

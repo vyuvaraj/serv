@@ -1,13 +1,13 @@
 package otel
 
 import (
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type Span = ServShared.Span
 
 func Init() {
-	ServShared.InitTrace("servqueue")
+	ServShared.InitTrace("github.com/vyuvaraj/serv/packages/ServQueue")
 }
 
 func GenerateTraceID() string {

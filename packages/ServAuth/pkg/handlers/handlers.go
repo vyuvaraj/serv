@@ -18,13 +18,13 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	"golang.org/x/crypto/bcrypt"
 
-	"servauth/pkg/kms"
-	"servauth/pkg/oauth"
-	"servauth/pkg/sessions"
-	"servauth/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/kms"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/oauth"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/sessions"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/store"
 )
 
 var (
@@ -196,7 +196,7 @@ func HandleRegister(w http.ResponseWriter, r *http.Request) {
 	UsersMu.Unlock()
 
 	SaveUsersToStore()
-	_ = ServShared.EmitAuditEvent("ServAuth", "USER_REGISTER", req.Username, map[string]interface{}{"email": req.Email, "tenant": tenantID})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "USER_REGISTER", req.Username, map[string]interface{}{"email": req.Email, "tenant": tenantID})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -241,7 +241,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	passwordMatches := VerifyPassword(req.Password, hashToCheck)
 
 	if !exists {
-		_ = ServShared.EmitAuditEvent("ServAuth", "LOGIN_FAILED", req.Username, map[string]interface{}{
+		_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "LOGIN_FAILED", req.Username, map[string]interface{}{
 			"ip":     r.RemoteAddr,
 			"reason": "user_not_found",
 			"tenant": tenantID,
@@ -263,7 +263,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		u.FailedAttempts++
 		if u.FailedAttempts >= 3 {
 			u.LockedUntil = time.Now().Add(5 * time.Minute)
-			_ = ServShared.EmitAuditEvent("ServAuth", "ACCOUNT_LOCKED", req.Username, map[string]interface{}{
+			_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "ACCOUNT_LOCKED", req.Username, map[string]interface{}{
 				"ip":              r.RemoteAddr,
 				"failed_attempts": u.FailedAttempts,
 				"locked_until":    u.LockedUntil.UTC().Format(time.RFC3339),
@@ -273,7 +273,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Users[userKey] = u
 		UsersMu.Unlock()
 		SaveUsersToStore()
-		_ = ServShared.EmitAuditEvent("ServAuth", "LOGIN_FAILED", req.Username, map[string]interface{}{
+		_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "LOGIN_FAILED", req.Username, map[string]interface{}{
 			"ip":     r.RemoteAddr,
 			"reason": "invalid_password",
 			"tenant": tenantID,
@@ -321,7 +321,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	sessions.SessionsMu.Unlock()
 	SaveSessionsToStore()
 	_ = sessions.EnterpriseRegisterAuthSession(token, user.Username, r.RemoteAddr, r.UserAgent())
-	_ = ServShared.EmitAuditEvent("ServAuth", "USER_LOGIN", user.Username, map[string]interface{}{"ip": r.RemoteAddr, "tenant": tenantID})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "USER_LOGIN", user.Username, map[string]interface{}{"ip": r.RemoteAddr, "tenant": tenantID})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -452,7 +452,7 @@ func HandleToken(w http.ResponseWriter, r *http.Request) {
 		Roles:    []string{"client"},
 		Scopes:   []string{"*"},
 		RegisteredClaims: jwt.RegisteredClaims{
-			Issuer:    "servauth",
+			Issuer:    "github.com/vyuvaraj/serv/packages/ServAuth",
 			Subject:   clientID,
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
@@ -614,7 +614,7 @@ func HandleKeys(w http.ResponseWriter, r *http.Request) {
 	APIKeysMu.Unlock()
 	SaveAPIKeysToStore()
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "API_KEY_ISSUE", req.Username, map[string]interface{}{"scopes": req.Scopes})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "API_KEY_ISSUE", req.Username, map[string]interface{}{"scopes": req.Scopes})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -652,7 +652,7 @@ func HandleKeysValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "API_KEY_VALIDATE", apiKey.Username, map[string]interface{}{"scopes": apiKey.Scopes})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "API_KEY_VALIDATE", apiKey.Username, map[string]interface{}{"scopes": apiKey.Scopes})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -689,7 +689,7 @@ func HandleKeysRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	SaveAPIKeysToStore()
-	_ = ServShared.EmitAuditEvent("ServAuth", "API_KEY_REVOKE", apiKey.Username, map[string]interface{}{"scopes": apiKey.Scopes})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "API_KEY_REVOKE", apiKey.Username, map[string]interface{}{"scopes": apiKey.Scopes})
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"success","message":"API key revoked"}`))
@@ -727,7 +727,7 @@ func HandleSessionsRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "SESSION_REVOKE", session.Username, map[string]interface{}{"token": req.Token})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "SESSION_REVOKE", session.Username, map[string]interface{}{"token": req.Token})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -779,7 +779,7 @@ func HandleMfaSetup(w http.ResponseWriter, r *http.Request) {
 	UsersMu.Unlock()
 	SaveUsersToStore()
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "MFA_SETUP", req.Username, map[string]interface{}{"tenant": tenantID})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "MFA_SETUP", req.Username, map[string]interface{}{"tenant": tenantID})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -832,7 +832,7 @@ func HandleMfaVerify(w http.ResponseWriter, r *http.Request) {
 		UsersMu.Unlock()
 		SaveUsersToStore()
 
-		_ = ServShared.EmitAuditEvent("ServAuth", "MFA_VERIFY", req.Username, map[string]interface{}{"tenant": tenantID})
+		_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "MFA_VERIFY", req.Username, map[string]interface{}{"tenant": tenantID})
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1057,7 +1057,7 @@ func HandleSecretsEncrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "SECRET_ENCRYPT", "system", nil)
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "SECRET_ENCRYPT", "system", nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -1088,7 +1088,7 @@ func HandleSecretsDecrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "SECRET_DECRYPT", "system", nil)
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "SECRET_DECRYPT", "system", nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -1157,7 +1157,7 @@ func HandleRotateJWKS(w http.ResponseWriter, r *http.Request) {
 	JWTKeyID = kid
 	JWKKeyPairsMu.Unlock()
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "JWKS_ROTATE", "system", nil)
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "JWKS_ROTATE", "system", nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -1345,7 +1345,7 @@ func issueJWTForUser(w http.ResponseWriter, r *http.Request, username string) {
 	sessions.SessionsMu.Unlock()
 	SaveSessionsToStore()
 
-	_ = ServShared.EmitAuditEvent("ServAuth", "LOGIN_SUCCESS", username, map[string]interface{}{"ip": r.RemoteAddr, "tenant": tenantID})
+	_ = ServShared.EmitAuditEvent("github.com/vyuvaraj/serv/packages/ServAuth", "LOGIN_SUCCESS", username, map[string]interface{}{"ip": r.RemoteAddr, "tenant": tenantID})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

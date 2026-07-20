@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 // S3ErrorResponse matches the AWS S3 XML error envelope.

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"servqueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
 )
 
 // TestFIFOOrderingWithinPartition verifies that messages published sequentially

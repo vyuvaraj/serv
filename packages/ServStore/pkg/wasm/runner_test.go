@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"servstore/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/wasm"
 )
 
 // buildWASM compiles a Go source file to a WASI binary using the host Go toolchain.

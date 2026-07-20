@@ -16,13 +16,13 @@ import (
 	"strings"
 	"time"
 
-	"servqueue/pkg/broker"
-	"servqueue/pkg/otel"
-	"servqueue/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/storage"
 
 	"flag"
 	"github.com/gorilla/websocket"
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 type Server struct {
@@ -49,8 +49,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
 	mux.HandleFunc("/metrics", s.handlePrometheusMetrics)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servqueue", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servqueue", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServQueue", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServQueue", "1.0.0"))
 	mux.HandleFunc("/api/topics/", s.handleTopics)
 	mux.HandleFunc("/api/v1/topics/", s.handleTopics)
 	mux.HandleFunc("/api/v1/events/", s.handleEvents)
@@ -79,7 +79,7 @@ func (s *Server) Start() error {
 	}
 
 	// Full middleware chain
-	fullMiddlewareChain := ServShared.TraceMiddleware("servqueue",
+	fullMiddlewareChain := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServQueue",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(
@@ -930,7 +930,7 @@ func (s *Server) handleTail(w http.ResponseWriter, r *http.Request) {
 			err := conn.WriteMessage(websocket.TextMessage, []byte(msg))
 			if span != nil {
 				otel.EndSpan(span, err, map[string]interface{}{
-					"messaging.system":      "servqueue",
+					"messaging.system":      "github.com/vyuvaraj/serv/packages/ServQueue",
 					"messaging.destination": namespacedTopic,
 					"messaging.consumer":    "websocket-tail",
 				})

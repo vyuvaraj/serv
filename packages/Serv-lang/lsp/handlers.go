@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 // --- Hover (works on usage, not just definition) ---

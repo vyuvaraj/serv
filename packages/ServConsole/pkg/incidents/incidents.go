@@ -45,8 +45,8 @@ func NewSLOTracker() *SLOTracker {
 	t := &SLOTracker{
 		slos: make(map[string]SLO),
 	}
-	t.slos["ServGate"] = SLO{ServiceName: "ServGate", TargetP99Ms: 200, ActualP99Ms: 45, TargetError: 1.0, ActualError: 0.05, BudgetRemain: 98.4}
-	t.slos["ServStore"] = SLO{ServiceName: "ServStore", TargetP99Ms: 150, ActualP99Ms: 120, TargetError: 0.5, ActualError: 0.1, BudgetRemain: 92.5}
+	t.slos["github.com/vyuvaraj/serv/packages/ServGate"] = SLO{ServiceName: "github.com/vyuvaraj/serv/packages/ServGate", TargetP99Ms: 200, ActualP99Ms: 45, TargetError: 1.0, ActualError: 0.05, BudgetRemain: 98.4}
+	t.slos["github.com/vyuvaraj/serv/packages/ServStore"] = SLO{ServiceName: "github.com/vyuvaraj/serv/packages/ServStore", TargetP99Ms: 150, ActualP99Ms: 120, TargetError: 0.5, ActualError: 0.1, BudgetRemain: 92.5}
 	return t
 }
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"serv/runtime"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"
 )
 
 func TestMockingHTTPGet(t *testing.T) {

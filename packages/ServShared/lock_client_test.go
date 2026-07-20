@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	ServShared "github.com/vyuvaraj/ServShared"
+	ServShared "github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 // mockLockServer sets up an httptest.Server that implements the ServMesh

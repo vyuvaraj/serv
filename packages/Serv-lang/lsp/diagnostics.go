@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 // --- Diagnostics (parse errors + static analysis) ---
@@ -29,7 +29,7 @@ func (s *Server) analyzeAndPublishDiagnostics(uri, text string) {
 			},
 			Severity: 1,
 			Message:  errMsg,
-			Source:   "serv",
+			Source:   "github.com/vyuvaraj/serv/packages/Serv-lang",
 		})
 	}
 
@@ -56,7 +56,7 @@ func (s *Server) analyzeAndPublishDiagnostics(uri, text string) {
 				},
 				Severity: severity,
 				Message:  d.Message,
-				Source:   "serv",
+				Source:   "github.com/vyuvaraj/serv/packages/Serv-lang",
 			})
 		}
 	}
@@ -77,7 +77,7 @@ func (s *Server) analyzeAndPublishDiagnostics(uri, text string) {
 			},
 			Severity: 2, // Warning
 			Message:  fmt.Sprintf("route %s %q has no return statement — will respond with empty 200", route.Method, route.Path),
-			Source:   "serv",
+			Source:   "github.com/vyuvaraj/serv/packages/Serv-lang",
 		})
 	}
 

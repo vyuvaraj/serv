@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 func TestS3BatchOperations(t *testing.T) {
@@ -210,7 +210,7 @@ func TestS3BatchOperations(t *testing.T) {
 
 	// 4. Test Bulk Tagging Operation
 	t.Run("Bulk Tagging", func(t *testing.T) {
-		tagsMap := map[string]string{"project": "servstore", "env": "test"}
+		tagsMap := map[string]string{"project": "github.com/vyuvaraj/serv/packages/ServStore", "env": "test"}
 		tagsJSON, _ := json.Marshal(tagsMap)
 
 		job := runBatchJob("Tagging", "src-bucket", []string{"obj1.txt", "obj2.txt"}, map[string]string{
@@ -225,7 +225,7 @@ func TestS3BatchOperations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get tags: %v", err)
 		}
-		if tags1["project"] != "servstore" || tags1["env"] != "test" {
+		if tags1["project"] != "github.com/vyuvaraj/serv/packages/ServStore" || tags1["env"] != "test" {
 			t.Errorf("unexpected tags: %v", tags1)
 		}
 	})

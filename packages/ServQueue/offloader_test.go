@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"servqueue/pkg/broker"
-	"servqueue/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/storage"
 )
 
 func TestStorageTieringOffloading(t *testing.T) {

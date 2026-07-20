@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"servmail/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/storage"
 )
 
 // HandleSMTPConnection handles a single SMTP connection and appends captured email to mock repository.

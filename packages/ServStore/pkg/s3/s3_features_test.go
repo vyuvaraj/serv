@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 func TestS3Features(t *testing.T) {
@@ -106,7 +106,7 @@ func TestS3Features(t *testing.T) {
 	for _, t := range tagsRes.TagSet {
 		tagsMap[t.Key] = t.Value
 	}
-	if tagsMap["env"] != "prod" || tagsMap["project"] != "serv" {
+	if tagsMap["env"] != "prod" || tagsMap["project"] != "github.com/vyuvaraj/serv/packages/Serv-lang" {
 		t.Errorf("GetObjectTagging: expected tags env=prod and project=serv, got: %v", tagsMap)
 	}
 

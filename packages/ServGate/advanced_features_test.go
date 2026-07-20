@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"servgate/pkg/proxy"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/proxy"
 )
 
 // Helper to generate self-signed certs and write them to temp files

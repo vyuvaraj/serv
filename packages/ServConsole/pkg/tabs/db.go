@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"servconsole/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/auth"
 )
 
 func HandleDbQuery(w http.ResponseWriter, r *http.Request) {

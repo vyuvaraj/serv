@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func TestApiVersioningRoutePrefixing(t *testing.T) {
@@ -379,7 +379,7 @@ store MyStore {}
 
 	origArgs := os.Args
 	defer func() { os.Args = origArgs }()
-	os.Args = []string{"serv", "generate", "sandbox", srvFile, "-o", sandboxFile}
+	os.Args = []string{"github.com/vyuvaraj/serv/packages/Serv-lang", "generate", "sandbox", srvFile, "-o", sandboxFile}
 
 	runGenerateSandbox(srvFile)
 

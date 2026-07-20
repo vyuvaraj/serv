@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"servsecret/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServSecret/pkg/storage"
 )
 
 func TestSecretHandlers(t *testing.T) {

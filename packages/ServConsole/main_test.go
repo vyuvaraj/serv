@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"servconsole/pkg/config"
-	"servconsole/pkg/tabs"
-	"servconsole/pkg/topology"
-	pkgalerts "servconsole/pkg/alerts"
-	pkgdashboards "servconsole/pkg/dashboards"
-	"servconsole/pkg/launcher"
-	"servconsole/pkg/incidents"
-	"servconsole/pkg/provision"
-	"servconsole/pkg/ai"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/tabs"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/topology"
+	pkgalerts "github.com/vyuvaraj/serv/packages/ServConsole/pkg/alerts"
+	pkgdashboards "github.com/vyuvaraj/serv/packages/ServConsole/pkg/dashboards"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/launcher"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/incidents"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/provision"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/ai"
 )
 
 type Route = config.Route
@@ -875,7 +875,7 @@ func TestHandleProvisioning(t *testing.T) {
 }
 
 func TestHandleDiagnosticExec(t *testing.T) {
-	payload := `{"service":"ServGate","command":"ps aux"}`
+	payload := `{"service":"github.com/vyuvaraj/serv/packages/ServGate","command":"ps aux"}`
 	req := httptest.NewRequest("POST", "/api/diagnostics/exec", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -906,7 +906,7 @@ func TestHandleTopologyLive(t *testing.T) {
 					"TraceID":      "trace-001",
 					"SpanID":       "span-001",
 					"ParentSpanID": "",
-					"ServiceName":  "ServGate",
+					"ServiceName":  "github.com/vyuvaraj/serv/packages/ServGate",
 					"DurationNs":   15000000,
 					"StatusCode":   "ok",
 					"StartTime":    time.Now().Add(-1 * time.Minute).Format(time.RFC3339Nano),
@@ -916,7 +916,7 @@ func TestHandleTopologyLive(t *testing.T) {
 					"TraceID":      "trace-001",
 					"SpanID":       "span-002",
 					"ParentSpanID": "span-001",
-					"ServiceName":  "ServStore",
+					"ServiceName":  "github.com/vyuvaraj/serv/packages/ServStore",
 					"DurationNs":   8000000,
 					"StatusCode":   "ok",
 					"StartTime":    time.Now().Add(-50 * time.Second).Format(time.RFC3339Nano),
@@ -926,7 +926,7 @@ func TestHandleTopologyLive(t *testing.T) {
 					"TraceID":      "trace-002",
 					"SpanID":       "span-003",
 					"ParentSpanID": "span-001",
-					"ServiceName":  "ServQueue",
+					"ServiceName":  "github.com/vyuvaraj/serv/packages/ServQueue",
 					"DurationNs":   3000000,
 					"StatusCode":   "error",
 					"StartTime":    time.Now().Add(-40 * time.Second).Format(time.RFC3339Nano),
@@ -968,13 +968,13 @@ func TestHandleTopologyLive(t *testing.T) {
 	// Verify ServGate and ServStore appear in nodes
 	foundGate, foundStore := false, false
 	for _, n := range result.Nodes {
-		if n.ID == "ServGate" {
+		if n.ID == "github.com/vyuvaraj/serv/packages/ServGate" {
 			foundGate = true
 			if n.HealthScore < 0 || n.HealthScore > 1 {
 				t.Errorf("health score out of range: %f", n.HealthScore)
 			}
 		}
-		if n.ID == "ServStore" {
+		if n.ID == "github.com/vyuvaraj/serv/packages/ServStore" {
 			foundStore = true
 		}
 	}
@@ -1023,7 +1023,7 @@ func TestHandleDashboards(t *testing.T) {
 	}
 
 	// 2. POST — create new dashboard
-	payload := `{"name":"SRE Alerts Board","description":"Custom board for SRE team","widgets":[{"id":"w1","title":"Error Spike","metric":"error_rate","chart_type":"line","time_range":"1h","service":"ServGate","width":6,"height":4}],"shared_with":["sre-team"]}`
+	payload := `{"name":"SRE Alerts Board","description":"Custom board for SRE team","widgets":[{"id":"w1","title":"Error Spike","metric":"error_rate","chart_type":"line","time_range":"1h","service":"github.com/vyuvaraj/serv/packages/ServGate","width":6,"height":4}],"shared_with":["sre-team"]}`
 	req = httptest.NewRequest("POST", "/api/dashboards", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
@@ -1357,7 +1357,7 @@ func TestAIObservabilityPipelines(t *testing.T) {
 // TestConsoleV1Readiness verifies V1.1 (/api/v1 prefix), V1.2 (standard errors), and V1.6 (/api/version).
 func TestConsoleV1Readiness(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servconsole", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServConsole", "1.0.0"))
 	mux.HandleFunc("/api/error-test", func(w http.ResponseWriter, r *http.Request) {
 		WriteJSONError(w, r, "Test Error Message", "ERR_TEST", http.StatusBadRequest)
 	})
@@ -1380,7 +1380,7 @@ func TestConsoleV1Readiness(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &ver); err != nil {
 		t.Fatalf("failed to parse version JSON: %v", err)
 	}
-	if ver["service"] != "servconsole" || ver["version"] != "1.0.0" {
+	if ver["service"] != "github.com/vyuvaraj/serv/packages/ServConsole" || ver["version"] != "1.0.0" {
 		t.Errorf("unexpected version response: %+v", ver)
 	}
 

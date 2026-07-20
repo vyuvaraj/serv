@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 	"gopkg.in/yaml.v3"
-	"servlock/pkg/handlers"
-	"servlock/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServLock/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServLock/pkg/storage"
 )
 
 type Config struct {
@@ -70,8 +70,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servlock", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servlock", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServLock", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServLock", "1.0.0"))
 
 	mux.HandleFunc("/api/locks/acquire", handlers.HandleAcquireLock)
 	mux.HandleFunc("/api/locks/release", handlers.HandleReleaseLock)
@@ -125,7 +125,7 @@ func main() {
 				return next
 			}
 		}
-		serverHandler = ServShared.TraceMiddleware("servlock",
+		serverHandler = ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServLock",
 			rateLimiter(
 				ServShared.CORSMiddleware(
 					ServShared.MaxBytesMiddleware(10*1024*1024)(

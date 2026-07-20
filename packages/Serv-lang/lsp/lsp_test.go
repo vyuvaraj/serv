@@ -501,7 +501,7 @@ func TestStructFieldCompletionsDX5(t *testing.T) {
 	openMsg := JSONRPCMessage{
 		JSONRPC: "2.0",
 		Method:  "textDocument/didOpen",
-		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv","languageId":"serv","version":1,"text":"struct User {\n  id: string\n  name: string\n}\nlet u = User {\n  id: \"1\"\n  name: \"Alice\"\n}\nlet x = u."}}`),
+		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.srv","languageId":"github.com/vyuvaraj/serv/packages/Serv-lang","version":1,"text":"struct User {\n  id: string\n  name: string\n}\nlet u = User {\n  id: \"1\"\n  name: \"Alice\"\n}\nlet x = u."}}`),
 	}
 	captureStdout(func() { server.handleMessage(openMsg) })
 

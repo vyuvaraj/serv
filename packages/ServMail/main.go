@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"strconv"
-	"github.com/vyuvaraj/ServShared"
-	"servmail/pkg/delivery"
-	"servmail/pkg/handlers"
-	"servmail/pkg/queue"
-	"servmail/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/delivery"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/queue"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/storage"
 )
 
 var (
@@ -239,8 +239,8 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servmail", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servmail", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServMail", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServMail", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -264,7 +264,7 @@ func main() {
 	mux.HandleFunc("/api/mail/mock-smtp", handleGetMockEmails)
 	mux.HandleFunc("/api/v1/mail/mock-smtp", handleGetMockEmails)
 
-	serverHandler := ServShared.TraceMiddleware("servmail",
+	serverHandler := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServMail",
 		ServShared.AuthMiddleware(
 			ServShared.RateLimitMiddleware(
 				ServShared.CORSMiddleware(

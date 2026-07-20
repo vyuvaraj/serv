@@ -20,14 +20,14 @@ import (
 	"syscall"
 	"time"
 
-	"servgate/pkg/otel"
-	"servgate/pkg/proxy"
-	"servgate/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/proxy"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/wasm"
 
 	"golang.org/x/crypto/acme/autocert"
 
-	"github.com/vyuvaraj/ServShared"
-	"github.com/vyuvaraj/ServShared/pkg/policy"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared/pkg/policy"
 )
 
 func getSecretFromServSecret(key string) (string, error) {
@@ -169,7 +169,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servgate", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServGate", "1.0.0"))
 	mux.Handle("/", handler)
 
 	handleMiddleware := func(w http.ResponseWriter, r *http.Request) {

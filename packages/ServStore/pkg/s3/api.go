@@ -24,14 +24,14 @@ import (
 
 	"github.com/go-stomp/stomp/v3"
 	"github.com/klauspost/reedsolomon"
-	"servstore/pkg/auth"
-	"servstore/pkg/cluster"
-	"servstore/pkg/metrics"
-	"servstore/pkg/otel"
-	"servstore/pkg/pipeline"
-	"servstore/pkg/ratelimit"
-	"servstore/pkg/storage"
-	"servstore/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/cluster"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/metrics"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/pipeline"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/ratelimit"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/wasm"
 )
 
 type Gateway struct {

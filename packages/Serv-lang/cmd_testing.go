@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 func runTests(srvFile string, withCoverage bool, filter string) bool {

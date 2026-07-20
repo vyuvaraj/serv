@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 
-	"servqueue/pkg/broker"
-	"servqueue/pkg/otel"
-	"servqueue/pkg/stomp"
-	"servqueue/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/stomp"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/web"
 )
 
 func main() {

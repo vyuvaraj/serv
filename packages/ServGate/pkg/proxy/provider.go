@@ -257,7 +257,7 @@ func signConfig(cfg *GatewayConfig, secret []byte) error {
 	claims := map[string]interface{}{
 		"config_hash": computedHash,
 		"exp":         time.Now().Add(24 * time.Hour).Unix(),
-		"iss":         "servconsole",
+		"iss":         "github.com/vyuvaraj/serv/packages/ServConsole",
 	}
 	claimsBytes, err := json.Marshal(claims)
 	if err != nil {
@@ -324,7 +324,7 @@ func verifyConfigSignature(cfg *GatewayConfig, secret []byte) error {
 		return fmt.Errorf("signature has expired")
 	}
 
-	if claims.Issuer != "servconsole" {
+	if claims.Issuer != "github.com/vyuvaraj/serv/packages/ServConsole" {
 		return fmt.Errorf("invalid signature issuer: %s", claims.Issuer)
 	}
 

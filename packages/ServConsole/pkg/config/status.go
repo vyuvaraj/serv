@@ -9,27 +9,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 func HandleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	statuses := []ComponentStatus{
-		CheckStatus("ServGate", *GateUrl),
-		CheckStatus("ServStore", *StoreUrl),
-		CheckStatus("ServQueue", *QueueUrl),
-		CheckStatus("ServTrace", *TraceUrl),
-		CheckStatus("ServTunnel", *TunnelUrl),
-		CheckStatus("ServAuth", *AuthUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServGate", *GateUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServStore", *StoreUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServQueue", *QueueUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServTrace", *TraceUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServTunnel", *TunnelUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServAuth", *AuthUrl),
 		CheckStatus("ServDB", *DbUrl),
-		CheckStatus("ServMail", *MailUrl),
-		CheckStatus("ServFlow", *FlowUrl),
-		CheckStatus("ServMesh", *MeshUrl),
-		CheckStatus("ServCron", *CronUrl),
-		CheckStatus("ServCache", *CacheUrl),
-		CheckStatus("ServRegistry", *RegistryUrl),
-		CheckStatus("ServCloud", *CloudUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServMail", *MailUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServFlow", *FlowUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServMesh", *MeshUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServCron", *CronUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServCache", *CacheUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServRegistry", *RegistryUrl),
+		CheckStatus("github.com/vyuvaraj/serv/packages/ServCloud", *CloudUrl),
 		CheckStatus("ServDocs", *DocsUrl),
 	}
 
@@ -55,7 +55,7 @@ func CheckStatus(name string, baseUrl string) ComponentStatus {
 	}
 
 	if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+		svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 		if svcToken != "" {
 			req.Header.Set("Authorization", "Bearer "+svcToken)
 		}
@@ -82,11 +82,11 @@ func CheckStatus(name string, baseUrl string) ComponentStatus {
 	var details any
 	var detailsPath string
 	switch name {
-	case "ServStore":
+	case "github.com/vyuvaraj/serv/packages/ServStore":
 		detailsPath = "/console/metrics"
-	case "ServQueue":
+	case "github.com/vyuvaraj/serv/packages/ServQueue":
 		detailsPath = "/api/stats"
-	case "ServGate":
+	case "github.com/vyuvaraj/serv/packages/ServGate":
 		detailsPath = "/"
 	}
 
@@ -95,7 +95,7 @@ func CheckStatus(name string, baseUrl string) ComponentStatus {
 		dreq, derr := http.NewRequest("GET", detUrl, nil)
 		if derr == nil {
 			if jwtSec := os.Getenv("SERV_JWT_SECRET"); jwtSec != "" {
-				svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "servconsole")
+				svcToken, _ := ServShared.GenerateServiceToken(jwtSec, "github.com/vyuvaraj/serv/packages/ServConsole")
 				if svcToken != "" {
 					dreq.Header.Set("Authorization", "Bearer "+svcToken)
 				}

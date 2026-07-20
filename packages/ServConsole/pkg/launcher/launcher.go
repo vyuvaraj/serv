@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 type DevServiceStatus struct {
@@ -30,13 +30,13 @@ func OrchestrateStartup() {
 		args []string
 		port int
 	}{
-		{"ServStore", "./servstore.exe", []string{}, 8081},
-		{"ServQueue", "./servqueue.exe", []string{}, 8082},
+		{"github.com/vyuvaraj/serv/packages/ServStore", "./servstore.exe", []string{}, 8081},
+		{"github.com/vyuvaraj/serv/packages/ServQueue", "./servqueue.exe", []string{}, 8082},
 		{"ServDB", "./servdb.exe", []string{}, 8097},
-		{"ServAuth", "./servauth.exe", []string{}, 8098},
-		{"ServGate", "./servgate.exe", []string{}, 8080},
-		{"ServMesh", "./servmesh.exe", []string{}, 8089},
-		{"ServCron", "./servcron.exe", []string{}, 8087},
+		{"github.com/vyuvaraj/serv/packages/ServAuth", "./servauth.exe", []string{}, 8098},
+		{"github.com/vyuvaraj/serv/packages/ServGate", "./servgate.exe", []string{}, 8080},
+		{"github.com/vyuvaraj/serv/packages/ServMesh", "./servmesh.exe", []string{}, 8089},
+		{"github.com/vyuvaraj/serv/packages/ServCron", "./servcron.exe", []string{}, 8087},
 		{"ServDocs", "./servdocs.exe", []string{}, 8084},
 	}
 
@@ -98,20 +98,20 @@ func HandleDevServices(w http.ResponseWriter, r *http.Request) {
 		Name string
 		URL  string
 	}{
-		{"ServGate", config.ActiveDiscovery.Gate},
-		{"ServStore", config.ActiveDiscovery.Store},
-		{"ServQueue", config.ActiveDiscovery.Queue},
-		{"ServTrace", config.ActiveDiscovery.Trace},
-		{"ServTunnel", config.ActiveDiscovery.Tunnel},
-		{"ServAuth", config.ActiveDiscovery.Auth},
+		{"github.com/vyuvaraj/serv/packages/ServGate", config.ActiveDiscovery.Gate},
+		{"github.com/vyuvaraj/serv/packages/ServStore", config.ActiveDiscovery.Store},
+		{"github.com/vyuvaraj/serv/packages/ServQueue", config.ActiveDiscovery.Queue},
+		{"github.com/vyuvaraj/serv/packages/ServTrace", config.ActiveDiscovery.Trace},
+		{"github.com/vyuvaraj/serv/packages/ServTunnel", config.ActiveDiscovery.Tunnel},
+		{"github.com/vyuvaraj/serv/packages/ServAuth", config.ActiveDiscovery.Auth},
 		{"ServDB", config.ActiveDiscovery.DB},
-		{"ServMail", config.ActiveDiscovery.Mail},
-		{"ServFlow", config.ActiveDiscovery.Flow},
-		{"ServMesh", config.ActiveDiscovery.Mesh},
-		{"ServCron", config.ActiveDiscovery.Cron},
-		{"ServCache", config.ActiveDiscovery.Cache},
-		{"ServRegistry", config.ActiveDiscovery.Registry},
-		{"ServCloud", config.ActiveDiscovery.Cloud},
+		{"github.com/vyuvaraj/serv/packages/ServMail", config.ActiveDiscovery.Mail},
+		{"github.com/vyuvaraj/serv/packages/ServFlow", config.ActiveDiscovery.Flow},
+		{"github.com/vyuvaraj/serv/packages/ServMesh", config.ActiveDiscovery.Mesh},
+		{"github.com/vyuvaraj/serv/packages/ServCron", config.ActiveDiscovery.Cron},
+		{"github.com/vyuvaraj/serv/packages/ServCache", config.ActiveDiscovery.Cache},
+		{"github.com/vyuvaraj/serv/packages/ServRegistry", config.ActiveDiscovery.Registry},
+		{"github.com/vyuvaraj/serv/packages/ServCloud", config.ActiveDiscovery.Cloud},
 	}
 
 	client := &http.Client{Timeout: 300 * time.Millisecond}

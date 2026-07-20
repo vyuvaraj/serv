@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"servtrace/pkg/server"
-	"servtrace/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServTrace/pkg/store"
 )
 
 func TestServTraceCollector(t *testing.T) {
@@ -424,7 +424,7 @@ func BenchmarkTraceStoreAddSpans(b *testing.B) {
 				Name:      "http.request",
 				StartTime: now,
 				EndTime:   now + int64(5*time.Millisecond),
-				Service:   "servgate",
+				Service:   "github.com/vyuvaraj/serv/packages/ServGate",
 			},
 		}
 		s.AddSpans(spans)

@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"servpool/pkg/analytics"
-	"servpool/pkg/migration"
-	"servpool/pkg/pool"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/analytics"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/migration"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/pool"
 )
 
 // QueryRequest is the HTTP request body for /api/db/query.

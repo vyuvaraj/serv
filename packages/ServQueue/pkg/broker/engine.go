@@ -13,8 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"servqueue/pkg/otel"
-	"servqueue/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/storage"
 
 	"github.com/tetratelabs/wazero"
 )
@@ -907,7 +907,7 @@ func (e *BrokerEngine) Publish(ctx context.Context, topic string, payload string
 	}
 
 	otel.EndSpan(span, nil, map[string]interface{}{
-		"messaging.system":      "servqueue",
+		"messaging.system":      "github.com/vyuvaraj/serv/packages/ServQueue",
 		"messaging.destination": topic,
 		"messaging.payload_len": len(processed),
 	})

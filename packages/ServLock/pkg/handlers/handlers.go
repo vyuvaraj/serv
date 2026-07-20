@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"servlock/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServLock/pkg/storage"
 )
 
 type LockRequest struct {

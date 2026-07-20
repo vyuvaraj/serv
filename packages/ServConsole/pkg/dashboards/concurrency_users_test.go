@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 // TestConcurrentDashboardUsers (D.29) simulates 50 concurrent users accessing

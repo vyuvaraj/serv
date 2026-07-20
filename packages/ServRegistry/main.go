@@ -21,9 +21,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/vyuvaraj/ServShared"
-	"servregistry/pkg/registry"
-	"servregistry/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/web"
 )
 
 // initS3 wires the global registry.S3Client to the given endpoint URL.
@@ -213,8 +213,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servregistry", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servregistry", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServRegistry", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServRegistry", "1.0.0"))
 
 	mux.HandleFunc("/publish", web.HandlePublish)
 	mux.HandleFunc("/api/v1/publish", web.HandlePublish)
@@ -239,7 +239,7 @@ func main() {
 	}
 
 	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> mux
-	serverHandler := ServShared.TraceMiddleware("servregistry",
+	serverHandler := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServRegistry",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

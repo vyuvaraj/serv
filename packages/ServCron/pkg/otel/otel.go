@@ -3,7 +3,7 @@ package otel
 import (
 	"context"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 // InitTrace initializes the telemetry tracing provider.

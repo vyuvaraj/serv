@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 type Alert struct {
@@ -54,20 +54,20 @@ func StartAlertMonitoring(ctx context.Context) {
 				name string
 				url  string
 			}{
-				{"ServGate", config.ActiveDiscovery.Gate},
-				{"ServStore", config.ActiveDiscovery.Store},
-				{"ServQueue", config.ActiveDiscovery.Queue},
-				{"ServTrace", config.ActiveDiscovery.Trace},
-				{"ServTunnel", config.ActiveDiscovery.Tunnel},
-				{"ServAuth", config.ActiveDiscovery.Auth},
+				{"github.com/vyuvaraj/serv/packages/ServGate", config.ActiveDiscovery.Gate},
+				{"github.com/vyuvaraj/serv/packages/ServStore", config.ActiveDiscovery.Store},
+				{"github.com/vyuvaraj/serv/packages/ServQueue", config.ActiveDiscovery.Queue},
+				{"github.com/vyuvaraj/serv/packages/ServTrace", config.ActiveDiscovery.Trace},
+				{"github.com/vyuvaraj/serv/packages/ServTunnel", config.ActiveDiscovery.Tunnel},
+				{"github.com/vyuvaraj/serv/packages/ServAuth", config.ActiveDiscovery.Auth},
 				{"ServDB", config.ActiveDiscovery.DB},
-				{"ServMail", config.ActiveDiscovery.Mail},
-				{"ServFlow", config.ActiveDiscovery.Flow},
-				{"ServMesh", config.ActiveDiscovery.Mesh},
-				{"ServCron", config.ActiveDiscovery.Cron},
-				{"ServCache", config.ActiveDiscovery.Cache},
-				{"ServRegistry", config.ActiveDiscovery.Registry},
-				{"ServCloud", config.ActiveDiscovery.Cloud},
+				{"github.com/vyuvaraj/serv/packages/ServMail", config.ActiveDiscovery.Mail},
+				{"github.com/vyuvaraj/serv/packages/ServFlow", config.ActiveDiscovery.Flow},
+				{"github.com/vyuvaraj/serv/packages/ServMesh", config.ActiveDiscovery.Mesh},
+				{"github.com/vyuvaraj/serv/packages/ServCron", config.ActiveDiscovery.Cron},
+				{"github.com/vyuvaraj/serv/packages/ServCache", config.ActiveDiscovery.Cache},
+				{"github.com/vyuvaraj/serv/packages/ServRegistry", config.ActiveDiscovery.Registry},
+				{"github.com/vyuvaraj/serv/packages/ServCloud", config.ActiveDiscovery.Cloud},
 				{"ServDocs", config.ActiveDiscovery.Docs},
 			}
 
@@ -197,7 +197,7 @@ func HandlePostmortem(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		targetAlert = Alert{
 			ID:        alertID,
-			Component: "ServGate",
+			Component: "github.com/vyuvaraj/serv/packages/ServGate",
 			Type:      "HighLatency",
 			Message:   "p99 latency exceeded 200ms threshold",
 			Severity:  "critical",

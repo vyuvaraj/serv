@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 func FuzzS3GatewayRequests(f *testing.F) {

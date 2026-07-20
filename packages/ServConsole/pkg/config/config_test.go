@@ -37,7 +37,7 @@ func TestHandleStatusEndpoint(t *testing.T) {
 }
 
 func TestComponentStatusCheck(t *testing.T) {
-	status := CheckStatus("ServGate", "invalid-url-format")
+	status := CheckStatus("github.com/vyuvaraj/serv/packages/ServGate", "invalid-url-format")
 	if status.Online {
 		t.Error("expected offline status for invalid url")
 	}

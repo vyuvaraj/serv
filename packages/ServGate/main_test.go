@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"servgate/pkg/proxy"
-	"servgate/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/proxy"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/wasm"
 )
 
 func TestServGateReverseProxy(t *testing.T) {
@@ -318,7 +318,7 @@ func TestInstallCommand(t *testing.T) {
 
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
-	os.Args = []string{"servgate", "install", "auth-token"}
+	os.Args = []string{"github.com/vyuvaraj/serv/packages/ServGate", "install", "auth-token"}
 
 	os.Setenv("SERV_REGISTRY", ts.URL)
 	defer os.Unsetenv("SERV_REGISTRY")
@@ -645,7 +645,7 @@ deny * *
 	// Compile policy to WASM
 	oldArgs := os.Args
 	defer func() { os.Args = oldArgs }()
-	os.Args = []string{"servgate", "policy", "compile", tmpPolicyFile.Name(), "-o", tmpWasmFile.Name()}
+	os.Args = []string{"github.com/vyuvaraj/serv/packages/ServGate", "policy", "compile", tmpPolicyFile.Name(), "-o", tmpWasmFile.Name()}
 	runPolicyCommand()
 
 	// Verify compiled WASM file exists

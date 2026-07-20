@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 func TestDashboardsAPIEndpoints(t *testing.T) {

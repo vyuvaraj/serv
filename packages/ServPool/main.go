@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
-	"servpool/pkg/pool"
-	"servpool/pkg/routing"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/pool"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/routing"
 )
 
 // Enterprise hooks (overridden in EE build).

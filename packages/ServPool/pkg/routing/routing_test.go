@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"servpool/pkg/pool"
+	"github.com/vyuvaraj/serv/packages/ServPool/pkg/pool"
 )
 
 type mockPool struct {

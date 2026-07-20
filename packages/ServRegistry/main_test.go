@@ -20,10 +20,10 @@ import (
 	"testing"
 	"time"
 
-	"servregistry/pkg/registry"
-	"servregistry/pkg/resolution"
-	"servregistry/pkg/signing"
-	"servregistry/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/resolution"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/signing"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/web"
 )
 
 func TestParseServToml(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"serv/compiler"
-	"serv/dap"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/dap"
 )
 
 // debugServ compiles <srvFile> with debug flags, extracts the source map from

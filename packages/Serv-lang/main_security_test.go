@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"serv/compiler"
-	"serv/runtime"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/runtime"
 )
 
 func TestSQLInjectionPrevention(t *testing.T) {

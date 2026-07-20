@@ -53,7 +53,7 @@ func initPlaygroundVars() {
 	pgRepoRoot = findPgRepoRoot()
 	candidates := []string{
 		filepath.Join(pgRepoRoot, "serv.exe"),
-		filepath.Join(pgRepoRoot, "serv"),
+		filepath.Join(pgRepoRoot, "github.com/vyuvaraj/serv/packages/Serv-lang"),
 	}
 
 	for _, c := range candidates {

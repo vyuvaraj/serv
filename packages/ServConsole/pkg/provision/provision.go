@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 var (

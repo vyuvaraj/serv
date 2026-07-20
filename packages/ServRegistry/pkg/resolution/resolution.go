@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"servregistry/pkg/registry"
+	"github.com/vyuvaraj/serv/packages/ServRegistry/pkg/registry"
 )
 
 func ParseSemver(v string) (int, int, int, error) {

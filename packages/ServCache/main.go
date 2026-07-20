@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 
-	"servcache/pkg/cache"
-	"servcache/pkg/otel"
-	"servcache/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/cache"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServCache/pkg/server"
 )
 
 const version = "0.1.0"

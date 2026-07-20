@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"servlock/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServLock/pkg/storage"
 )
 
 func TestLockLifecycle(t *testing.T) {

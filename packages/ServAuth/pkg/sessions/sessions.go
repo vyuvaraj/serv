@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"servauth/pkg/store"
+	"github.com/vyuvaraj/serv/packages/ServAuth/pkg/store"
 )
 
 var (

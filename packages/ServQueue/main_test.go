@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"servqueue/pkg/broker"
-	"servqueue/pkg/stomp"
-	"servqueue/pkg/web"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/broker"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/stomp"
+	"github.com/vyuvaraj/serv/packages/ServQueue/pkg/web"
 
 	"github.com/gorilla/websocket"
 )

@@ -24,11 +24,11 @@ import (
 	"sync"
 	"time"
 
-	"servgate/pkg/otel"
-	"servgate/pkg/wasm"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServGate/pkg/wasm"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/vyuvaraj/ServShared/pkg/policy"
+	"github.com/vyuvaraj/serv/packages/ServShared/pkg/policy"
 )
 
 // WeightedTarget represents a backend target with a traffic weight for canary/blue-green deployments.

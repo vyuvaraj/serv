@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 const testSecret = "test-secret-key-for-tenant-middleware"

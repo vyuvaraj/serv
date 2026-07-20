@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"servcloud/pkg/orchestrator"
-	"servcloud/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/orchestrator"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/server"
 )
 
 func TestServCloudLifecycle(t *testing.T) {

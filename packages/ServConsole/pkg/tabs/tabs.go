@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"servconsole/pkg/config"
+	"github.com/vyuvaraj/serv/packages/ServConsole/pkg/config"
 )
 
 var (
@@ -264,7 +264,7 @@ func HandleRebalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := http.Client{Timeout: 3 * time.Second}
-	body := strings.NewReader(`{"source_node":{"node_id":"servconsole","address":"localhost:8083","status":"online"},"peers":{}}`)
+	body := strings.NewReader(`{"source_node":{"node_id":"github.com/vyuvaraj/serv/packages/ServConsole","address":"localhost:8083","status":"online"},"peers":{}}`)
 	req, err := http.NewRequest("POST",
 		strings.TrimSuffix(*config.StoreUrl, "/")+"/console/cluster/gossip", body)
 	if err != nil {

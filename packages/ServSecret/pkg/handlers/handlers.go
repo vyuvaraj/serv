@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/vyuvaraj/ServShared"
-	"servsecret/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServSecret/pkg/storage"
 )
 
 var Store storage.SecretStore

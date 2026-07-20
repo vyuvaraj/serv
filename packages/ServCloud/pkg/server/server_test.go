@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"servcloud/pkg/orchestrator"
+	"github.com/vyuvaraj/serv/packages/ServCloud/pkg/orchestrator"
 )
 
 func TestNewServer(t *testing.T) {

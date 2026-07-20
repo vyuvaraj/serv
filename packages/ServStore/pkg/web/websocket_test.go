@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"servstore/pkg/cluster"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/cluster"
 )
 
 func TestWebSocketUpgradeAndEventPush(t *testing.T) {

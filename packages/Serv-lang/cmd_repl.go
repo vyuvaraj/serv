@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"serv/compiler"
+	"github.com/vyuvaraj/serv/packages/Serv-lang/compiler"
 )
 
 // runREPL starts an interactive Serv shell.

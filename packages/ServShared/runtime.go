@@ -160,7 +160,7 @@ type httpMeshResolver struct {
 
 // NewHTTPMeshResolver returns a MeshResolver backed by plain HTTP calls to
 // the ServMesh registry REST API at meshAddr (e.g. "http://localhost:8089").
-// This is the zero-dependency alternative to servmesh/pkg/client.MeshTransport.
+// This is the zero-dependency alternative to github.com/vyuvaraj/serv/packages/ServMesh/pkg/client.MeshTransport.
 func NewHTTPMeshResolver(meshAddr string) MeshResolver {
 	return &httpMeshResolver{
 		baseURL: meshAddr,

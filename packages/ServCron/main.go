@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"servcron/pkg/cron"
-	"servcron/pkg/otel"
-	"servcron/pkg/server"
+	"github.com/vyuvaraj/serv/packages/ServCron/pkg/cron"
+	"github.com/vyuvaraj/serv/packages/ServCron/pkg/otel"
+	"github.com/vyuvaraj/serv/packages/ServCron/pkg/server"
 
-	"github.com/vyuvaraj/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServShared"
 )
 
 func main() {
@@ -54,7 +54,7 @@ func main() {
 	defer stop()
 
 	if !standalone {
-		otel.InitTrace(ctx, "servcron")
+		otel.InitTrace(ctx, "github.com/vyuvaraj/serv/packages/ServCron")
 		defer otel.Shutdown(context.Background())
 	}
 
@@ -73,7 +73,7 @@ func main() {
 	// Set up server
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servcron", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServCron", "1.0.0"))
 
 	// Wrapper handler for /api/v1/ prefix rewriting (V1.1 support)
 	v1Wrapper := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +91,7 @@ func main() {
 	}
 
 	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
-	serverHandler := ServShared.TraceMiddleware("servcron",
+	serverHandler := ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServCron",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"flag"
-	"github.com/vyuvaraj/ServShared"
-	"servmesh/pkg/lock"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServMesh/pkg/lock"
 )
 
 type Instance struct {
@@ -309,8 +309,8 @@ func (r *Registry) Handler() http.Handler {
 
 	mux.HandleFunc("/healthz", ServShared.HealthzHandler)
 	mux.HandleFunc("/readyz", ServShared.ReadyzHandler)
-	mux.HandleFunc("/api/version", ServShared.VersionHandler("servmesh", "1.0.0"))
-	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("servmesh", "1.0.0"))
+	mux.HandleFunc("/api/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServMesh", "1.0.0"))
+	mux.HandleFunc("/api/v1/version", ServShared.VersionHandler("github.com/vyuvaraj/serv/packages/ServMesh", "1.0.0"))
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -772,7 +772,7 @@ func (r *Registry) Handler() http.Handler {
 	}
 
 	// Wrap in ServShared middleware: Trace -> RateLimit -> CORS -> MaxBytes -> Auth -> Tenant -> v1Wrapper
-	return ServShared.TraceMiddleware("servmesh",
+	return ServShared.TraceMiddleware("github.com/vyuvaraj/serv/packages/ServMesh",
 		rateLimiter(
 			ServShared.CORSMiddleware(
 				ServShared.MaxBytesMiddleware(10*1024*1024)(

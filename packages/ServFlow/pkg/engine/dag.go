@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/go-stomp/stomp/v3"
-	"github.com/vyuvaraj/ServShared"
-	"servflow/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServFlow/pkg/storage"
 )
 
 func HasCycle(def storage.WorkflowDef) bool {

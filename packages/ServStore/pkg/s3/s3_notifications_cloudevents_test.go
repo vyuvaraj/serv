@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"servstore/pkg/auth"
-	"servstore/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/auth"
+	"github.com/vyuvaraj/serv/packages/ServStore/pkg/storage"
 )
 
 func TestS3CloudEventsNotifications(t *testing.T) {

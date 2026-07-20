@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"os"
-	"github.com/vyuvaraj/ServShared"
-	"servmail/pkg/handlers"
-	"servmail/pkg/queue"
-	"servmail/pkg/storage"
+	"github.com/vyuvaraj/serv/packages/ServShared"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/handlers"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/queue"
+	"github.com/vyuvaraj/serv/packages/ServMail/pkg/storage"
 )
 
 
