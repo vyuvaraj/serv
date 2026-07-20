@@ -27,5 +27,3 @@ require (
 	github.com/aws/smithy-go v1.27.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 )
-
-replace github.com/vyuvaraj/ServShared => ../ServShared
