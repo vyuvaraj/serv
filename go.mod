@@ -1,6 +1,6 @@
 module servsecret
 
-go 1.24.0
+go 1.23.0
 
 require (
 	github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198
