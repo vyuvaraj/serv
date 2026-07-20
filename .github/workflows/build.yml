@@ -1,0 +1,61 @@
+name: Build & Test Workspace
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.26.3"
+
+jobs:
+  build-test:
+    name: Build and Test Workspace Modules
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Check out codebase
+        uses: actions/checkout@v4
+
+      - name: Verify workspace Go version
+        run: |
+          go version
+
+      - name: Build all modules
+        run: |
+          # Build each package dynamically using workspace resolution
+          modules=(
+            "Serv-lang" "ServTunnel" "ServStore" "ServTrace" "ServShared"
+            "ServRegistry" "ServQueue" "ServMesh" "ServPool" "ServMail"
+            "ServGate" "ServFlow" "ServLock" "ServConsole" "ServCron"
+            "ServCloud" "ServCache" "ServAuth" "ServSecret"
+          )
+          for m in "${modules[@]}"; do
+            if [ -d "packages/$m" ]; then
+              echo "==> Building package $m..."
+              (cd "packages/$m" && go build ./...)
+            fi
+          done
+
+      - name: Run workspace tests
+        run: |
+          # Run tests for each package
+          modules=(
+            "Serv-lang" "ServTunnel" "ServStore" "ServTrace" "ServShared"
+            "ServRegistry" "ServQueue" "ServMesh" "ServPool" "ServMail"
+            "ServGate" "ServFlow" "ServLock" "ServConsole" "ServCron"
+            "ServCloud" "ServCache" "ServAuth" "ServSecret"
+          )
+          for m in "${modules[@]}"; do
+            if [ -d "packages/$m" ]; then
+              echo "==> Testing package $m..."
+              (cd "packages/$m" && go test ./...)
+            fi
+          done
