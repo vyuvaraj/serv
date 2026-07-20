@@ -1,0 +1,99 @@
+project_name: servauth
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servauth
+    main: .
+    binary: servauth
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servauth
+    builds: [servauth]
+    name_template: "servauth_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servauth:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servauth:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServAuth"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServAuth"
+
+brews:
+  - name: servauth
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServAuth"
+    description: "Authentication and authorization service from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servauth"
+    test: |
+      system "#{bin}/servauth", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServAuth"
+    description: "Authentication and authorization service from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servauth-pkg
+    package_name: servauth
+    builds: [servauth]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServAuth
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Authentication and authorization service from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servauth/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
