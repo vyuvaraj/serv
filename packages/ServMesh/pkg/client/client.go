@@ -76,7 +76,7 @@ func NewMeshTransport(registryURL string, cacheTTL time.Duration) *MeshTransport
 }
 
 func (t *MeshTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Scheme != "github.com/vyuvaraj/serv/packages/Serv-lang" {
+	if req.URL.Scheme != "serv" {
 		return t.base.RoundTrip(req)
 	}
 
@@ -844,7 +844,7 @@ func NewServResolverBuilder(transport *MeshTransport) *ServResolverBuilder {
 }
 
 func (b *ServResolverBuilder) Scheme() string {
-	return "github.com/vyuvaraj/serv/packages/Serv-lang"
+	return "serv"
 }
 
 func (b *ServResolverBuilder) Build(target resolver.Target, cc resolver.ClientConn, opts resolver.BuildOptions) (resolver.Resolver, error) {

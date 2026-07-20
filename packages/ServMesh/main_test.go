@@ -1059,7 +1059,7 @@ func TestGRPCResolverAndInterceptor(t *testing.T) {
 	registerInstance(t, regURL, "grpc-service", "localhost:50051")
 
 	// Verify builder scheme
-	if builder.Scheme() != "github.com/vyuvaraj/serv/packages/Serv-lang" {
+	if builder.Scheme() != "serv" {
 		t.Errorf("expected scheme 'serv', got '%s'", builder.Scheme())
 	}
 
