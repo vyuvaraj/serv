@@ -1,0 +1,99 @@
+project_name: servflow
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servflow
+    main: .
+    binary: servflow
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servflow
+    builds: [servflow]
+    name_template: "servflow_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servflow:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servflow:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServFlow"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServFlow"
+
+brews:
+  - name: servflow
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServFlow"
+    description: "Workflow orchestration and pipeline service from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servflow"
+    test: |
+      system "#{bin}/servflow", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServFlow"
+    description: "Workflow orchestration and pipeline service from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servflow-pkg
+    package_name: servflow
+    builds: [servflow]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServFlow
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Workflow orchestration engine from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servflow/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
