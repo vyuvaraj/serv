@@ -1,0 +1,11 @@
+﻿# Dockerfile.goreleaser
+# Used by goreleaser only -- expects a pre-built binary in the build context.
+# The standard Dockerfile (multi-stage, builds from source) is used for local dev.
+
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates tzdata wget
+WORKDIR /app
+COPY servconsole .
+COPY web/ ./web/
+EXPOSE 8083
+ENTRYPOINT ["./servconsole"]

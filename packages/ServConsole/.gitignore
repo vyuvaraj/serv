@@ -1,0 +1,7 @@
+# Binaries
+*.exe
+servconsole
+audit.json
+*_ee.go
+*_ee_test.go
+*_ee_*.go

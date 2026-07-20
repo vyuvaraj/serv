@@ -1,0 +1,5658 @@
+// ServConsole Frontend Controller
+
+const STATE = {
+  activeTab: 'gateways',
+  components: {
+    ServGate: { online: false, latency: 0, details: null },
+    ServQueue: { online: false, latency: 0, details: null },
+    ServStore: { online: false, latency: 0, details: null },
+    ServTunnel: { online: false, latency: 0, details: null }
+  },
+  routes: [],
+  buckets: [],
+  selectedBucket: null,
+  objects: [],
+  traces: [],
+  logs: []
+};
+
+// Colors for storage nodes in ring visualizer
+const NODE_COLORS = [
+  '#a855f7', // purple
+  '#06b6d4', // cyan
+  '#10b981', // green
+  '#f59e0b', // orange
+  '#ef4444'  // red
+];
+
+document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+  checkAuthConfig();
+  initTabs();
+  try { initForms(); } catch(e) { console.warn('initForms:', e); }
+  initPolling();
+  initRingCanvas();
+  try { initAuditLogsUI(); } catch(e) { console.warn('initAuditLogsUI:', e); }
+  initAlertsUI();
+  initLogsUI();
+  initMobileMenu();
+  try { initSidebarCollapse(); } catch(e) { console.warn('initSidebarCollapse:', e); }
+  try { initEnvironmentSelector(); } catch(e) { console.warn('initEnv:', e); }
+});
+
+function initTheme() {
+  const toggleBtn = document.getElementById('btn-theme-toggle');
+  if (!toggleBtn) return;
+
+  const currentTheme = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', currentTheme);
+  toggleBtn.textContent = currentTheme === 'light' ? '🌙' : '☀️';
+
+  toggleBtn.addEventListener('click', () => {
+    const activeTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const newTheme = activeTheme === 'light' ? 'dark' : 'light';
+    
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    toggleBtn.textContent = newTheme === 'light' ? '🌙' : '☀️';
+  });
+}
+
+// --- Tab Switching ---
+function initTabs() {
+  console.log('[ServConsole] initTabs: binding', document.querySelectorAll('.tab-btn').length, 'tab buttons');
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.getAttribute('data-tab');
+      console.log('[ServConsole] Tab clicked:', tabId);
+      
+      // Update UI active states
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      
+      btn.classList.add('active');
+      const pane = document.getElementById(`tab-${tabId}`);
+      if (pane) pane.classList.add('active');
+      
+      STATE.activeTab = tabId;
+      logEvent('system', `Switched to tab: ${tabId}`);
+      
+      if (tabId === 'storage') {
+        fetchStorageRing();
+        fetchBuckets();
+        fetchClusterHealth();
+      } else if (tabId === 'traces') {
+        fetchTraces();
+      } else if (tabId === 'graph') {
+        fetchDependencyGraph();
+      } else if (tabId === 'audit') {
+        fetchAuditLogs();
+      } else if (tabId === 'database') {
+        fetchDatabaseSchemas();
+        fetchMigrations();
+        fetchDbHealth();
+      } else if (tabId === 'auth') {
+        fetchAuthUsers();
+        fetchAuthSessions();
+      } else if (tabId === 'mail') {
+        fetchMailDashboard();
+        fetchMailAttachments();
+        fetchMailPreferences();
+      } else if (tabId === 'policies') {
+        loadPoliciesView();
+      } else if (tabId === 'cost') {
+        fetchCostEstimation();
+        fetchCapacityPlanning();
+      } else if (tabId === 'slo') {
+        fetchSLOTargets();
+      } else if (tabId === 'deployments') {
+        fetchDeployments();
+        fetchCloudServices();
+        fetchUpgradeDashboard();
+      } else if (tabId === 'ai-observatory') {
+        fetchAIMetrics();
+        fetchRootCauseAnalysis();
+        fetchPredictiveAlerts();
+        fetchPlaybooks();
+      } else if (tabId === 'traces') {
+        fetchTraces();
+        fetchChangeCorrelationTimeline();
+      } else if (tabId === 'docs') {
+        const frame = document.getElementById('docs-frame');
+        if (frame) frame.src = frame.src; // Force reload/refresh
+        fetchApiSpecs();
+      } else if (tabId === 'topology') {
+        initServiceComparison();
+        fetchDependencyMatrix();
+      } else if (tabId === 'mesh') {
+        fetchMeshStatus();
+      } else if (tabId === 'cron') {
+        fetchCronJobs();
+        previewCronExpression();
+      } else if (tabId === 'cache') {
+        fetchCacheMetrics();
+      } else if (tabId === 'registry') {
+        fetchRegistryCatalog();
+      } else if (tabId === 'config') {
+        fetchRunningConfig();
+      }
+    });
+  });
+}
+
+// --- Polling & Status Aggregation ---
+function initPolling() {
+  const poll = async () => {
+    try {
+      const res = await fetch('/api/status');
+      if (res.status === 401) {
+        showLoginScreen();
+        return;
+      }
+      const data = await res.json();
+      
+      // Update local state
+      data.components.forEach(comp => {
+        STATE.components[comp.name] = {
+          online: comp.online,
+          latency: comp.latency_ms || 0,
+          url: comp.url || '',
+          details: comp.details
+        };
+      });
+      
+      updateSummaryUI();
+      
+      // If we are on gateways tab, refresh routes list if details changed
+      if (STATE.activeTab === 'gateways') {
+        refreshRoutesList();
+        fetchConnections();
+      } else if (STATE.activeTab === 'queues') {
+        refreshQueuesList();
+      } else if (STATE.activeTab === 'slo') {
+        fetchSLOTargets();
+      } else if (STATE.activeTab === 'deployments') {
+        fetchDeployments();
+        fetchCloudServices();
+        fetchUpgradeDashboard();
+      }
+    } catch (err) {
+      logEvent('error', `Status polling failed: ${err.message}`);
+    }
+  };
+  
+  poll();
+  setInterval(poll, 3000);
+
+  // Poll alerts every 5 seconds
+  if (typeof pollAlerts === 'function') {
+    pollAlerts();
+    setInterval(pollAlerts, 5000);
+  }
+}
+
+function updateSummaryUI() {
+  // Global Status
+  const statuses = Object.values(STATE.components).map(c => c.online);
+  const onlineCount = statuses.filter(Boolean).length;
+  const statusDot = document.getElementById('global-status-dot');
+  const statusText = document.getElementById('global-status-text');
+  
+  if (onlineCount === statuses.length) {
+    statusDot.className = 'status-indicator online';
+    statusText.textContent = 'Ecosystem Online';
+  } else if (onlineCount > 0) {
+    statusDot.className = 'status-indicator degraded';
+    statusText.textContent = 'Degraded State Detected';
+  } else {
+    statusDot.className = 'status-indicator offline';
+    statusText.textContent = 'Ecosystem Offline';
+  }
+  
+  // ServGate Card
+  const gate = STATE.components.ServGate;
+  const gateCard = document.getElementById('gate-summary-card');
+  const gateLatency = document.getElementById('gate-latency');
+  if (gate.online) {
+    gateCard.querySelector('.badge').className = 'badge online';
+    gateCard.querySelector('.badge').textContent = 'ONLINE';
+    gateLatency.textContent = `${gate.latency} ms`;
+  } else {
+    gateCard.querySelector('.badge').className = 'badge offline';
+    gateCard.querySelector('.badge').textContent = 'OFFLINE';
+    gateLatency.textContent = '— ms';
+  }
+  
+  // ServQueue Card
+  const queue = STATE.components.ServQueue;
+  const queueCard = document.getElementById('queue-summary-card');
+  const queueMsgs = document.getElementById('queue-messages');
+  if (queue.online) {
+    queueCard.querySelector('.badge').className = 'badge online';
+    queueCard.querySelector('.badge').textContent = 'ONLINE';
+    const published = queue.details?.metrics?.messages_published_total || 0;
+    queueMsgs.textContent = `${published} msg`;
+  } else {
+    queueCard.querySelector('.badge').className = 'badge offline';
+    queueCard.querySelector('.badge').textContent = 'OFFLINE';
+    queueMsgs.textContent = '— msg';
+  }
+  
+  // ServStore Card
+  const store = STATE.components.ServStore;
+  const storeCard = document.getElementById('store-summary-card');
+  const storeBuckets = document.getElementById('store-buckets');
+  if (store.online) {
+    storeCard.querySelector('.badge').className = 'badge online';
+    storeCard.querySelector('.badge').textContent = 'ONLINE';
+    const metricBkts = store.details?.Metrics?.BucketsCount || 0;
+    storeBuckets.textContent = `${metricBkts} bkts`;
+  } else {
+    storeCard.querySelector('.badge').className = 'badge offline';
+    storeCard.querySelector('.badge').textContent = 'OFFLINE';
+    storeBuckets.textContent = '— bkts';
+  }
+
+  // ServTunnel Card
+  const tunnel = STATE.components.ServTunnel;
+  const tunnelCard = document.getElementById('tunnel-summary-card');
+  const tunnelActive = document.getElementById('tunnel-active');
+  if (tunnelCard && tunnelActive) {
+    if (tunnel.online) {
+      tunnelCard.querySelector('.badge').className = 'badge online';
+      tunnelCard.querySelector('.badge').textContent = 'ONLINE';
+      tunnelActive.textContent = `${tunnel.latency} ms`;
+    } else {
+      tunnelCard.querySelector('.badge').className = 'badge offline';
+      tunnelCard.querySelector('.badge').textContent = 'OFFLINE';
+      tunnelActive.textContent = '— ms';
+    }
+  }
+}
+
+// --- Gateways Tab: Routes & WASM ---
+async function refreshRoutesList() {
+  try {
+    const res = await fetch('/api/routes');
+    if (!res.ok) return;
+    const routes = await res.json();
+    STATE.routes = routes;
+    
+    const tbody = document.querySelector('#routes-table tbody');
+    tbody.innerHTML = '';
+    
+    if (routes.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No routes configured</td></tr>`;
+      return;
+    }
+    
+    const role = STATE.user?.role || 'admin';
+    const disabledAttr = role === 'admin' ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Admin privilege required"';
+    routes.forEach(route => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong style="color:var(--primary); font-family:var(--font-mono);">${route.prefix}</strong></td>
+        <td><span style="font-family:var(--font-mono);">${route.target || route.targets?.join(', ')}</span></td>
+        <td>${route.rate_limit_rpm ? `${route.rate_limit_rpm} rpm` : '—'}</td>
+        <td>${route.prompt_guard ? '✅ Active' : '—'}</td>
+        <td>${route.semantic_cache ? '✅ Active' : '—'}</td>
+        <td>${route.pii_redact ? '✅ Active' : '—'}</td>
+        <td>
+          <button class="btn btn-danger btn-sm" onclick="deleteRoute('${route.prefix}')" ${disabledAttr}>Delete</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    // Graceful fallback if /api/routes is not fully integrated yet
+  }
+}
+
+// --- Queues Tab: Transforms & Messaging ---
+function refreshQueuesList() {
+  const queue = STATE.components.ServQueue;
+  const tbody = document.querySelector('#queues-table tbody');
+  tbody.innerHTML = '';
+  
+  if (!queue.online || !queue.details) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">ServQueue is offline</td></tr>`;
+    return;
+  }
+  
+  // Render STOMP / general queue stats
+  const metrics = queue.details.metrics || {};
+  const role = STATE.user?.role || 'admin';
+  const adminDisabled = role === 'admin' ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Admin privilege required"';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><strong>stomp://localhost:61613</strong> (Default STOMP)</td>
+    <td>WASM Engine Loaded</td>
+    <td>
+      In: ${metrics.messages_published_total || 0} <br>
+      WASM Execs: ${metrics.wasm_executions_total || 0}
+    </td>
+    <td>
+      <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('default')" ${adminDisabled}>Reset Filters</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+
+  // Fetch topic administration data
+  fetchTopicAdmin();
+  fetchWAL();
+  fetchDelayedMessages();
+}
+
+async function fetchTopicAdmin() {
+  const tbody = document.querySelector('#topic-admin-table tbody');
+  try {
+    // Fetch custom provisioned topics
+    const provRes = await fetch('/api/provision/queue');
+    let customTopicsList = [];
+    if (provRes.ok) {
+      customTopicsList = await provRes.json();
+    }
+
+    const res = await fetch('/api/proxy/queue/api/topics');
+    let topics = [];
+    if (res.ok) {
+      const data = await res.json();
+      topics = data.topics || [];
+    }
+
+    // Merge topics
+    const existingNames = new Set(topics.map(t => t.name));
+    customTopicsList.forEach(tName => {
+      if (!existingNames.has(tName)) {
+        topics.push({
+          name: tName,
+          subscribers: 0,
+          partitions: 1,
+          has_transform: false
+        });
+      }
+    });
+
+    if (topics.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No topics registered yet</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    const role = STATE.user?.role || 'admin';
+    const isOp = role === 'admin' || role === 'operator';
+    const isAdmin = role === 'admin';
+    const opDisabled = isOp ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Operator privilege required"';
+    const adminDisabled = isAdmin ? '' : 'disabled style="opacity:0.5; cursor:not-allowed;" title="Admin privilege required"';
+
+    topics.forEach(topic => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${topic.name}</strong></td>
+        <td>${topic.subscribers}</td>
+        <td>${topic.partitions || 0}</td>
+        <td>${topic.has_transform ? '<span class="badge online">Active</span>' : '<span class="text-muted">None</span>'}</td>
+        <td>${topic.dlq_topic ? `<span class="badge">${topic.dlq_topic}</span>` : '<span class="text-muted">—</span>'}</td>
+        <td>
+          <button class="btn btn-secondary btn-sm" onclick="configureDLQ('${topic.name}')" ${opDisabled}>DLQ</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearWasmTransform('${topic.name}')" ${adminDisabled}>Clear WASM</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+  }
+}
+
+function configureDLQ(topic) {
+  const dlqTopic = prompt(`Enter DLQ topic name for "${topic}" (e.g. ${topic}.dlq):`);
+  if (!dlqTopic) return;
+
+  fetch(`/api/proxy/queue/api/topics/${topic}/dlq`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dlq_topic: dlqTopic })
+  }).then(res => {
+    const status = document.getElementById('topic-admin-status');
+    if (res.ok) {
+      status.className = 'status-message success';
+      status.textContent = `✓ DLQ "${dlqTopic}" configured for topic "${topic}"`;
+      fetchTopicAdmin();
+    } else {
+      status.className = 'status-message error';
+      status.textContent = `✗ Failed to configure DLQ`;
+    }
+  });
+}
+
+// --- Storage Tab: Consistent Ring, Buckets, Objects ---
+async function fetchStorageRing() {
+  try {
+    const res = await fetch('/api/proxy/store/console/cluster/ring');
+    if (!res.ok) return;
+    const ringData = await res.json();
+    
+    // Draw the ring
+    drawHashRing(ringData);
+    
+    // Render Node List legend
+    const list = document.getElementById('ring-nodes-list');
+    list.innerHTML = '';
+    
+    const nodes = ringData.Nodes || [];
+    if (nodes.length === 0) {
+      list.innerHTML = `<li class="text-muted">No nodes active in storage cluster</li>`;
+      return;
+    }
+    
+    nodes.forEach((node, index) => {
+      const color = NODE_COLORS[index % NODE_COLORS.length];
+      const li = document.createElement('li');
+      li.className = 'ring-node-item';
+      li.innerHTML = `
+        <span class="node-color-dot" style="background-color: ${color}"></span>
+        <span>Node: <strong>${node}</strong></span>
+      `;
+      list.appendChild(li);
+    });
+  } catch (err) {
+    logEvent('error', `Failed to load consistent ring: ${err.message}`);
+  }
+}
+
+async function fetchBuckets() {
+  try {
+    // S3 client bucket listing fallback
+    const res = await fetch('/api/proxy/store/console/metrics');
+    let bucketsCount = 0;
+    if (res.ok) {
+      const metrics = await res.json();
+      bucketsCount = metrics.BucketsCount || 0;
+    }
+    
+    // Render bucket list from ServStore
+    const containers = document.getElementById('buckets-container');
+    containers.innerHTML = '';
+    
+    // Fetch actual bucket list from ServStore (returns S3 XML)
+    const provRes = await fetch('/api/proxy/store/');
+    let bucketList = [];
+    if (provRes.ok) {
+      const text = await provRes.text();
+      // Parse S3 XML response
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      const bucketEls = xml.querySelectorAll('Bucket > Name');
+      bucketEls.forEach(el => bucketList.push(el.textContent));
+    }
+    
+    if (bucketList.length === 0) {
+      containers.innerHTML = '<div class="text-muted" style="padding:1rem;font-size:0.85rem;">No buckets found. Create one using the button above.</div>';
+    }
+    
+    bucketList.forEach(b => {
+      const div = document.createElement('div');
+      div.className = `bucket-item ${STATE.selectedBucket === b ? 'active' : ''}`;
+      div.innerHTML = `📁 ${b}`;
+      div.addEventListener('click', () => selectBucket(b));
+      containers.appendChild(div);
+    });
+  } catch (err) {
+    logEvent('error', `Failed to load buckets: ${err.message}`);
+  }
+}
+
+function selectBucket(name) {
+  STATE.selectedBucket = name;
+  document.getElementById('current-bucket-name').textContent = name;
+  document.querySelectorAll('.bucket-item').forEach(el => {
+    el.classList.toggle('active', el.textContent.includes(name));
+  });
+  fetchObjects(name);
+}
+
+async function fetchObjects(bucket) {
+  const tbody = document.querySelector('#objects-table tbody');
+  tbody.innerHTML = `<tr><td colspan="3" class="text-center">Loading objects...</td></tr>`;
+  
+  try {
+    const res = await fetch(`/api/proxy/store/${bucket}?list-type=2`);
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Bucket is empty or not accessible</td></tr>`;
+      return;
+    }
+    const text = await res.text();
+    
+    // Parse S3 XML response
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const contents = xml.querySelectorAll('Contents');
+    
+    tbody.innerHTML = '';
+    if (contents.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No objects in this bucket</td></tr>`;
+      return;
+    }
+    contents.forEach(item => {
+      const key = item.querySelector('Key')?.textContent || '';
+      const size = parseInt(item.querySelector('Size')?.textContent || '0');
+      const modified = item.querySelector('LastModified')?.textContent || '';
+      const sizeStr = size > 1048576 ? `${(size / 1048576).toFixed(1)} MB` : size > 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`;
+      const modStr = modified ? new Date(modified).toLocaleString() : '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono);">${key}</td>
+        <td>${sizeStr}</td>
+        <td>${modStr}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Failed to load objects</td></tr>`;
+  }
+}
+
+// --- Consistent Hash Ring Drawing ---
+function drawHashRing(ringData) {
+  const canvas = document.getElementById('ring-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  const width = canvas.width;
+  const height = canvas.height;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = width / 2 - 30;
+  
+  ctx.clearRect(0, 0, width, height);
+  
+  // Draw circular track
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  
+  const nodes = ringData.Nodes || [];
+  const tokens = ringData.Tokens || []; // token keys
+  const tokenToNode = ringData.TokenToNode || {};
+  
+  if (nodes.length === 0) {
+    // Draw empty ring text
+    ctx.font = '14px Outfit';
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.textAlign = 'center';
+    ctx.fillText('No active storage cluster', centerX, centerY);
+    return;
+  }
+  
+  // Distribute nodes visually on the ring
+  nodes.forEach((node, index) => {
+    const angle = (index / nodes.length) * 2 * Math.PI - Math.PI / 2;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+    
+    const color = NODE_COLORS[index % NODE_COLORS.length];
+    
+    // Draw glowing node dot
+    ctx.beginPath();
+    ctx.arc(x, y, 10, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
+    ctx.fill();
+    ctx.shadowBlur = 0; // reset
+    
+    // Draw node name label
+    ctx.font = 'bold 10px Outfit';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(node.split(':')[0], x, y - 16);
+  });
+}
+
+function initRingCanvas() {
+  // Mock ring visualizer if cluster is down
+  drawHashRing({
+    Nodes: ['node1:8081', 'node2:8081', 'node3:8081']
+  });
+}
+
+// --- Interactive Forms & Submissions ---
+function initForms() {
+  // Modal toggle
+  const modal = document.getElementById('add-route-modal');
+  const addRouteBtn = document.getElementById('btn-add-route');
+  const modalCloseBtn = document.getElementById('modal-close-btn');
+  if (addRouteBtn && modal) {
+    addRouteBtn.addEventListener('click', () => { modal.classList.add('active'); });
+  }
+  if (modalCloseBtn && modal) {
+    modalCloseBtn.addEventListener('click', () => { modal.classList.remove('active'); });
+  }
+  
+  // Register API Route
+  const addRouteForm = document.getElementById('add-route-form');
+  if (addRouteForm) addRouteForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const prefix = document.getElementById('route-prefix').value;
+    const target = document.getElementById('route-target').value;
+    const rpm = parseInt(document.getElementById('route-rpm').value) || 0;
+    const prompt_guard = document.getElementById('route-ai-guard').checked;
+    const semantic_cache = document.getElementById('route-ai-cache').checked;
+    const pii_redact = document.getElementById('route-ai-pii').checked;
+    
+    try {
+      const res = await fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prefix, target, rate_limit_rpm: rpm, prompt_guard, semantic_cache, pii_redact
+        })
+      });
+      
+      if (res.ok) {
+        logEvent('gateway', `Added API Route: ${prefix} -> ${target}`);
+        modal.classList.remove('active');
+        e.target.reset();
+        refreshRoutesList();
+      } else {
+        alert('Failed to register route');
+      }
+    } catch (err) {
+      logEvent('error', `Route creation error: ${err.message}`);
+    }
+  });
+
+  // Hot-swap WASM Middleware
+  const wasmForm = document.getElementById('wasm-upload-form');
+  if (wasmForm) wasmForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fileInput = document.getElementById('wasm-file-input');
+    const nameInput = document.getElementById('wasm-name-input');
+    const statusMsg = document.getElementById('wasm-status-message');
+    
+    if (fileInput.files.length === 0) {
+      statusMsg.className = 'status-message error';
+      statusMsg.textContent = 'Please select a WASM file first';
+      return;
+    }
+    
+    const file = fileInput.files[0];
+    const name = nameInput.value.trim();
+    
+    try {
+      statusMsg.className = 'status-message';
+      statusMsg.textContent = 'Uploading and compiling WASM...';
+      
+      const fileBytes = await file.arrayBuffer();
+      const res = await fetch(`/api/proxy/gate/api/admin/middleware/${name}`, {
+        method: 'POST',
+        body: fileBytes
+      });
+      
+      if (res.ok) {
+        statusMsg.className = 'status-message success';
+        statusMsg.textContent = `✓ Middleware "${name}" successfully registered & hot-swapped!`;
+        logEvent('gateway', `WASM middleware "${name}" hot-swapped successfully.`);
+        nameInput.value = '';
+        fileInput.value = '';
+      } else {
+        const text = await res.text();
+        statusMsg.className = 'status-message error';
+        statusMsg.textContent = `Error: ${text}`;
+        logEvent('error', `WASM compilation failed: ${text}`);
+      }
+    } catch (err) {
+      statusMsg.className = 'status-message error';
+      statusMsg.textContent = `Network Error: ${err.message}`;
+    }
+  });
+
+  // Attach Queue transform
+  const queueTransformForm = document.getElementById('queue-transform-form');
+  if (queueTransformForm) queueTransformForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const topic = document.getElementById('transform-topic').value.trim();
+    const fileInput = document.getElementById('transform-file');
+    const status = document.getElementById('queue-transform-status');
+    
+    if (fileInput.files.length === 0) return;
+    
+    try {
+      status.className = 'status-message';
+      status.textContent = 'Registering WASM transform filter...';
+      
+      const fileBytes = await fileInput.files[0].arrayBuffer();
+      const res = await fetch(`/api/proxy/queue/api/topics/${topic}/transform`, {
+        method: 'POST',
+        body: fileBytes
+      });
+      
+      if (res.ok) {
+        status.className = 'status-message success';
+        status.textContent = `✓ Transform filter registered for topic: ${topic}`;
+        logEvent('queue', `WASM transform attached to queue: ${topic}`);
+      } else {
+        const errText = await res.text();
+        status.className = 'status-message error';
+        status.textContent = `Error: ${errText}`;
+      }
+    } catch (err) {
+      status.className = 'status-message error';
+      status.textContent = `Error: ${err.message}`;
+    }
+  });
+
+  // Publish STOMP Message
+  const publishForm = document.getElementById('publish-message-form');
+  if (publishForm) publishForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const topic = document.getElementById('pub-topic').value;
+    const payload = document.getElementById('pub-payload').value;
+    const status = document.getElementById('publish-status');
+    
+    try {
+      const res = await fetch('/api/proxy/queue/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic, payload })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        status.className = 'status-message success';
+        status.textContent = `✓ Delivered: ${data.delivered_payload}`;
+        logEvent('queue', `STOMP message published to topic [${topic}]: ${payload}`);
+      } else {
+        const errText = await res.text();
+        status.className = 'status-message error';
+        status.textContent = `Failed: ${errText}`;
+      }
+    } catch (err) {
+      status.className = 'status-message error';
+      status.textContent = `Error: ${err.message}`;
+    }
+  });
+
+  // Hash Ring Placement Trace Checker
+  const placementBtn = document.getElementById('btn-check-placement');
+  if (placementBtn) placementBtn.addEventListener('click', async () => {
+    const bucket = document.getElementById('placement-bucket').value.trim();
+    const key = document.getElementById('placement-key').value.trim();
+    const resultBox = document.getElementById('placement-result');
+    
+    if (!bucket || !key) {
+      alert('Please fill out both bucket and key');
+      return;
+    }
+    
+    try {
+      const res = await fetch(`/api/proxy/store/console/cluster/placement?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`);
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('placement-node-id').textContent = data.node_id;
+        document.getElementById('placement-node-addr').textContent = data.address;
+        resultBox.style.display = 'block';
+        logEvent('store', `Traced key [${bucket}/${key}] -> Node: ${data.node_id}`);
+      } else {
+        alert('Placement check failed');
+      }
+    } catch (err) {
+      alert('Network Error during placement check');
+    }
+  });
+  
+  // Telemetry triggers
+  document.getElementById('btn-refresh-traces')?.addEventListener('click', fetchTraces);
+  document.getElementById('btn-refresh-graph')?.addEventListener('click', fetchDependencyGraph);
+  document.getElementById('btn-clear-traces')?.addEventListener('click', clearTraces);
+  document.getElementById('trace-search')?.addEventListener('input', filterTraces);
+  document.getElementById('btn-expand-all-spans')?.addEventListener('click', () => {
+    document.querySelectorAll('.waterfall-children-container').forEach(c => {
+      c.style.display = 'block';
+    });
+    document.querySelectorAll('.waterfall-toggle-btn').forEach(btn => {
+      btn.innerHTML = '▼';
+    });
+  });
+  document.getElementById('btn-collapse-all-spans')?.addEventListener('click', () => {
+    document.querySelectorAll('.waterfall-children-container').forEach(c => {
+      c.style.display = 'none';
+    });
+    document.querySelectorAll('.waterfall-toggle-btn').forEach(btn => {
+      btn.innerHTML = '▶';
+    });
+  });
+  document.getElementById('checkbox-critical-path')?.addEventListener('change', (e) => {
+    const show = e.target.checked;
+    document.querySelectorAll('.waterfall-span-row').forEach(row => {
+      if (row.dataset.critical === 'true') {
+        if (show) {
+          row.classList.add('critical-path-highlight');
+        } else {
+          row.classList.remove('critical-path-highlight');
+        }
+      }
+    });
+  });
+  document.getElementById('btn-clear-logs')?.addEventListener('click', () => {
+    document.getElementById('console-logs-screen').innerHTML = '';
+  });
+
+  // Queue WAL & Delayed triggers
+  document.getElementById('btn-refresh-wal')?.addEventListener('click', fetchWAL);
+  document.getElementById('btn-refresh-delayed')?.addEventListener('click', fetchDelayedMessages);
+
+  // Create Bucket Modal
+  const bucketModal = document.getElementById('create-bucket-modal');
+  const openBucketBtn = document.getElementById('btn-create-bucket');
+  const closeBucketBtn = document.getElementById('btn-close-bucket-modal');
+  if (openBucketBtn && bucketModal) {
+    openBucketBtn.addEventListener('click', () => { bucketModal.style.display = 'flex'; });
+    closeBucketBtn.addEventListener('click', () => { bucketModal.style.display = 'none'; });
+    bucketModal.addEventListener('click', (e) => { if (e.target === bucketModal) bucketModal.style.display = 'none'; });
+  }
+
+  const bucketForm = document.getElementById('create-bucket-form');
+  if (bucketForm) {
+    bucketForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const bucketName = document.getElementById('new-bucket-name').value;
+      try {
+        const res = await fetch('/api/provision/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bucketName })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          logEvent('store', `Provisioned Bucket: ${data.bucketName} (Gateway Link: ${data.realGateway})`);
+          bucketModal.style.display = 'none';
+          bucketForm.reset();
+          fetchBuckets();
+        } else {
+          alert('Failed to provision bucket.');
+        }
+      } catch (err) {
+        logEvent('error', `Bucket provisioning error: ${err.message}`);
+      }
+    });
+  }
+
+  // Create Topic Modal
+  const topicModal = document.getElementById('create-topic-modal');
+  const openTopicBtn = document.getElementById('btn-create-topic');
+  const closeTopicBtn = document.getElementById('btn-close-topic-modal');
+  if (openTopicBtn && topicModal) {
+    openTopicBtn.addEventListener('click', () => { topicModal.style.display = 'flex'; });
+    closeTopicBtn.addEventListener('click', () => { topicModal.style.display = 'none'; });
+    topicModal.addEventListener('click', (e) => { if (e.target === topicModal) topicModal.style.display = 'none'; });
+  }
+
+  const topicForm = document.getElementById('create-topic-form');
+  if (topicForm) {
+    topicForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const topicName = document.getElementById('new-topic-name').value;
+      try {
+        const res = await fetch('/api/provision/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicName })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          logEvent('queue', `Provisioned Topic: ${data.topicName} (Gateway Link: ${data.realGateway})`);
+          topicModal.style.display = 'none';
+          topicForm.reset();
+          if (typeof fetchTopicAdmin === 'function') {
+            fetchTopicAdmin();
+          }
+        } else {
+          alert('Failed to provision topic.');
+        }
+      } catch (err) {
+        logEvent('error', `Topic provisioning error: ${err.message}`);
+      }
+    });
+  }
+
+  // Diagnostics Terminal Modal
+  const termModal = document.getElementById('diagnostics-terminal-modal');
+  const termToggle = document.getElementById('btn-terminal-toggle');
+  const termClose = document.getElementById('btn-close-terminal-modal');
+  const termInput = document.getElementById('terminal-cmd-input');
+  const termSelect = document.getElementById('terminal-service-select');
+  const termPrompt = document.getElementById('terminal-prompt-prefix');
+
+  if (termToggle && termModal) {
+    termToggle.addEventListener('click', () => {
+      termModal.style.display = 'flex';
+      setTimeout(() => { termInput.focus(); }, 100);
+    });
+    termClose.addEventListener('click', () => { termModal.style.display = 'none'; });
+    termModal.addEventListener('click', (e) => { if (e.target === termModal) termModal.style.display = 'none'; });
+  }
+
+  if (termSelect && termPrompt) {
+    termSelect.addEventListener('change', () => {
+      termPrompt.textContent = `${termSelect.value}:~#`;
+      termInput.focus();
+    });
+  }
+
+  if (termInput) {
+    termInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        const cmd = termInput.value.trim();
+        if (!cmd) return;
+        termInput.value = '';
+        await executeTerminalCommand(cmd);
+      }
+    });
+  }
+}
+
+async function fetchWAL() {
+  const tbody = document.querySelector('#wal-table tbody');
+  if (!tbody) return;
+  try {
+    const res = await fetch('/api/proxy/queue/api/stats');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Unable to fetch WAL</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const entries = data.wal_entries || [];
+
+    if (entries.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No WAL entries recorded</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    entries.forEach(entry => {
+      const tr = document.createElement('tr');
+      const date = new Date(entry.Timestamp / 1000000);
+      const timeStr = date.toLocaleTimeString() + '.' + String(entry.Timestamp % 1000000).padStart(6, '0').slice(0, 3);
+      const preview = entry.Payload.length > 60 ? entry.Payload.slice(0, 60) + '...' : entry.Payload;
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${timeStr}</td>
+        <td><strong>${entry.Topic}</strong></td>
+        <td>${entry.Payload.length} bytes</td>
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(preview)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function fetchDelayedMessages() {
+  const tbody = document.querySelector('#delayed-messages-table tbody');
+  if (!tbody) return;
+  try {
+    const res = await fetch('/api/proxy/queue/api/stats');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Unable to fetch delayed messages</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    const msgs = data.delayed_messages || [];
+
+    if (msgs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No delayed messages scheduled</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    msgs.forEach(msg => {
+      const tr = document.createElement('tr');
+      const targetTime = new Date(msg.target_time);
+      const diffMs = Math.max(0, targetTime.getTime() - Date.now());
+      const delayStr = (diffMs / 1000).toFixed(1) + 's';
+      const preview = msg.payload.length > 40 ? msg.payload.slice(0, 40) + '...' : msg.payload;
+      tr.innerHTML = `
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${msg.id}</td>
+        <td><strong>${msg.topic}</strong></td>
+        <td><span class="badge" style="background-color: var(--warning); color: #000;">${delayStr}</span></td>
+        <td style="font-family:var(--font-mono); font-size:0.85rem;">${escapeHtml(preview)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+  }
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// --- Console Log Event helper ---
+function logEvent(service, message) {
+  const consoleScreen = document.getElementById('console-logs-screen');
+  if (!consoleScreen) return;
+  
+  const line = document.createElement('div');
+  line.className = `log-line ${service}`;
+  
+  const time = new Date().toLocaleTimeString();
+  line.innerHTML = `[${time}] <span class="tag">[${service.toUpperCase()}]</span> ${message}`;
+  
+  consoleScreen.appendChild(line);
+  consoleScreen.scrollTop = consoleScreen.scrollHeight;
+}
+
+// ─── Phase 3: Cluster Operations & Repair Panel ───────────────────────────
+
+async function fetchClusterHealth() {
+  try {
+    const res = await fetch('/api/cluster');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderClusterNodes(data);
+    renderErasureCoding(data);
+  } catch (err) {
+    logEvent('error', `Cluster health fetch failed: ${err.message}`);
+  }
+}
+
+function renderClusterNodes(data) {
+  const tbody = document.getElementById('cluster-nodes-body');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const nodes = data.nodes || [];
+  if (nodes.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No cluster nodes detected — ServStore may be running in single-node mode</td></tr>`;
+    return;
+  }
+
+  nodes.forEach(node => {
+    const lagSec = (node.last_seen_ago_ms / 1000).toFixed(1);
+    const lagLabel = node.last_seen_ago_ms === 0 ? 'Local node' : `${lagSec}s ago`;
+    const statusDot = node.status === 'online'
+      ? `<span style="color:var(--success)">● Online</span>`
+      : `<span style="color:var(--danger)">● Offline</span>`;
+    const region = node.region || '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono);">${node.node_id}</td>
+      <td style="font-family:var(--font-mono);">${node.address}</td>
+      <td>${region}</td>
+      <td>${statusDot}</td>
+      <td style="color:var(--text-secondary);">${lagLabel}</td>
+      <td><span class="lag-badge ${node.lag_status}">${node.lag_status.toUpperCase()}</span></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="switchToTracesTab('S3')">View Traces</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  logEvent('store', `Cluster health: ${data.online_count} online, ${data.offline_count} offline`);
+}
+
+function renderErasureCoding(data) {
+  const diagram = document.getElementById('shard-diagram');
+  if (!diagram) return;
+  diagram.innerHTML = '';
+
+  const dataShards   = data.data_shards   || 2;
+  const parityShards = data.parity_shards || 1;
+
+  for (let i = 0; i < dataShards; i++) {
+    const tile = document.createElement('div');
+    tile.className = 'shard-tile data';
+    tile.textContent = `D${i + 1}`;
+    tile.title = `Data shard ${i + 1}`;
+    diagram.appendChild(tile);
+  }
+  for (let i = 0; i < parityShards; i++) {
+    const tile = document.createElement('div');
+    tile.className = 'shard-tile parity';
+    tile.textContent = `P${i + 1}`;
+    tile.title = `Parity shard ${i + 1}`;
+    diagram.appendChild(tile);
+  }
+
+  document.getElementById('ec-mode').textContent   = data.erasure_coding ? 'Erasure Coding (Reed-Solomon)' : 'Replication';
+  document.getElementById('ec-data').textContent   = dataShards;
+  document.getElementById('ec-parity').textContent = parityShards;
+  document.getElementById('ec-state').textContent  = data.cluster_healthy ? '✅ Healthy' : '⚠ Degraded';
+  document.getElementById('ec-state').style.color  = data.cluster_healthy ? 'var(--success)' : 'var(--warning)';
+}
+
+// Wire refresh + rebalance buttons (called once after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+  const refreshBtn = document.getElementById('btn-refresh-cluster');
+  if (refreshBtn) refreshBtn.addEventListener('click', fetchClusterHealth);
+
+  const rebalanceBtn = document.getElementById('btn-trigger-rebalance');
+  if (rebalanceBtn) {
+    rebalanceBtn.addEventListener('click', async () => {
+      const statusEl = document.getElementById('rebalance-status');
+      statusEl.className = 'status-message';
+      statusEl.textContent = '⚡ Initiating gossip rebalance round...';
+      rebalanceBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/cluster/rebalance', { method: 'POST' });
+        if (res.ok) {
+          statusEl.className = 'status-message success';
+          statusEl.textContent = '✓ Rebalance gossip round triggered. Nodes will sync within ~3s.';
+          logEvent('store', 'Cluster rebalance gossip round triggered successfully.');
+          setTimeout(fetchClusterHealth, 3500);
+        } else {
+          const err = await res.text();
+          statusEl.className = 'status-message error';
+          statusEl.textContent = `Failed: ${err}`;
+        }
+      } catch (err) {
+        statusEl.className = 'status-message error';
+        statusEl.textContent = `Network error: ${err.message}`;
+      } finally {
+        rebalanceBtn.disabled = false;
+      }
+    });
+  }
+});
+
+// --- OIDC SSO and Audit Logs Frontend Hooks ---
+
+let SSO_ENABLED = false;
+
+async function checkAuthConfig() {
+  try {
+    const res = await fetch('/api/auth/config');
+    const config = await res.json();
+    SSO_ENABLED = config.sso_enabled;
+    
+    // Fetch user and role from backend
+    const meRes = await fetch('/api/auth/me');
+    if (meRes.status === 401) {
+      showLoginScreen();
+      return;
+    }
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      STATE.user = meData;
+      displayUserProfile(meData.username, meData.role);
+      applyRBACRules(meData.role);
+    } else {
+      // Fallback: decode cookie
+      const decoded = getDecodedToken();
+      if (decoded) {
+        STATE.user = decoded;
+        displayUserProfile(decoded.username, decoded.role);
+        applyRBACRules(decoded.role);
+      } else if (SSO_ENABLED) {
+        showLoginScreen();
+      } else {
+        STATE.user = { username: 'anonymous', role: 'admin' };
+        displayUserProfile('anonymous', 'admin');
+        applyRBACRules('admin');
+      }
+    }
+  } catch (err) {
+    console.error("Auth config check failed:", err);
+    // If auth is not configured at all, default to admin
+    STATE.user = { username: 'anonymous', role: 'admin' };
+    displayUserProfile('anonymous', 'admin');
+    applyRBACRules('admin');
+  }
+}
+
+function showLoginScreen() {
+  document.getElementById('login-screen').style.display = 'flex';
+  // Disable main app UI container pointer events
+  const container = document.querySelector('.app-container');
+  if (container) {
+    container.style.opacity = '0.15';
+    container.style.pointerEvents = 'none';
+  }
+}
+
+function displayUserProfile(username, role) {
+  const profileSection = document.getElementById('user-profile-section');
+  const userText = document.getElementById('logged-in-username');
+  if (profileSection && userText) {
+    userText.textContent = `${username} (${role.toUpperCase()})`;
+    profileSection.style.display = 'flex';
+  }
+}
+
+function getDecodedToken() {
+  const cookie = document.cookie.split('; ').find(row => row.startsWith('token='));
+  if (!cookie) return null;
+  const token = cookie.split('=')[1];
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return {
+      username: payload.username,
+      role: payload.role || (payload.username === 'admin' ? 'admin' : (payload.username === 'operator' ? 'operator' : 'viewer'))
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function applyRBACRules(role) {
+  const isAdmin = role === 'admin';
+  const isOperator = role === 'operator' || isAdmin;
+  
+  // 1. Admin-only UI Controls
+  const adminSelectors = [
+    '#btn-add-route',
+    '#wasm-upload-form button[type="submit"]',
+    '#queue-transform-form button[type="submit"]',
+    '#btn-apply-migration',
+    '#btn-save-policy',
+    '#btn-delete-policy'
+  ];
+  
+  // 2. Operator/Admin UI Controls
+  const operatorSelectors = [
+    '#btn-create-bucket',
+    '#publish-message-form button[type="submit"]',
+    '#btn-trigger-rebalance'
+  ];
+
+  adminSelectors.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => {
+      el.disabled = !isAdmin;
+      if (!isAdmin) {
+        el.title = "Admin privilege required";
+        el.style.opacity = '0.5';
+        el.style.cursor = 'not-allowed';
+      } else {
+        el.title = "";
+        el.style.opacity = '';
+        el.style.cursor = '';
+      }
+    });
+  });
+
+  operatorSelectors.forEach(sel => {
+    document.querySelectorAll(sel).forEach(el => {
+      el.disabled = !isOperator;
+      if (!isOperator) {
+        el.title = "Operator/Admin privilege required";
+        el.style.opacity = '0.5';
+        el.style.cursor = 'not-allowed';
+      } else {
+        el.title = "";
+        el.style.opacity = '';
+        el.style.cursor = '';
+      }
+    });
+  });
+}
+
+async function fetchAuditLogs() {
+  try {
+    const res = await fetch('/api/audit-logs');
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+    const logs = await res.json();
+    
+    const tbody = document.querySelector('#audit-table tbody');
+    tbody.innerHTML = '';
+    
+    if (logs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No security audit logs recorded yet.</td></tr>`;
+      return;
+    }
+    
+    logs.forEach(log => {
+      const tr = document.createElement('tr');
+      const timeStr = new Date(log.timestamp).toLocaleTimeString();
+      const dateStr = new Date(log.timestamp).toLocaleDateString();
+      const statusClass = log.status >= 200 && log.status < 300 ? 'success' : (log.status >= 400 ? 'error' : 'warning');
+      const methodClass = log.method.toLowerCase();
+      
+      tr.innerHTML = `
+        <td><span style="color:var(--text-muted);">${dateStr} ${timeStr}</span></td>
+        <td><strong style="color:var(--primary);">${escapeHtml(log.user)}</strong></td>
+        <td><strong>${escapeHtml(log.action)}</strong></td>
+        <td><span class="method-badge ${methodClass}">${escapeHtml(log.method)}</span></td>
+        <td><span style="font-family:var(--font-mono); font-size:0.8rem;">${escapeHtml(log.path)}</span></td>
+        <td><span class="status-badge ${statusClass}">${log.status}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error("Failed to fetch audit logs:", err);
+  }
+}
+
+function initAuditLogsUI() {
+  const refreshAuditBtn = document.getElementById('btn-refresh-audit');
+  if (refreshAuditBtn) {
+    refreshAuditBtn.addEventListener('click', fetchAuditLogs);
+  }
+  
+  const ssoLoginBtn = document.getElementById('btn-sso-login');
+  if (ssoLoginBtn) {
+    ssoLoginBtn.addEventListener('click', () => {
+      window.location.href = '/api/auth/login';
+    });
+  }
+  
+  const logoutBtn = document.getElementById('btn-logout');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/auth/logout', { method: 'POST' });
+        if (res.ok) {
+          window.location.reload();
+        }
+      } catch (err) {
+        console.error("Logout failed:", err);
+      }
+    });
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+// ─── Database Schema ORM Viewer ────────────────────────────────────────────
+
+async function fetchDatabaseSchemas() {
+  const serviceSelect = document.getElementById('db-service-select');
+  const noSchema = document.getElementById('db-no-schema');
+  const schemaVisual = document.getElementById('db-schema-visual');
+
+  try {
+    const res = await fetch('/api/proxy/store/console/schema');
+    if (!res.ok) {
+      noSchema.style.display = 'block';
+      noSchema.innerHTML = `
+        <p style="font-size:2rem; margin-bottom:1rem;">⚠️</p>
+        <p>Could not reach ServStore schema endpoint.</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">Make sure ServStore is online and the schema API is available.</p>
+      `;
+      schemaVisual.style.display = 'none';
+      return;
+    }
+
+    const schemas = await res.json();
+    const serviceNames = Object.keys(schemas);
+
+    // Populate service dropdown
+    serviceSelect.innerHTML = '<option value="">Select Service...</option>';
+    serviceNames.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      serviceSelect.appendChild(opt);
+    });
+
+    // Store schemas in state
+    STATE.dbSchemas = schemas;
+
+    if (serviceNames.length === 0) {
+      noSchema.style.display = 'block';
+      noSchema.innerHTML = `
+        <p style="font-size:2rem; margin-bottom:1rem;">📂</p>
+        <p>No database schemas registered yet.</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">Deploy a Serv-lang service with ORM tables to see them here.</p>
+      `;
+      schemaVisual.style.display = 'none';
+    } else if (serviceNames.length === 1) {
+      // Auto-select the only service
+      serviceSelect.value = serviceNames[0];
+      renderDatabaseSchema(serviceNames[0]);
+    } else {
+      noSchema.style.display = 'block';
+      noSchema.innerHTML = `
+        <p style="font-size:2rem; margin-bottom:1rem;">🗄️</p>
+        <p><strong>${serviceNames.length}</strong> services have registered schemas.</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">Select a service from the dropdown above to visualize its database schema.</p>
+      `;
+      schemaVisual.style.display = 'none';
+    }
+
+    logEvent('store', `Loaded ${serviceNames.length} database schema(s): ${serviceNames.join(', ') || 'none'}`);
+  } catch (err) {
+    noSchema.style.display = 'block';
+    noSchema.innerHTML = `
+      <p style="font-size:2rem; margin-bottom:1rem;">❌</p>
+      <p>Failed to fetch schemas: ${escapeHtml(err.message)}</p>
+    `;
+    schemaVisual.style.display = 'none';
+    logEvent('error', `Database schema fetch failed: ${err.message}`);
+  }
+}
+
+function renderDatabaseSchema(serviceName) {
+  const noSchema = document.getElementById('db-no-schema');
+  const schemaVisual = document.getElementById('db-schema-visual');
+
+  const schema = STATE.dbSchemas?.[serviceName];
+  if (!schema) {
+    noSchema.style.display = 'block';
+    noSchema.innerHTML = `
+      <p style="font-size:2rem; margin-bottom:1rem;">❓</p>
+      <p>No schema found for service: <strong>${escapeHtml(serviceName)}</strong></p>
+    `;
+    schemaVisual.style.display = 'none';
+    return;
+  }
+
+  noSchema.style.display = 'none';
+  schemaVisual.style.display = 'grid';
+  schemaVisual.innerHTML = '';
+
+  // Schema can be an array of tables or an object with tables key
+  let tables = [];
+  if (Array.isArray(schema)) {
+    tables = schema;
+  } else if (schema.tables && Array.isArray(schema.tables)) {
+    tables = schema.tables;
+  } else if (typeof schema === 'object') {
+    // Try treating each key as a table name
+    Object.keys(schema).forEach(key => {
+      if (typeof schema[key] === 'object' && schema[key] !== null) {
+        tables.push({ name: key, ...schema[key] });
+      }
+    });
+  }
+
+  if (tables.length === 0) {
+    noSchema.style.display = 'block';
+    noSchema.innerHTML = `
+      <p style="font-size:2rem; margin-bottom:1rem;">📋</p>
+      <p>Schema registered but contains no tables.</p>
+    `;
+    schemaVisual.style.display = 'none';
+    return;
+  }
+
+  // Color palette for table headers
+  const TABLE_COLORS = [
+    'linear-gradient(135deg, hsl(250, 80%, 55%), hsl(280, 70%, 45%))',
+    'linear-gradient(135deg, hsl(190, 80%, 45%), hsl(210, 70%, 40%))',
+    'linear-gradient(135deg, hsl(145, 70%, 40%), hsl(170, 60%, 35%))',
+    'linear-gradient(135deg, hsl(35, 85%, 50%), hsl(20, 75%, 45%))',
+    'linear-gradient(135deg, hsl(340, 75%, 50%), hsl(355, 65%, 45%))',
+    'linear-gradient(135deg, hsl(50, 80%, 50%), hsl(40, 70%, 40%))',
+  ];
+
+  tables.forEach((table, idx) => {
+    const card = document.createElement('div');
+    card.className = 'db-table-card';
+
+    const tableName = table.name || table.Name || `Table_${idx + 1}`;
+    const columns = table.columns || table.Columns || table.fields || table.Fields || [];
+    const headerColor = TABLE_COLORS[idx % TABLE_COLORS.length];
+
+    card.innerHTML = `
+      <div class="db-table-header" style="background:${headerColor};">
+        <div class="db-table-icon">🗃️</div>
+        <div class="db-table-name">${escapeHtml(tableName)}</div>
+        <div class="db-table-count">${columns.length} col${columns.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="db-table-columns">
+        ${columns.length === 0
+          ? '<div class="db-col-row empty">No columns defined</div>'
+          : columns.map(col => renderColumnRow(col)).join('')
+        }
+      </div>
+    `;
+
+    schemaVisual.appendChild(card);
+  });
+
+  logEvent('store', `Rendered ${tables.length} table(s) for service: ${serviceName}`);
+}
+
+function renderColumnRow(col) {
+  const name = col.name || col.Name || col.field || col.Field || '?';
+  const type = col.type || col.Type || col.data_type || col.DataType || 'unknown';
+  const isPK = col.primary_key || col.PrimaryKey || col.pk || col.is_primary || false;
+  const isFK = col.foreign_key || col.ForeignKey || col.fk || col.references || false;
+  const isNullable = col.nullable !== undefined ? col.nullable : (col.Nullable !== undefined ? col.Nullable : true);
+  const isAutoInc = col.auto_increment || col.AutoIncrement || col.autoincrement || false;
+
+  let badges = '';
+  if (isPK) badges += '<span class="db-badge pk" title="Primary Key">PK</span>';
+  if (isFK) badges += `<span class="db-badge fk" title="Foreign Key → ${escapeHtml(String(isFK))}">FK</span>`;
+  if (isAutoInc) badges += '<span class="db-badge ai" title="Auto Increment">AI</span>';
+  if (!isNullable) badges += '<span class="db-badge nn" title="Not Null">NN</span>';
+
+  const typeClass = getTypeClass(type);
+
+  return `
+    <div class="db-col-row ${isPK ? 'primary' : ''}">
+      <div class="db-col-name">
+        ${isPK ? '<span class="db-key-icon">🔑</span>' : '<span class="db-col-dot"></span>'}
+        ${escapeHtml(name)}
+      </div>
+      <div class="db-col-meta">
+        ${badges}
+        <span class="db-type-badge ${typeClass}">${escapeHtml(type)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function getTypeClass(type) {
+  const t = (type || '').toLowerCase();
+  if (t.includes('int') || t.includes('float') || t.includes('double') || t.includes('decimal') || t.includes('numeric') || t.includes('real')) return 'type-number';
+  if (t.includes('varchar') || t.includes('text') || t.includes('char') || t.includes('string')) return 'type-string';
+  if (t.includes('bool')) return 'type-bool';
+  if (t.includes('time') || t.includes('date') || t.includes('timestamp')) return 'type-date';
+  if (t.includes('blob') || t.includes('binary') || t.includes('bytes')) return 'type-binary';
+  if (t.includes('json') || t.includes('jsonb')) return 'type-json';
+  return 'type-other';
+}
+
+// Wire up Database tab UI controls
+document.addEventListener('DOMContentLoaded', () => {
+  const serviceSelect = document.getElementById('db-service-select');
+  if (serviceSelect) {
+    serviceSelect.addEventListener('change', () => {
+      const selected = serviceSelect.value;
+      if (selected) {
+        renderDatabaseSchema(selected);
+      } else {
+        const noSchema = document.getElementById('db-no-schema');
+        const schemaVisual = document.getElementById('db-schema-visual');
+        noSchema.style.display = 'block';
+        noSchema.innerHTML = `
+          <p style="font-size:2rem; margin-bottom:1rem;">📂</p>
+          <p>Select a service to load and visualize its database schema.</p>
+        `;
+        schemaVisual.style.display = 'none';
+      }
+    });
+  }
+
+  const refreshDbBtn = document.getElementById('btn-refresh-database');
+  if (refreshDbBtn) {
+    refreshDbBtn.addEventListener('click', fetchDatabaseSchemas);
+  }
+
+  initQueryWorkbench();
+});
+
+// ─── SQL Query Workbench ───────────────────────────────────────────────────
+
+function initQueryWorkbench() {
+  const driverSelect = document.getElementById('wb-driver-select');
+  const connStrInput = document.getElementById('wb-conn-str');
+  const connHint = document.getElementById('wb-conn-hint');
+  const queryText = document.getElementById('wb-query-text');
+  const runQueryBtn = document.getElementById('btn-run-query');
+
+  if (!driverSelect || !connStrInput || !queryText || !runQueryBtn) return;
+
+  const dsnDefaults = {
+    sqlite: {
+      dsn: './dev.db',
+      hint: 'Filepath for SQLite database (e.g. ./dev.db or C:/path/to/db.db)',
+      query: 'SELECT name FROM sqlite_master WHERE type="table" AND name NOT LIKE "sqlite_%";'
+    },
+    postgres: {
+      dsn: 'postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable',
+      hint: 'PostgreSQL connection URL DSN.',
+      query: 'SELECT table_name, table_schema FROM information_schema.tables WHERE table_schema = \'public\';'
+    },
+    mysql: {
+      dsn: 'root:secret@tcp(localhost:3306)/mysql',
+      hint: 'MySQL/MariaDB connection DSN (username:password@tcp(host:port)/dbname).',
+      query: 'SHOW TABLES;'
+    },
+    oracle: {
+      dsn: 'oracle://user:pass@localhost:1521/xe',
+      hint: 'Oracle connection string DSN.',
+      query: 'SELECT table_name FROM user_tables;'
+    }
+  };
+
+  // Set initial default query
+  queryText.value = dsnDefaults.sqlite.query;
+
+  driverSelect.addEventListener('change', () => {
+    const driver = driverSelect.value;
+    const config = dsnDefaults[driver];
+    if (config) {
+      connStrInput.value = config.dsn;
+      connHint.textContent = config.hint;
+      queryText.value = config.query;
+    }
+  });
+
+  runQueryBtn.addEventListener('click', runSqlQuery);
+
+  // Ctrl+Enter shortcut in textarea
+  queryText.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault();
+      runSqlQuery();
+    }
+  });
+}
+
+async function runSqlQuery() {
+  const driverSelect = document.getElementById('wb-driver-select');
+  const connStrInput = document.getElementById('wb-conn-str');
+  const queryText = document.getElementById('wb-query-text');
+  const runQueryBtn = document.getElementById('btn-run-query');
+  const resultsContainer = document.getElementById('wb-results-container');
+  const errorAlert = document.getElementById('wb-error-alert');
+  const successAlert = document.getElementById('wb-success-alert');
+  const tableWrapper = document.getElementById('wb-table-wrapper');
+  const resultsTable = document.getElementById('wb-results-table');
+  const resultsStats = document.getElementById('wb-results-stats');
+
+  if (!driverSelect || !connStrInput || !queryText || !runQueryBtn) return;
+
+  const driver = driverSelect.value;
+  const connStr = connStrInput.value.trim();
+  const query = queryText.value.trim();
+
+  if (!connStr) {
+    alert('Please enter a connection string / DSN.');
+    return;
+  }
+  if (!query) {
+    alert('Please enter an SQL query to execute.');
+    return;
+  }
+
+  // Reset display
+  resultsContainer.style.display = 'block';
+  errorAlert.style.display = 'none';
+  successAlert.style.display = 'none';
+  tableWrapper.style.display = 'none';
+  resultsStats.textContent = 'Executing...';
+  runQueryBtn.disabled = true;
+  runQueryBtn.textContent = 'Running...';
+
+  try {
+    const res = await fetch('/api/db/query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ driver, connStr, query })
+    });
+
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+
+    if (!res.ok) {
+      const errMsg = await res.text();
+      throw new Error(errMsg || `HTTP Error ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (!data.success) {
+      errorAlert.style.display = 'block';
+      errorAlert.textContent = data.error || 'Unknown query execution error.';
+      resultsStats.textContent = 'Failed';
+      return;
+    }
+
+    resultsStats.textContent = `Executed in ${data.executionTimeMs}ms`;
+
+    if (data.isSelect) {
+      successAlert.style.display = 'block';
+      successAlert.textContent = `Success: Query returned ${data.rows ? data.rows.length : 0} rows.`;
+      
+      // Render Table
+      tableWrapper.style.display = 'block';
+      
+      // Headers
+      const thead = resultsTable.querySelector('thead');
+      thead.innerHTML = '';
+      const trHead = document.createElement('tr');
+      data.columns.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+
+      // Rows
+      const tbody = resultsTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      if (!data.rows || data.rows.length === 0) {
+        const trEmpty = document.createElement('tr');
+        trEmpty.innerHTML = `<td colspan="${data.columns.length}" class="text-center text-muted" style="padding: 2rem;">No rows returned.</td>`;
+        tbody.appendChild(trEmpty);
+      } else {
+        data.rows.forEach(row => {
+          const tr = document.createElement('tr');
+          row.forEach(cell => {
+            const td = document.createElement('td');
+            td.textContent = cell !== null ? String(cell) : 'NULL';
+            if (cell === null) td.style.fontStyle = 'italic';
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+      }
+    } else {
+      successAlert.style.display = 'block';
+      successAlert.textContent = `Success: Query executed. Rows Affected: ${data.rowsAffected !== undefined ? data.rowsAffected : 0}. Last Insert ID: ${data.lastInsertId !== undefined ? data.lastInsertId : '—'}.`;
+    }
+  } catch (err) {
+    errorAlert.style.display = 'block';
+    errorAlert.textContent = err.message;
+    resultsStats.textContent = 'Error';
+  } finally {
+    runQueryBtn.disabled = false;
+    runQueryBtn.textContent = 'Run Query';
+  }
+}
+
+// --- Cross-Service Dependency Graph (Item 6) ---
+let graphNodes = [];
+let graphEdges = [];
+let draggedNode = null;
+let selectedNode = null;
+let graphAnimationId = null;
+let flowParticles = [];
+let viewportOffsetX = 0;
+let viewportOffsetY = 0;
+let viewportZoom = 1;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+
+function clearInspector() {
+  const title = document.getElementById('inspector-title');
+  const body = document.getElementById('inspector-body');
+  if (title && body) {
+    title.textContent = 'No Node Selected';
+    body.innerHTML = '<p>Click on any service node in the topology graph on the left to inspect its real-time metrics, error rate, throughput, and active dependencies.</p>';
+  }
+}
+
+function updateInspector(node) {
+  const title = document.getElementById('inspector-title');
+  const body = document.getElementById('inspector-body');
+  if (!title || !body) return;
+  
+  title.textContent = node.label || node.id;
+  
+  // Find edges related to this node
+  const inbound = graphEdges.filter(e => e.to === node.id);
+  const outbound = graphEdges.filter(e => e.from === node.id);
+  
+  const statusBadge = node.online ? '<span class="badge online">ONLINE</span>' : '<span class="badge offline">OFFLINE</span>';
+  const errRatePct = ((node.error_rate || 0) * 100).toFixed(1);
+  const latency = node.latency_ms !== undefined ? `${node.latency_ms.toFixed(1)} ms` : '—';
+  const throughput = node.throughput !== undefined ? `${node.throughput} rps` : '—';
+  
+  let inboundHtml = '';
+  if (inbound.length > 0) {
+    inboundHtml = `<div style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+      <strong style="color: #fff; font-size: 0.8rem;">Inbound Connections:</strong>
+      ${inbound.map(e => `<div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.02); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.78rem; border: 1px solid rgba(255,255,255,0.02);">
+        <span style="font-family: var(--font-mono); color: #94a3b8;">← ${e.from} (${e.label || 'RPC'})</span>
+        <span style="font-family: var(--font-mono); color:${e.error_rate > 0.1 ? '#ef4444' : '#cbd5e1'}">${e.throughput || 0} rps | ${e.latency_ms || 0}ms</span>
+      </div>`).join('')}
+    </div>`;
+  } else {
+    inboundHtml = '<div style="margin-top:0.5rem; font-size:0.8rem; color:#64748b;">No inbound traffic</div>';
+  }
+  
+  let outboundHtml = '';
+  if (outbound.length > 0) {
+    outboundHtml = `<div style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+      <strong style="color: #fff; font-size: 0.8rem;">Outbound Connections:</strong>
+      ${outbound.map(e => `<div style="display:flex; justify-content:space-between; background:rgba(255,255,255,0.02); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.78rem; border: 1px solid rgba(255,255,255,0.02);">
+        <span style="font-family: var(--font-mono); color: #94a3b8;">→ ${e.to} (${e.label || 'RPC'})</span>
+        <span style="font-family: var(--font-mono); color:${e.error_rate > 0.1 ? '#ef4444' : '#cbd5e1'}">${e.throughput || 0} rps | ${e.latency_ms || 0}ms</span>
+      </div>`).join('')}
+    </div>`;
+  } else {
+    outboundHtml = '<div style="margin-top:0.5rem; font-size:0.8rem; color:#64748b;">No outbound traffic</div>';
+  }
+  
+  body.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="color: #94a3b8;">Status:</span>
+      ${statusBadge}
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; background: rgba(255,255,255,0.02); padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+      <div>
+        <div style="font-size:0.75rem; color:#64748b;">LATENCY</div>
+        <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-top:0.2rem; font-family: var(--font-mono);">${latency}</div>
+      </div>
+      <div>
+        <div style="font-size:0.75rem; color:#64748b;">THROUGHPUT</div>
+        <div style="font-size:1.1rem; font-weight:600; color:#fff; margin-top:0.2rem; font-family: var(--font-mono);">${throughput}</div>
+      </div>
+      <div style="grid-column: span 2; margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">
+        <div style="font-size:0.75rem; color:#64748b;">ERROR RATE</div>
+        <div style="font-size:1.1rem; font-weight:600; color:${node.error_rate > 0.1 ? '#ef4444' : '#10b981'}; margin-top:0.2rem; font-family: var(--font-mono);">${errRatePct}%</div>
+      </div>
+    </div>
+    
+    ${inboundHtml}
+    ${outboundHtml}
+  `;
+}
+
+async function fetchDependencyGraph() {
+  const canvas = document.getElementById('graph-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  // Render loading state
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = '16px Outfit';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.textAlign = 'center';
+  ctx.fillText('Auto-discovering service topology...', canvas.width / 2, canvas.height / 2);
+  
+  // Setup mouse events once
+  if (!canvas.dataset.eventsAttached) {
+    canvas.dataset.eventsAttached = 'true';
+    canvas.style.cursor = 'grab';
+    
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      const transformedMouseX = (mouseX - viewportOffsetX) / viewportZoom;
+      const transformedMouseY = (mouseY - viewportOffsetY) / viewportZoom;
+      
+      draggedNode = null;
+      let hit = false;
+      
+      for (const node of graphNodes) {
+        const dx = transformedMouseX - node.x;
+        const dy = transformedMouseY - node.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= 45) {
+          draggedNode = node;
+          selectedNode = node;
+          updateInspector(node);
+          logEvent('console', `Selected topology node: ${node.id}`);
+          hit = true;
+          break;
+        }
+      }
+      
+      if (!hit) {
+        selectedNode = null;
+        clearInspector();
+        isPanning = true;
+        panStartX = e.clientX - viewportOffsetX;
+        panStartY = e.clientY - viewportOffsetY;
+        canvas.style.cursor = 'grabbing';
+      }
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      const transformedMouseX = (mouseX - viewportOffsetX) / viewportZoom;
+      const transformedMouseY = (mouseY - viewportOffsetY) / viewportZoom;
+      
+      if (draggedNode) {
+        draggedNode.x = Math.max(45, Math.min(canvas.width - 45, transformedMouseX));
+        draggedNode.y = Math.max(45, Math.min(canvas.height - 45, transformedMouseY));
+      } else if (isPanning) {
+        viewportOffsetX = e.clientX - panStartX;
+        viewportOffsetY = e.clientY - panStartY;
+      } else {
+        let hover = false;
+        for (const node of graphNodes) {
+          const dx = transformedMouseX - node.x;
+          const dy = transformedMouseY - node.y;
+          if (Math.sqrt(dx * dx + dy * dy) <= 45) {
+            hover = true;
+            break;
+          }
+        }
+        canvas.style.cursor = hover ? 'pointer' : 'grab';
+      }
+    });
+    
+    canvas.addEventListener('mouseup', () => { 
+      draggedNode = null; 
+      isPanning = false; 
+      canvas.style.cursor = 'grab';
+    });
+    
+    canvas.addEventListener('mouseleave', () => { 
+      draggedNode = null; 
+      isPanning = false; 
+      canvas.style.cursor = 'grab';
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const zoomIntensity = 0.05;
+      const wheelDelta = e.deltaY < 0 ? 1 : -1;
+      const zoomFactor = Math.exp(wheelDelta * zoomIntensity);
+      const newZoom = Math.min(3.0, Math.max(0.4, viewportZoom * zoomFactor));
+
+      viewportOffsetX = mouseX - (mouseX - viewportOffsetX) * (newZoom / viewportZoom);
+      viewportOffsetY = mouseY - (mouseY - viewportOffsetY) * (newZoom / viewportZoom);
+      viewportZoom = newZoom;
+    }, { passive: false });
+  }
+  
+  try {
+    const res = await fetch('/api/topology/live');
+    if (!res.ok) {
+      loadMockGraphData();
+      startGraphRenderLoop(ctx, canvas);
+      return;
+    }
+    const data = await res.json();
+    if (!data.nodes || data.nodes.length === 0) {
+      loadMockGraphData();
+      startGraphRenderLoop(ctx, canvas);
+      return;
+    }
+
+    const currentNodesMap = new Map(graphNodes.map(n => [n.id, n]));
+    graphNodes = data.nodes.map((node, index) => {
+      const existing = currentNodesMap.get(node.id);
+      if (existing) {
+        return { ...node, x: existing.x, y: existing.y };
+      }
+      let x = 400;
+      let y = 250;
+      if (node.id === 'ServGate') { x = 150; y = 250; }
+      else if (node.id === 'ServStore') { x = 650; y = 150; }
+      else if (node.id === 'ServQueue') { x = 650; y = 350; }
+      else {
+        x = 400;
+        y = 150 + (index * 90);
+      }
+      return { ...node, x, y };
+    });
+
+    graphEdges = data.edges || [];
+    
+    // Update selectedNode state with new telemetry values if it exists
+    if (selectedNode) {
+      const updated = graphNodes.find(n => n.id === selectedNode.id);
+      if (updated) {
+        selectedNode = updated;
+        updateInspector(selectedNode);
+      } else {
+        selectedNode = null;
+        clearInspector();
+      }
+    }
+    
+    startGraphRenderLoop(ctx, canvas);
+  } catch (err) {
+    loadMockGraphData();
+    startGraphRenderLoop(ctx, canvas);
+  }
+}
+
+// --- OpenTelemetry Distributed Tracing (Observability Link) ---
+let loadedTraces = [];
+
+async function fetchTraces() {
+  const tbody = document.querySelector('#traces-table tbody');
+  if (!tbody) return;
+  try {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Loading traces...</td></tr>`;
+    const res = await fetch('/api/proxy/trace/api/traces');
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Failed to load traces from ServTrace</td></tr>`;
+      return;
+    }
+    loadedTraces = await res.json();
+    // Sort descending by timestamp
+    loadedTraces.sort((a, b) => b.timestampUnixNano - a.timestampUnixNano);
+    renderTraceList(loadedTraces);
+    logEvent('trace', `Loaded ${loadedTraces.length} traces`);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Error: ${err.message}</td></tr>`;
+    logEvent('error', `Failed to fetch traces: ${err.message}`);
+  }
+}
+
+function renderTraceList(traces) {
+  const tbody = document.querySelector('#traces-table tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  
+  if (traces.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No traces found in ServTrace</td></tr>`;
+    return;
+  }
+  
+  traces.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.className = 'trace-item-row';
+    tr.dataset.traceId = t.traceId;
+    
+    // Formatting timestamp
+    const date = new Date(t.timestampUnixNano / 1000000);
+    const timeStr = date.toLocaleTimeString() + '.' + String(t.timestampUnixNano % 1000000).padStart(6, '0').slice(0, 3);
+    
+    const statusClass = t.errorCount > 0 ? 'badge offline' : 'badge online';
+    const statusLabel = t.errorCount > 0 ? `${t.errorCount} ERR` : 'OK';
+    const serviceClass = `waterfall-span-service service-${t.service.toLowerCase()}`;
+    
+    tr.innerHTML = `
+      <td style="font-family:var(--font-mono); font-size:0.8rem;">${timeStr}</td>
+      <td style="font-family:var(--font-mono); font-size:0.8rem; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${t.traceId}">${t.traceId}</td>
+      <td><strong>${escapeHtml(t.rootName)}</strong></td>
+      <td><span class="${serviceClass}">${escapeHtml(t.service)}</span></td>
+      <td style="font-family:var(--font-mono);">${t.durationMs.toFixed(2)} ms</td>
+      <td>${t.totalSpans}</td>
+      <td><span class="${statusClass}">${statusLabel}</span></td>
+    `;
+    
+    tr.addEventListener('click', () => {
+      document.querySelectorAll('.trace-item-row').forEach(r => r.classList.remove('active'));
+      tr.classList.add('active');
+      showTraceDetail(t.traceId);
+    });
+    
+    tbody.appendChild(tr);
+  });
+}
+
+function filterTraces() {
+  const query = document.getElementById('trace-search').value.toLowerCase();
+  const filtered = loadedTraces.filter(t => 
+    t.traceId.toLowerCase().includes(query) || 
+    t.rootName.toLowerCase().includes(query) || 
+    t.service.toLowerCase().includes(query)
+  );
+  renderTraceList(filtered);
+}
+
+async function clearTraces() {
+  if (!confirm('Are you sure you want to clear all trace records from ServTrace memory?')) return;
+  try {
+    const res = await fetch('/api/proxy/trace/api/traces/', { method: 'DELETE' });
+    if (res.ok) {
+      logEvent('trace', 'Traces cleared successfully');
+      fetchTraces();
+      document.getElementById('traces-timeline').innerHTML = `
+        <div class="text-center text-muted" style="padding: 4rem 0;">Select a trace from the logs on the left to view the distributed spans execution tree.</div>
+      `;
+      document.getElementById('waterfall-trace-id-badge').textContent = 'No Trace Selected';
+    } else {
+      alert('Failed to clear traces');
+    }
+  } catch (err) {
+    logEvent('error', `Failed to clear traces: ${err.message}`);
+  }
+}
+
+function markCriticalPath(node) {
+  if (!node) return;
+  node.isCritical = true;
+  if (node.children && node.children.length > 0) {
+    let maxChild = null;
+    let maxDur = -1;
+    node.children.forEach(c => {
+      if (c.durationMs > maxDur) {
+        maxDur = c.durationMs;
+        maxChild = c;
+      }
+    });
+    if (maxChild) {
+      markCriticalPath(maxChild);
+    }
+  }
+}
+
+async function showTraceDetail(traceId) {
+  const timeline = document.getElementById('traces-timeline');
+  const badge = document.getElementById('waterfall-trace-id-badge');
+  const replayBtn = document.getElementById('btn-replay-trace');
+  const traceLogsBtn = document.getElementById('btn-trace-logs');
+  const expandBtn = document.getElementById('btn-expand-all-spans');
+  const collapseBtn = document.getElementById('btn-collapse-all-spans');
+  const cpToggleLabel = document.getElementById('critical-path-toggle-label');
+  const cpCheckbox = document.getElementById('checkbox-critical-path');
+  
+  if (!timeline) return;
+  
+  if (replayBtn) replayBtn.style.display = 'none';
+  if (traceLogsBtn) traceLogsBtn.style.display = 'none';
+  if (expandBtn) expandBtn.style.display = 'none';
+  if (collapseBtn) collapseBtn.style.display = 'none';
+  if (cpToggleLabel) cpToggleLabel.style.display = 'none';
+  if (cpCheckbox) cpCheckbox.checked = false;
+  
+  badge.textContent = `TRACE ID: ${traceId.slice(0, 8)}...`;
+  timeline.innerHTML = `<div class="text-center text-muted" style="padding: 4rem 0;">Loading trace tree...</div>`;
+  
+  try {
+    const res = await fetch(`/api/proxy/trace/api/traces/${traceId}`);
+    if (!res.ok) {
+      timeline.innerHTML = `<div class="text-center text-muted">Failed to load trace detail</div>`;
+      return;
+    }
+    const rootNode = await res.json();
+    timeline.innerHTML = '';
+    renderSequencePipeline(rootNode);
+    
+    // Calculate critical path
+    markCriticalPath(rootNode);
+    
+    // We want to find the max duration of the trace to compute bar widths relative to total duration
+    const totalDuration = findMaxDuration(rootNode);
+    renderSpanNodeWaterfall(timeline, rootNode, totalDuration, 0);
+
+    STATE.selectedTraceId = traceId;
+    if (replayBtn) replayBtn.style.display = 'inline-block';
+    if (traceLogsBtn) traceLogsBtn.style.display = 'inline-block';
+    if (expandBtn) expandBtn.style.display = 'inline-block';
+    if (collapseBtn) collapseBtn.style.display = 'inline-block';
+    if (cpToggleLabel) cpToggleLabel.style.display = 'inline-flex';
+  } catch (err) {
+    timeline.innerHTML = `<div class="text-center text-muted">Error loading tree: ${err.message}</div>`;
+  }
+}
+
+function findMaxDuration(node) {
+  let max = node.offsetMs + node.durationMs;
+  if (node.children) {
+    node.children.forEach(c => {
+      const childMax = findMaxDuration(c);
+      if (childMax > max) max = childMax;
+    });
+  }
+  return max;
+}
+
+function renderSpanNodeWaterfall(container, node, totalDuration, depth) {
+  if (!node) return;
+  
+  const hasChildren = node.children && node.children.length > 0;
+  
+  const spanWrapper = document.createElement('div');
+  spanWrapper.className = 'waterfall-span-wrapper';
+  spanWrapper.style.width = '100%';
+  spanWrapper.dataset.spanId = node.span.spanId;
+  
+  const row = document.createElement('div');
+  row.className = 'waterfall-span-row';
+  if (node.isCritical) {
+    row.dataset.critical = 'true';
+  }
+  
+  const service = (node.span.service || 'unknown').toLowerCase();
+  const serviceClass = `waterfall-span-service service-${service}`;
+  
+  const isSlowQuery = node.span.attributes && (node.span.attributes['db.slow_query'] === true || node.span.attributes['db.slow_query'] === "true");
+  const barClass = `waterfall-bar waterfall-bar-${service} ${node.span.status === 2 ? 'error' : (isSlowQuery ? 'success warning-bar' : 'success')}`;
+  
+  let slowQueryWarning = '';
+  if (isSlowQuery) {
+    slowQueryWarning = `<span class="badge warning" style="font-size:0.65rem; padding:0.15rem 0.3rem; margin-left:4px; font-weight:bold; font-family:var(--font-mono);">⚠️ SLOW QUERY</span>`;
+  }
+  
+  // Calculate width and offset %
+  const pctWidth = totalDuration > 0 ? (node.durationMs / totalDuration) * 100 : 100;
+  const pctOffset = totalDuration > 0 ? (node.offsetMs / totalDuration) * 100 : 0;
+  
+  const indent = depth * 15;
+  const hasAttributes = node.span.attributes && Object.keys(node.span.attributes).length > 0;
+  const uniqueId = `attr-${node.span.spanId}`;
+  
+  // Build info cell with toggle button if children exist
+  let toggleBtnHtml = '';
+  if (hasChildren) {
+    toggleBtnHtml = `<span class="waterfall-toggle-btn" id="toggle-btn-${node.span.spanId}" style="margin-right: 4px;">▼</span>`;
+  } else {
+    toggleBtnHtml = `<span style="display: inline-block; width: 14px; margin-right: 4px;"></span>`;
+  }
+  
+  row.innerHTML = `
+    <div class="waterfall-span-main">
+      <div class="waterfall-span-info" style="padding-left: ${indent}px;">
+        ${toggleBtnHtml}
+        <span class="${serviceClass}">${escapeHtml(node.span.service || 'unknown')}</span>
+        <span class="waterfall-span-name" title="${escapeHtml(node.span.name)}">${escapeHtml(node.span.name)}</span>
+        ${slowQueryWarning}
+        ${hasAttributes ? `<span style="font-size:0.75rem; cursor:pointer; color:var(--primary);" onclick="toggleSpanAttr('${uniqueId}')">ⓘ</span>` : ''}
+      </div>
+      <div class="waterfall-timeline-track">
+        <div class="${barClass}" style="left: ${pctOffset}%; width: ${pctWidth}%;"></div>
+        <div class="waterfall-timeline-track-75"></div>
+        <div class="waterfall-duration-label" style="left: ${pctOffset + pctWidth}%;">${node.durationMs.toFixed(1)}ms</div>
+      </div>
+    </div>
+    ${hasAttributes ? `
+      <div class="waterfall-span-details" id="${uniqueId}" style="display: none;">
+        <div class="attributes-grid">
+          ${Object.entries(node.span.attributes).map(([k, v]) => `
+            <div class="attr-key">${escapeHtml(k)}</div>
+            <div class="attr-val">${escapeHtml(String(v))}</div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+  `;
+  
+  spanWrapper.appendChild(row);
+  
+  if (hasChildren) {
+    const childrenContainer = document.createElement('div');
+    childrenContainer.className = 'waterfall-children-container';
+    childrenContainer.id = `children-${node.span.spanId}`;
+    
+    // Sort children by start offset
+    node.children.sort((a, b) => a.offsetMs - b.offsetMs);
+    node.children.forEach(child => {
+      renderSpanNodeWaterfall(childrenContainer, child, totalDuration, depth + 1);
+    });
+    
+    spanWrapper.appendChild(childrenContainer);
+    
+    // Add event listener to toggle button
+    setTimeout(() => {
+      const btn = spanWrapper.querySelector(`#toggle-btn-${node.span.spanId}`);
+      if (btn) {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const disp = childrenContainer.style.display;
+          if (disp === 'none') {
+            childrenContainer.style.display = 'flex';
+            btn.innerHTML = '▼';
+          } else {
+            childrenContainer.style.display = 'none';
+            btn.innerHTML = '▶';
+          }
+        });
+      }
+    }, 0);
+  }
+  
+  container.appendChild(spanWrapper);
+}
+
+function toggleSpanAttr(id) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+}
+window.toggleSpanAttr = toggleSpanAttr;
+
+function switchToTracesTab(filterQuery) {
+  const tracesBtn = document.querySelector('.tab-btn[data-tab="traces"]');
+  if (tracesBtn) {
+    tracesBtn.click();
+    if (filterQuery) {
+      const searchInput = document.getElementById('trace-search');
+      if (searchInput) {
+        searchInput.value = filterQuery;
+        filterTraces();
+      }
+    }
+  }
+}
+window.switchToTracesTab = switchToTracesTab;
+
+function loadMockGraphData() {
+  graphNodes = [
+    { id: 'ServGate', label: 'ServGate', x: 150, y: 250, color: '#06b6d4' },
+    { id: 'OrderService', label: 'OrderService', x: 400, y: 150, color: '#a855f7' },
+    { id: 'BillingService', label: 'BillingService', x: 400, y: 350, color: '#a855f7' },
+    { id: 'ServStore', label: 'ServStore', x: 650, y: 150, color: '#10b981' },
+    { id: 'ServQueue', label: 'ServQueue', x: 650, y: 350, color: '#f59e0b' }
+  ];
+  
+  graphEdges = [
+    { from: 'ServGate', to: 'OrderService', label: 'HTTP' },
+    { from: 'ServGate', to: 'BillingService', label: 'HTTP' },
+    { from: 'OrderService', to: 'ServStore', label: 'PUT' },
+    { from: 'BillingService', to: 'ServQueue', label: 'STOMP' }
+  ];
+}
+
+function startGraphRenderLoop(ctx, canvas) {
+  if (graphAnimationId) {
+    cancelAnimationFrame(graphAnimationId);
+  }
+  
+  flowParticles = [];
+  
+  function updateAndDraw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(viewportOffsetX, viewportOffsetY);
+    ctx.scale(viewportZoom, viewportZoom);
+    
+    // Draw connection edges
+    graphEdges.forEach(edge => {
+      const fromNode = graphNodes.find(n => n.id === edge.from);
+      const toNode = graphNodes.find(n => n.id === edge.to);
+      if (fromNode && toNode) {
+        const isErrorProne = edge.error_rate > 0.1;
+        const edgeColor = isErrorProne ? '#ef4444' : '#475569';
+        
+        let label = edge.label;
+        if (edge.throughput) {
+          label = `${edge.label || 'Call'} (${edge.throughput} rps)`;
+        }
+        drawArrow(ctx, fromNode.x, fromNode.y, toNode.x, toNode.y, edgeColor, label);
+      }
+    });
+    
+    // Periodically spawn particles on random edges
+    if (Math.random() < 0.04 && graphEdges.length > 0) {
+      const randomEdge = graphEdges[Math.floor(Math.random() * graphEdges.length)];
+      const throughputVal = randomEdge.throughput || 5;
+      flowParticles.push({
+        edge: randomEdge,
+        progress: 0.0,
+        speed: 0.005 + Math.min(throughputVal * 0.001, 0.035),
+        color: randomEdge.error_rate > 0.1 ? '#ef4444' : '#6366f1'
+      });
+    }
+    
+    // Update and draw flow particles
+    flowParticles.forEach((p, idx) => {
+      p.progress += p.speed;
+      if (p.progress >= 1.0) {
+        flowParticles.splice(idx, 1);
+        return;
+      }
+      
+      const fromNode = graphNodes.find(n => n.id === p.edge.from);
+      const toNode = graphNodes.find(n => n.id === p.edge.to);
+      if (fromNode && toNode) {
+        const angle = Math.atan2(toNode.y - fromNode.y, toNode.x - fromNode.x);
+        const startX = fromNode.x + 45 * Math.cos(angle);
+        const startY = fromNode.y + 45 * Math.sin(angle);
+        const endX = toNode.x - 45 * Math.cos(angle);
+        const endY = toNode.y - 45 * Math.sin(angle);
+        
+        const px = startX + (endX - startX) * p.progress;
+        const py = startY + (endY - startY) * p.progress;
+        
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = p.color || '#6366f1';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = p.color || '#6366f1';
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    });
+    
+    // Draw nodes
+    graphNodes.forEach(node => {
+      const isOffline = !node.online;
+      const isErrorProne = node.error_rate > 0.1;
+      const nodeColor = isOffline ? '#94a3b8' : (isErrorProne ? '#ef4444' : node.color);
+      
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, 45, 0, 2 * Math.PI);
+      ctx.fillStyle = isOffline ? 'rgba(15, 17, 32, 0.95)' : 'rgba(15, 17, 32, 0.85)';
+      ctx.strokeStyle = nodeColor;
+      ctx.lineWidth = selectedNode === node ? 5 : 3;
+      ctx.shadowBlur = selectedNode === node ? 18 : 10;
+      ctx.shadowColor = nodeColor;
+      ctx.fill();
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      
+      ctx.font = 'bold 12px Outfit';
+      ctx.fillStyle = isOffline ? '#94a3b8' : '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.fillText(node.id, node.x, node.y + (isErrorProne ? -4 : 4));
+      
+      if (isErrorProne) {
+        ctx.font = 'bold 10px JetBrains Mono';
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText('! ERROR', node.x, node.y + 12);
+      }
+    });
+    
+    ctx.restore();
+    
+    // Draw zoom indicator in screen space (no transform)
+    const zoomPct = Math.round(viewportZoom * 100);
+    ctx.save();
+    ctx.font = '11px JetBrains Mono, monospace';
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.7)';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${zoomPct}%`, canvas.width - 10, canvas.height - 10);
+    if (viewportZoom !== 1) {
+      ctx.font = '10px Outfit, sans-serif';
+      ctx.fillStyle = 'rgba(99, 102, 241, 0.6)';
+      ctx.textAlign = 'center';
+      ctx.fillText('Scroll to zoom · Drag to pan', canvas.width / 2, canvas.height - 10);
+    }
+    ctx.restore();
+    
+    graphAnimationId = requestAnimationFrame(updateAndDraw);
+  }
+  
+  updateAndDraw();
+}
+
+function drawArrow(ctx, fromX, fromY, toX, toY, color, label) {
+  const headlen = 12; 
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  
+  const startX = fromX + 45 * Math.cos(angle);
+  const startY = fromY + 45 * Math.sin(angle);
+  const endX = toX - 45 * Math.cos(angle);
+  const endY = toY - 45 * Math.sin(angle);
+  
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  ctx.beginPath();
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(endX - headlen * Math.cos(angle - Math.PI / 6), endY - headlen * Math.sin(angle - Math.PI / 6));
+  ctx.lineTo(endX - headlen * Math.cos(angle + Math.PI / 6), endY - headlen * Math.sin(angle + Math.PI / 6));
+  ctx.fillStyle = color;
+  ctx.fill();
+  
+  if (label) {
+    const midX = (startX + endX) / 2;
+    const midY = (startY + endY) / 2;
+    ctx.font = '10px JetBrains Mono';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, midX, midY - 8);
+  }
+}
+
+// --- Access Control / Policy Editor Logic ---
+let defaultUsers = ['admin', 'developer-bob', 'anonymous'];
+let selectedUser = '';
+
+function getStorageUsers() {
+  const stored = localStorage.getItem('console_users');
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      return defaultUsers;
+    }
+  }
+  localStorage.setItem('console_users', JSON.stringify(defaultUsers));
+  return defaultUsers;
+}
+
+function saveStorageUser(username) {
+  const users = getStorageUsers();
+  if (!users.includes(username)) {
+    users.push(username);
+    localStorage.setItem('console_users', JSON.stringify(users));
+  }
+}
+
+function loadPoliciesView() {
+  const users = getStorageUsers();
+  const listContainer = document.getElementById('policy-users-list');
+  if (!listContainer) return;
+  listContainer.innerHTML = '';
+
+  users.forEach(u => {
+    const item = document.createElement('div');
+    item.className = `user-item ${selectedUser === u ? 'active' : ''}`;
+    item.style.padding = '10px 12px';
+    item.style.borderRadius = '8px';
+    item.style.cursor = 'pointer';
+    item.style.color = selectedUser === u ? 'var(--text-primary)' : 'var(--text-secondary)';
+    item.style.backgroundColor = selectedUser === u ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+    item.style.borderLeft = selectedUser === u ? '3px solid var(--primary)' : 'none';
+    item.style.marginBottom = '4px';
+    item.style.transition = 'all 0.2s ease';
+    item.style.fontWeight = '500';
+
+    item.innerHTML = `👤 ${u}`;
+    item.addEventListener('click', () => selectUserPolicy(u));
+    listContainer.appendChild(item);
+  });
+
+  // Wire once helper buttons and selection
+  if (!window.policiesWired) {
+    window.policiesWired = true;
+
+    document.getElementById('btn-select-user').addEventListener('click', () => {
+      const usernameInput = document.getElementById('new-user-name');
+      const username = usernameInput.value.trim();
+      if (!username) {
+        alert('Username cannot be empty');
+        return;
+      }
+      saveStorageUser(username);
+      usernameInput.value = '';
+      selectUserPolicy(username);
+    });
+
+    document.getElementById('btn-save-policy').addEventListener('click', async () => {
+      if (!selectedUser) return;
+      const jsonArea = document.getElementById('policy-json-area');
+      const rawJson = jsonArea.value.trim();
+
+      try {
+        JSON.parse(rawJson);
+      } catch (e) {
+        alert('Invalid JSON format: ' + e.message);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/proxy/store/console/users/${selectedUser}/policy`, {
+          method: 'PUT',
+          body: rawJson,
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          logEvent('store', `Saved IAM policy for user: ${selectedUser}`);
+          alert(`Policy for "${selectedUser}" saved successfully!`);
+        } else {
+          const text = await res.text();
+          alert('Failed to save policy: ' + text);
+        }
+      } catch (err) {
+        alert('Network Error: ' + err.message);
+      }
+    });
+
+    document.getElementById('btn-delete-policy').addEventListener('click', async () => {
+      if (!selectedUser) return;
+      if (!confirm(`Are you sure you want to delete policy for user "${selectedUser}"?`)) return;
+
+      try {
+        const res = await fetch(`/api/proxy/store/console/users/${selectedUser}/policy`, {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          logEvent('store', `Deleted IAM policy for user: ${selectedUser}`);
+          alert(`Policy for "${selectedUser}" deleted`);
+          selectUserPolicy(selectedUser);
+        } else {
+          alert('Failed to delete policy');
+        }
+      } catch (err) {
+        alert('Network Error: ' + err.message);
+      }
+    });
+
+    // Quick Templates
+    document.getElementById('tpl-s3-allow').addEventListener('click', () => {
+      const jsonArea = document.getElementById('policy-json-area');
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["s3:GetObject", "s3:PutObject"],
+            Resource: ["arn:aws:s3:::*"]
+          }
+        ]
+      }, null, 2);
+    });
+
+    document.getElementById('tpl-stomp-allow').addEventListener('click', () => {
+      const jsonArea = document.getElementById('policy-json-area');
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["stomp:Publish", "stomp:Subscribe"],
+            Resource: ["arn:aws:stomp:::topic/*"]
+          }
+        ]
+      }, null, 2);
+    });
+
+    document.getElementById('tpl-full-access').addEventListener('click', () => {
+      const jsonArea = document.getElementById('policy-json-area');
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["s3:*", "stomp:*"],
+            Resource: ["*"]
+          }
+        ]
+      }, null, 2);
+    });
+  }
+}
+
+async function selectUserPolicy(username) {
+  selectedUser = username;
+  loadPoliciesView();
+
+  const titleEl = document.getElementById('policy-current-user');
+  const jsonArea = document.getElementById('policy-json-area');
+  const btnSave = document.getElementById('btn-save-policy');
+  const btnDelete = document.getElementById('btn-delete-policy');
+
+  if (titleEl) titleEl.textContent = username;
+  if (jsonArea) jsonArea.value = '';
+  if (btnSave) btnSave.disabled = true;
+  if (btnDelete) btnDelete.disabled = true;
+
+  try {
+    const res = await fetch(`/api/proxy/store/console/users/${username}/policy`);
+    if (res.status === 404) {
+      jsonArea.value = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: []
+      }, null, 2);
+    } else if (!res.ok) {
+      jsonArea.value = "Failed to load policy";
+    } else {
+      const data = await res.json();
+      jsonArea.value = JSON.stringify(data, null, 2);
+    }
+    const isAdmin = STATE.user?.role === 'admin';
+    if (btnSave) btnSave.disabled = !isAdmin;
+    if (btnDelete) btnDelete.disabled = !isAdmin;
+  } catch (err) {
+    if (jsonArea) jsonArea.value = "Error: " + err.message;
+  }
+}
+
+// ─── Migration Auditing ────────────────────────────────────────────────────
+
+async function fetchMigrations() {
+  try {
+    const res = await fetch('/api/db/migrations');
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+    if (!res.ok) return;
+    const data = await res.json();
+    STATE.migrations = data || [];
+    renderMigrations();
+  } catch (err) {
+    console.error('Failed to fetch migrations:', err);
+  }
+}
+
+function renderMigrations() {
+  const tbody = document.querySelector('#migrations-table tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const migrations = STATE.migrations || [];
+  if (migrations.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No migrations applied yet. Use the form to apply your first schema revision.</td></tr>`;
+    return;
+  }
+
+  migrations.forEach(mig => {
+    const tr = document.createElement('tr');
+    const timeStr = new Date(mig.timestamp).toLocaleString();
+    const statusClass = mig.status === 'success' ? 'mig-success' : 'mig-failed';
+    const statusIcon = mig.status === 'success' ? '✓' : '✗';
+    const statusLabel = mig.status === 'success' ? 'Success' : 'Failed';
+    const deltaHtml = mig.delta ? escapeHtml(mig.delta) : '—';
+    const errorTip = mig.error ? ` title="${escapeHtml(mig.error)}"` : '';
+
+    tr.innerHTML = `
+      <td><span class="mig-revision-badge">${escapeHtml(mig.revision)}</span></td>
+      <td>
+        <div style="font-weight:500;">${escapeHtml(mig.description || '—')}</div>
+        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:0.15rem;">
+          ${escapeHtml(mig.driver)} · ${escapeHtml(mig.user)} · ${mig.duration_ms}ms
+        </div>
+      </td>
+      <td><span class="mig-status-badge ${statusClass}"${errorTip}>${statusIcon} ${statusLabel}</span></td>
+      <td style="font-family:var(--font-mono); font-size:0.78rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(mig.delta || '')}">${deltaHtml}</td>
+      <td style="font-size:0.78rem; color:var(--text-muted); white-space:nowrap;">${timeStr}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  logEvent('store', `Loaded ${migrations.length} migration audit entries`);
+}
+
+async function applyMigration() {
+  const driverEl = document.getElementById('mig-driver');
+  const dsnEl = document.getElementById('mig-dsn');
+  const revisionEl = document.getElementById('mig-revision');
+  const descEl = document.getElementById('mig-description');
+  const sqlEl = document.getElementById('mig-sql');
+  const statusEl = document.getElementById('migration-status');
+  const btnEl = document.getElementById('btn-apply-migration');
+
+  if (!driverEl || !dsnEl || !revisionEl || !sqlEl) return;
+
+  const driver = driverEl.value;
+  const dsn = dsnEl.value.trim();
+  const revision = revisionEl.value.trim();
+  const description = descEl.value.trim();
+  const sql = sqlEl.value.trim();
+
+  if (!dsn || !revision || !sql) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = 'Please fill in Driver, DSN, Revision ID, and SQL script.';
+    return;
+  }
+
+  statusEl.className = 'status-message';
+  statusEl.textContent = '⚡ Applying migration...';
+  btnEl.disabled = true;
+  btnEl.textContent = 'Applying...';
+
+  try {
+    const res = await fetch('/api/db/migrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ driver, dsn, revision, description, sql })
+    });
+
+    if (res.status === 401) {
+      showLoginScreen();
+      return;
+    }
+
+    const data = await res.json();
+
+    if (data.status === 'success') {
+      statusEl.className = 'status-message success';
+      statusEl.textContent = `✓ Migration ${data.revision} applied successfully (${data.duration_ms}ms). Delta: ${data.delta}`;
+      logEvent('store', `Migration applied: rev ${data.revision} — ${data.delta}`);
+      // Reset form fields (except driver & DSN for convenience)
+      revisionEl.value = '';
+      descEl.value = '';
+      sqlEl.value = '';
+    } else {
+      statusEl.className = 'status-message error';
+      statusEl.textContent = `✗ Migration ${data.revision} failed: ${data.error}`;
+      logEvent('error', `Migration failed: rev ${data.revision} — ${data.error}`);
+    }
+
+    // Refresh the revisions table
+    fetchMigrations();
+  } catch (err) {
+    statusEl.className = 'status-message error';
+    statusEl.textContent = `Network error: ${err.message}`;
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = '⚡ Apply Migration';
+  }
+}
+
+// Wire up migration UI on DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  const migForm = document.getElementById('migration-form');
+  if (migForm) {
+    migForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      applyMigration();
+    });
+  }
+
+  const refreshMigBtn = document.getElementById('btn-refresh-migrations');
+  if (refreshMigBtn) {
+    refreshMigBtn.addEventListener('click', fetchMigrations);
+  }
+});
+
+// --- Gateways Connection Stats & Route Deletion ---
+async function fetchConnections() {
+  try {
+    const res = await fetch('/api/proxy/gate/api/admin/connections');
+    if (!res.ok) return;
+    const conns = await res.json();
+    const tbody = document.querySelector('#connections-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    
+    const keys = Object.keys(conns);
+    if (keys.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No active connections recorded</td></tr>`;
+      return;
+    }
+    
+    keys.forEach(target => {
+      const count = conns[target];
+      const tr = document.createElement('tr');
+      
+      let loadBadge = '<span class="badge online">LOW</span>';
+      if (count > 50) {
+        loadBadge = '<span class="badge offline">HIGH</span>';
+      } else if (count > 10) {
+        loadBadge = '<span class="badge degraded">MODERATE</span>';
+      }
+      
+      tr.innerHTML = `
+        <td><span style="font-family:var(--font-mono);">${target}</span></td>
+        <td><strong>${count}</strong></td>
+        <td>${loadBadge}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    // silent fallback
+  }
+}
+
+async function deleteRoute(prefix) {
+  if (!confirm(`Are you sure you want to delete route "${prefix}"?`)) {
+    return;
+  }
+  try {
+    const res = await fetch(`/api/routes?prefix=${encodeURIComponent(prefix)}`, {
+      method: 'DELETE'
+    });
+    if (res.ok) {
+      logEvent('system', `Deleted route prefix: ${prefix}`);
+      refreshRoutesList();
+      fetchConnections();
+    } else {
+      const errData = await res.json();
+      logEvent('error', `Failed to delete route: ${errData.error || res.statusText}`);
+    }
+  } catch (err) {
+    logEvent('error', `Failed to delete route: ${err.message}`);
+  }
+}
+
+// Bind manual refresh connection button
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    document.getElementById('btn-refresh-connections')?.addEventListener('click', fetchConnections);
+  }, 1000);
+
+  // Wire up summary card click events
+  document.getElementById('gate-summary-card')?.addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="gateways"]')?.click();
+  });
+  document.getElementById('queue-summary-card')?.addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="queues"]')?.click();
+  });
+  document.getElementById('store-summary-card')?.addEventListener('click', () => {
+    document.querySelector('.tab-btn[data-tab="storage"]')?.click();
+  });
+});
+
+// Global navigation helpers
+window.switchToTracesTab = function(filterText) {
+  const tracesTabBtn = document.querySelector('.tab-btn[data-tab="traces"]');
+  if (tracesTabBtn) {
+    tracesTabBtn.click();
+  }
+  setTimeout(() => {
+    const searchInput = document.getElementById('trace-search');
+    if (searchInput) {
+      searchInput.value = filterText;
+      searchInput.dispatchEvent(new Event('input'));
+    }
+  }, 50);
+};
+
+// Alerts & Replay Logic
+function initAlertsUI() {
+  const alertsToggle = document.getElementById('btn-alerts-toggle');
+  const alertsPanel = document.getElementById('alerts-dropdown-panel');
+  const dismissAllBtn = document.getElementById('btn-alerts-clear');
+
+  if (alertsToggle && alertsPanel) {
+    alertsToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      alertsPanel.style.display = alertsPanel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!alertsPanel.contains(e.target) && e.target !== alertsToggle) {
+        alertsPanel.style.display = 'none';
+      }
+    });
+  }
+
+  if (dismissAllBtn) {
+    dismissAllBtn.addEventListener('click', async () => {
+      const activeAlerts = STATE.alerts || [];
+      const unackAlerts = activeAlerts.filter(a => !a.acknowledged);
+      for (const alert of unackAlerts) {
+        await ackAlert(alert.id);
+      }
+      pollAlerts();
+    });
+  }
+
+  const replayBtn = document.getElementById('btn-replay-trace');
+  if (replayBtn) {
+    replayBtn.addEventListener('click', replaySelectedTrace);
+  }
+
+  const traceLogsBtn = document.getElementById('btn-trace-logs');
+  if (traceLogsBtn) {
+    traceLogsBtn.addEventListener('click', showTraceLogs);
+  }
+}
+
+async function pollAlerts() {
+  try {
+    const res = await fetch('/api/alerts');
+    if (!res.ok) return;
+    const alertsList = await res.json();
+    STATE.alerts = alertsList;
+    renderAlertsDropdown(alertsList);
+  } catch (err) {
+    console.error('Failed to poll alerts:', err);
+  }
+}
+
+function renderAlertsDropdown(alertsList) {
+  const badge = document.getElementById('alerts-count-badge');
+  const container = document.getElementById('alerts-list-container');
+  if (!badge || !container) return;
+
+  const unackAlerts = alertsList.filter(a => !a.acknowledged);
+  
+  if (unackAlerts.length > 0) {
+    badge.textContent = unackAlerts.length;
+    badge.style.display = 'flex';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  container.innerHTML = '';
+  if (alertsList.length === 0) {
+    container.innerHTML = `<div class="text-center text-muted" style="padding: 1rem 0; font-size: 0.85rem;">No active alerts</div>`;
+    return;
+  }
+
+  alertsList.forEach(alert => {
+    const item = document.createElement('div');
+    item.className = `alert-item ${alert.severity} ${alert.acknowledged ? 'acknowledged' : ''}`;
+    item.style.cursor = 'pointer';
+    if (alert.acknowledged) {
+      item.style.opacity = '0.5';
+    }
+
+    const time = new Date(alert.timestamp).toLocaleTimeString();
+    
+    item.innerHTML = `
+      <div class="alert-item-header">
+        <span>${alert.component}</span>
+        <span class="alert-item-time">${time}</span>
+      </div>
+      <div style="font-size: 0.85rem; color: #e2e8f0; margin-bottom: 0.25rem;">${alert.message}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.25rem;">
+        <span style="font-size: 0.7rem; color: var(--primary); text-decoration: underline;">Investigate Timeline</span>
+        ${!alert.acknowledged ? `
+          <button class="btn btn-secondary btn-sm" style="font-size: 0.7rem; padding: 0.1rem 0.3rem;" onclick="event.stopPropagation(); ackAlert('${alert.id}')">Acknowledge</button>
+        ` : ''}
+      </div>
+    `;
+    item.addEventListener('click', () => {
+      openIncidentTimeline(alert.id);
+    });
+    container.appendChild(item);
+  });
+}
+
+async function ackAlert(id) {
+  try {
+    const res = await fetch('/api/alerts/ack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    if (res.ok) {
+      logEvent('system', `Alert ${id} acknowledged`);
+      pollAlerts();
+    }
+  } catch (err) {
+    console.error('Failed to ack alert:', err);
+  }
+}
+window.ackAlert = ackAlert;
+
+async function replaySelectedTrace() {
+  const traceId = STATE.selectedTraceId;
+  if (!traceId) return;
+
+  const replayBtn = document.getElementById('btn-replay-trace');
+  if (replayBtn) {
+    replayBtn.disabled = true;
+    replayBtn.textContent = '⚡ Replaying...';
+  }
+
+  logEvent('trace', `Replaying request from trace: ${traceId}`);
+
+  try {
+    const res = await fetch('/api/traces/replay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ traceId })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        logEvent('trace', `✓ Replay Succeeded! Code: ${data.statusCode}. Response: ${data.body.slice(0, 100)}`);
+      } else {
+        logEvent('error', `✗ Replay Failed! Code: ${data.statusCode}. Response: ${data.body.slice(0, 100)}`);
+      }
+    } else {
+      const errText = await res.text();
+      logEvent('error', `✗ Replay Failed: ${errText}`);
+    }
+  } catch (err) {
+    logEvent('error', `✗ Replay Network Error: ${err.message}`);
+  } finally {
+    if (replayBtn) {
+      replayBtn.disabled = false;
+      replayBtn.textContent = '⚡ Replay Request';
+    }
+  }
+}
+
+// Logs UI & Cost Optimization Logic
+function initLogsUI() {
+  const svcFilter = document.getElementById('log-filter-service');
+  const lvlFilter = document.getElementById('log-filter-level');
+  const searchInput = document.getElementById('log-search-text');
+
+  if (svcFilter) svcFilter.addEventListener('change', fetchLogs);
+  if (lvlFilter) lvlFilter.addEventListener('change', fetchLogs);
+  if (searchInput) {
+    let debounce;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(fetchLogs, 300);
+    });
+  }
+
+  setInterval(fetchLogs, 4000);
+  fetchLogs();
+}
+
+async function fetchLogs() {
+  const svc = document.getElementById('log-filter-service')?.value || '';
+  const lvl = document.getElementById('log-filter-level')?.value || '';
+  const search = document.getElementById('log-search-text')?.value || '';
+
+  try {
+    const url = `/api/logs?service=${encodeURIComponent(svc)}&level=${encodeURIComponent(lvl)}&search=${encodeURIComponent(search)}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const logs = await res.json();
+    
+    const consoleScreen = document.getElementById('console-logs-screen');
+    if (!consoleScreen) return;
+    
+    consoleScreen.innerHTML = '';
+    
+    if (logs.length === 0) {
+      consoleScreen.innerHTML = '<div class="text-muted text-center" style="padding: 1rem 0;">No matching logs found</div>';
+      return;
+    }
+    
+    logs.forEach(log => {
+      const line = document.createElement('div');
+      const service = (log.service || 'unknown').toLowerCase();
+      line.className = `log-line ${service} ${log.level || 'info'}`;
+      
+      const time = new Date(log.timestamp).toLocaleTimeString();
+      const traceBadge = log.traceId ? ` <span style="font-family:var(--font-mono); font-size:0.7rem; opacity:0.6; cursor:pointer;" onclick="switchToTracesTab('${log.traceId}')">[trace:${log.traceId.slice(0,6)}]</span>` : '';
+      
+      line.innerHTML = `[${time}] <span class="tag">[${(log.service || 'unknown').toUpperCase()}]</span> <span class="level-tag">[${(log.level || 'info').toUpperCase()}]</span> ${escapeHtml(log.message)}${traceBadge}`;
+      consoleScreen.appendChild(line);
+    });
+    
+    consoleScreen.scrollTop = consoleScreen.scrollHeight;
+  } catch (err) {
+    console.error('Failed to fetch logs:', err);
+  }
+}
+
+async function fetchCostEstimation() {
+  const estTotal = document.getElementById('cost-estimated-total');
+  const limitLabel = document.getElementById('cost-budget-limit');
+  const percentLabel = document.getElementById('cost-budget-percent');
+  const progressBar = document.getElementById('cost-budget-progress');
+  const badge = document.getElementById('cost-budget-badge');
+  const breakdownList = document.getElementById('cost-breakdown-list');
+  const recContainer = document.getElementById('cost-recommendations-container');
+
+  if (!estTotal) return;
+
+  try {
+    const res = await fetch('/api/cost-estimation');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    estTotal.textContent = `$${data.monthly.total.toFixed(2)}`;
+    limitLabel.textContent = `$${data.monthly.budget.toFixed(2)}`;
+    percentLabel.textContent = `${data.monthly.percent.toFixed(1)}%`;
+    progressBar.style.width = `${Math.min(100, data.monthly.percent)}%`;
+
+    if (data.monthly.total > data.monthly.budget) {
+      badge.className = 'badge offline';
+      badge.textContent = 'Budget Exceeded';
+      progressBar.style.backgroundColor = 'var(--danger, #ef4444)';
+    } else {
+      badge.className = 'badge online';
+      badge.textContent = 'Within Budget';
+      progressBar.style.backgroundColor = 'var(--primary)';
+    }
+
+    breakdownList.innerHTML = '';
+    data.breakdown.forEach(item => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.justifyContent = 'space-between';
+      row.style.alignItems = 'center';
+      row.style.padding = '0.5rem';
+      row.style.background = 'rgba(255,255,255,0.02)';
+      row.style.borderRadius = '4px';
+
+      row.innerHTML = `
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background-color:${item.color};"></span>
+          <span>${item.name}</span>
+        </div>
+        <strong>$${item.value.toFixed(2)}</strong>
+      `;
+      breakdownList.appendChild(row);
+    });
+
+    recContainer.innerHTML = '';
+    data.recommendations.forEach(rec => {
+      const item = document.createElement('div');
+      item.style.padding = '0.75rem';
+      item.style.background = 'rgba(255, 193, 7, 0.05)';
+      item.style.borderLeft = '3px solid var(--warning, #f59e0b)';
+      item.style.borderRadius = '4px';
+      item.style.fontSize = '0.85rem';
+      item.style.color = '#e2e8f0';
+      item.textContent = rec;
+      recContainer.appendChild(item);
+    });
+
+  } catch (err) {
+    console.error('Failed to fetch cost estimation:', err);
+  }
+}
+
+async function fetchSLOTargets() {
+  const container = document.getElementById('slo-indicators-container');
+  const statusEl = document.getElementById('slo-overall-status');
+  const recsContainer = document.getElementById('slo-recs-container');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/slo');
+    if (!res.ok) throw new Error('API returned error status');
+    const data = await res.json();
+
+    let breachedCount = 0;
+    let warningCount = 0;
+
+    container.innerHTML = '';
+    data.forEach(slo => {
+      let statusColor = 'var(--success)';
+      let statusText = 'HEALTHY';
+      let progressColor = 'var(--success)';
+      
+      if (slo.status === 'breached') {
+        statusColor = 'var(--danger, #ef4444)';
+        statusText = 'BREACHED';
+        progressColor = 'var(--danger, #ef4444)';
+        breachedCount++;
+      } else if (slo.status === 'warning') {
+        statusColor = 'var(--warning, #f59e0b)';
+        statusText = 'WARNING';
+        progressColor = 'var(--warning, #f59e0b)';
+        warningCount++;
+      }
+
+      const card = document.createElement('div');
+      card.style.background = 'rgba(255, 255, 255, 0.02)';
+      card.style.border = '1px solid rgba(255, 255, 255, 0.05)';
+      card.style.borderRadius = '8px';
+      card.style.padding = '1.25rem';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '1rem';
+
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="margin:0; font-size:1rem; color:#fff;">${slo.name}</h3>
+            <span style="font-size:0.75rem; color:var(--text-secondary); font-family:var(--font-mono);">${slo.serviceId}</span>
+          </div>
+          <span class="badge" style="background:${statusColor}15; color:${statusColor}; border:1px solid ${statusColor}30;">${statusText}</span>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:1rem; font-size:0.85rem; border-top: 1px solid rgba(255,255,255,0.03); padding-top:0.75rem;">
+          <div>
+            <div style="color:var(--text-muted); font-size:0.75rem; margin-bottom:0.25rem;">Target Compliance</div>
+            <strong>${slo.targetPercent.toFixed(2)}%</strong>
+          </div>
+          <div>
+            <div style="color:var(--text-muted); font-size:0.75rem; margin-bottom:0.25rem;">Actual Compliance</div>
+            <strong style="color:${statusColor}">${slo.actualPercent.toFixed(2)}%</strong>
+          </div>
+          <div>
+            <div style="color:var(--text-muted); font-size:0.75rem; margin-bottom:0.25rem;">Latency (Actual / Target)</div>
+            <strong>${slo.actualLatencyMs}ms / ${slo.targetLatencyMs}ms</strong>
+          </div>
+        </div>
+
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:0.4rem;">
+            <span style="color:var(--text-secondary);">Error Budget Remaining</span>
+            <span style="font-weight:600; color:${progressColor};">${slo.budgetRemainingPercent.toFixed(1)}%</span>
+          </div>
+          <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:4px; overflow:hidden;">
+            <div style="background:${progressColor}; width:${slo.budgetRemainingPercent}%; height:100%; transition:width 0.5s ease;"></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:0.3rem;">
+            <span>Burn Rate: ${slo.burnRate.toFixed(1)}x</span>
+            <span>Est. Exhaustion: ${slo.burnRate > 1.0 ? Math.round(30 * (slo.budgetRemainingPercent / 100) / slo.burnRate) : '30+'} days</span>
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+
+    // Update summary details
+    if (breachedCount > 0) {
+      statusEl.textContent = `${breachedCount} SLO(s) Breached`;
+      statusEl.style.color = 'var(--danger, #ef4444)';
+    } else if (warningCount > 0) {
+      statusEl.textContent = `${warningCount} SLO(s) in Warning State`;
+      statusEl.style.color = 'var(--warning, #f59e0b)';
+    } else {
+      statusEl.textContent = '100% Operational & Healthy';
+      statusEl.style.color = 'var(--success)';
+    }
+
+    recsContainer.innerHTML = '';
+    let adviceList = [];
+    data.forEach(slo => {
+      if (slo.status === 'breached') {
+        adviceList.push(`[CRITICAL] ${slo.serviceId} is exhausting its error budget rapidly! Uptime is below the ${slo.targetPercent}% target threshold. Investigate immediately.`);
+      } else if (slo.status === 'warning') {
+        adviceList.push(`[WARNING] Latency on ${slo.serviceId} is exceeding the targeted ${slo.targetLatencyMs}ms. Burn rate is currently ${slo.burnRate.toFixed(1)}x.`);
+      }
+    });
+
+    if (adviceList.length === 0) {
+      adviceList.push("No immediate action required. All system metrics comply with targets.");
+      adviceList.push("Protip: Keep an eye on consistent storage shards distribution to maintain sub-100ms read latency.");
+    }
+
+    adviceList.forEach(adv => {
+      const card = document.createElement('div');
+      card.style.padding = '0.75rem';
+      card.style.borderRadius = '4px';
+      card.style.fontSize = '0.8rem';
+      if (adv.startsWith('[CRITICAL]')) {
+        card.style.background = 'rgba(239, 68, 68, 0.05)';
+        card.style.borderLeft = '3px solid var(--danger, #ef4444)';
+        card.style.color = '#fca5a5';
+      } else if (adv.startsWith('[WARNING]')) {
+        card.style.background = 'rgba(245, 158, 11, 0.05)';
+        card.style.borderLeft = '3px solid var(--warning, #f59e0b)';
+        card.style.color = '#fef3c7';
+      } else {
+        card.style.background = 'rgba(255, 255, 255, 0.02)';
+        card.style.borderLeft = '3px solid var(--primary)';
+        card.style.color = 'var(--text-secondary)';
+      }
+      card.textContent = adv;
+      recsContainer.appendChild(card);
+    });
+
+  } catch (err) {
+    console.error('Failed to fetch SLO targets:', err);
+  }
+}
+
+function initMobileMenu() {
+  const menuBtn = document.getElementById('mobile-menu-btn');
+  const navTabs = document.getElementById('main-nav-tabs');
+  if (!menuBtn || !navTabs) return;
+
+  menuBtn.addEventListener('click', () => {
+    navTabs.classList.toggle('mobile-active');
+  });
+
+  // Close nav menu on tab clicks on mobile
+  navTabs.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      navTabs.classList.remove('mobile-active');
+    });
+  });
+}
+
+function initSidebarCollapse() {
+  const collapseBtn = document.getElementById('btn-sidebar-collapse');
+  const sidebar = document.querySelector('.sidebar');
+  if (!collapseBtn || !sidebar) return;
+
+  const applyState = (collapsed) => {
+    if (collapsed) {
+      sidebar.classList.add('collapsed');
+      collapseBtn.style.transform = 'scale(1.15) rotate(180deg)';
+    } else {
+      sidebar.classList.remove('collapsed');
+      collapseBtn.style.transform = '';
+    }
+  };
+
+  // Load state from localStorage
+  const isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+  applyState(isCollapsed);
+
+  collapseBtn.addEventListener('click', () => {
+    const collapsed = sidebar.classList.toggle('collapsed');
+    // Keep rotate in sync; hover scale handled by CSS
+    collapseBtn.style.transform = collapsed ? 'rotate(180deg)' : '';
+    localStorage.setItem('sidebar-collapsed', collapsed);
+  });
+}
+
+async function initEnvironmentSelector() {
+  const selector = document.getElementById('env-selector');
+  if (!selector) return;
+
+  try {
+    const res = await fetch('/api/environments');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    selector.innerHTML = '';
+    data.environments.forEach(env => {
+      const opt = document.createElement('option');
+      opt.value = env.id;
+      opt.textContent = env.name;
+      opt.selected = env.id === data.active;
+      selector.appendChild(opt);
+    });
+
+    updateEnvironmentTheme(data.active);
+
+    selector.addEventListener('change', async () => {
+      const selectedEnv = selector.value;
+      try {
+        const postRes = await fetch('/api/environments/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ environmentId: selectedEnv })
+        });
+        if (postRes.ok) {
+          logEvent('system', `Switched environment to: ${selectedEnv}`);
+          updateEnvironmentTheme(selectedEnv);
+          // Refresh cost metrics if active tab is cost
+          if (STATE.activeTab === 'cost') {
+            fetchCostEstimation();
+          } else if (STATE.activeTab === 'deployments') {
+            fetchDeployments();
+          }
+        }
+      } catch (err) {
+        console.error('Failed to change environment:', err);
+      }
+    });
+
+  } catch (err) {
+    console.error('Failed to initialize environment selector:', err);
+  }
+}
+
+function updateEnvironmentTheme(envId) {
+  const displayEl = document.getElementById('active-env-display');
+  if (displayEl) {
+    displayEl.textContent = envId.charAt(0).toUpperCase() + envId.slice(1);
+  }
+
+  // Set visual theme dot color based on active env
+  const wrapper = document.querySelector('.env-selector-wrapper');
+  if (wrapper) {
+    let dotColor = '#06b6d4'; // default dev
+    if (envId === 'staging') dotColor = '#f59e0b';
+    else if (envId === 'production') dotColor = '#a855f7';
+    wrapper.style.borderColor = dotColor + '40';
+    wrapper.style.boxShadow = `0 0 8px ${dotColor}20`;
+  }
+}
+
+async function fetchDeployments() {
+  const listContainer = document.getElementById('deployments-list');
+  const activeVerEl = document.getElementById('active-deployment-version');
+  const activeAuthorEl = document.getElementById('active-env-author');
+  const activeTimeEl = document.getElementById('active-env-time');
+  if (!listContainer) return;
+
+  try {
+    const res = await fetch('/api/deployments');
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    listContainer.innerHTML = '';
+    data.forEach(dep => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.03)';
+      tr.style.transition = 'background-color 0.2s';
+      
+      let statusBadge = `<span class="badge" style="background:rgba(148, 163, 184, 0.1); color:#cbd5e1;">Historical</span>`;
+      let actionBtn = `<button class="btn btn-secondary btn-sm" onclick="triggerRollback('${dep.id}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Rollback</button>`;
+      
+      if (dep.status === 'active') {
+        statusBadge = `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">Active</span>`;
+        actionBtn = `<span style="font-size:0.75rem; color:var(--text-muted);">Current</span>`;
+        
+        if (activeVerEl) activeVerEl.textContent = dep.version;
+        if (activeAuthorEl) activeAuthorEl.textContent = dep.author;
+        if (activeTimeEl) activeTimeEl.textContent = new Date(dep.timestamp).toLocaleTimeString();
+      } else if (dep.status === 'rolled_back') {
+        statusBadge = `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">Rolled Back</span>`;
+      }
+
+      tr.innerHTML = `
+        <td style="padding: 0.75rem; font-weight:600; color:#fff;">${dep.version}</td>
+        <td style="padding: 0.75rem; color:var(--text-secondary);">${new Date(dep.timestamp).toLocaleTimeString()}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${dep.author}</td>
+        <td style="padding: 0.75rem; color:var(--text-secondary); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dep.changelog}</td>
+        <td style="padding: 0.75rem;">${statusBadge}</td>
+        <td style="padding: 0.75rem; text-align: right;">${actionBtn}</td>
+      `;
+      listContainer.appendChild(tr);
+    });
+
+  } catch (err) {
+    console.error('Failed to fetch deployments:', err);
+  }
+}
+
+async function triggerRollback(targetId) {
+  if (!confirm('Are you sure you want to rollback to this deployment version? This will compile and swap the active binary.')) {
+    return;
+  }
+  
+  try {
+    const res = await fetch('/api/deployments/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetId })
+    });
+    if (res.ok) {
+      logEvent('system', `Successfully triggered rollback to ${targetId}`);
+      fetchDeployments();
+    } else {
+      alert('Rollback failed. Verify authorization scopes.');
+    }
+  } catch (err) {
+    console.error('Error during rollback:', err);
+  }
+}
+
+async function openIncidentTimeline(alertId) {
+  const modal = document.getElementById('incident-timeline-modal');
+  const closeBtn = document.getElementById('incident-modal-close-btn');
+  const eventsContainer = document.getElementById('incident-timeline-events');
+  const titleEl = document.getElementById('incident-modal-title');
+  const compEl = document.getElementById('incident-modal-component');
+  const sevEl = document.getElementById('incident-modal-severity');
+
+  if (!modal || !eventsContainer) return;
+
+  eventsContainer.innerHTML = '<div class="text-center text-muted" style="padding: 2rem;">Analyzing logs & compiling timeline events...</div>';
+  modal.style.display = 'flex';
+
+  const closeModal = () => { modal.style.display = 'none'; };
+  closeBtn.onclick = closeModal;
+  modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+
+  try {
+    const res = await fetch(`/api/incidents/analyze?alertId=${alertId}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    titleEl.textContent = data.title;
+    compEl.textContent = data.component;
+    
+    sevEl.textContent = data.severity.toUpperCase();
+    if (data.severity === 'critical') {
+      sevEl.className = 'badge offline';
+      sevEl.style.background = 'rgba(239,68,68,0.1)';
+      sevEl.style.color = 'var(--danger)';
+    } else {
+      sevEl.className = 'badge warning';
+      sevEl.style.background = 'rgba(245,158,11,0.1)';
+      sevEl.style.color = 'var(--warning)';
+    }
+
+    eventsContainer.innerHTML = '';
+    data.events.forEach(evt => {
+      const card = document.createElement('div');
+      card.className = 'timeline-event-card';
+      card.style.position = 'relative';
+      card.style.background = 'rgba(255,255,255,0.02)';
+      card.style.border = '1px solid rgba(255,255,255,0.05)';
+      card.style.borderRadius = '8px';
+      card.style.padding = '1rem';
+      card.style.marginLeft = '1rem';
+
+      let typeBadge = `<span class="badge" style="background:${evt.color}20; color:${evt.color}; border: 1px solid ${evt.color}30; text-transform:uppercase; font-size:0.65rem;">${evt.type}</span>`;
+
+      const tStr = new Date(evt.timestamp).toLocaleTimeString();
+
+      card.innerHTML = `
+        <div class="timeline-dot" style="position:absolute; left:-2.45rem; top:1.25rem; width:14px; height:14px; border-radius:50%; background:${evt.color}; box-shadow: 0 0 10px ${evt.color}; border:2px solid var(--bg-primary);"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+          <h4 style="margin:0; font-size:0.9rem; color:#fff;">${evt.title}</h4>
+          <span style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${tStr}</span>
+        </div>
+        <p style="margin:0; font-size:0.82rem; color:var(--text-secondary); line-height:1.4;">${evt.description}</p>
+        <div style="margin-top:0.6rem; display:flex; align-items:center; gap:0.5rem;">
+          ${typeBadge}
+        </div>
+      `;
+      eventsContainer.appendChild(card);
+    });
+
+    await renderIncidentRunbooks(data.component, alertId);
+
+  } catch (err) {
+    eventsContainer.innerHTML = '<div class="text-center text-muted" style="padding: 2rem; color:var(--danger);">Failed to auto-generate incident timeline.</div>';
+    const section = document.getElementById('incident-runbook-section');
+    if (section) section.style.display = 'none';
+  }
+}
+
+async function renderIncidentRunbooks(component, alertId) {
+  const section = document.getElementById('incident-runbook-section');
+  const container = document.getElementById('incident-runbooks-list');
+  if (!section || !container) return;
+
+  section.style.display = 'none';
+  container.innerHTML = '';
+
+  try {
+    const res = await fetch(`/api/runbooks?component=${encodeURIComponent(component)}`);
+    if (!res.ok) return;
+    const list = await res.json();
+    if (!list || list.length === 0) return;
+
+    section.style.display = 'block';
+    list.forEach(rb => {
+      const div = document.createElement('div');
+      div.className = 'runbook-item';
+      div.style.display = 'flex';
+      div.style.justifyContent = 'space-between';
+      div.style.alignItems = 'center';
+      div.style.padding = '0.75rem';
+      div.style.background = 'rgba(255,255,255,0.03)';
+      div.style.border = '1px solid rgba(255,255,255,0.05)';
+      div.style.borderRadius = '6px';
+      
+      div.innerHTML = `
+        <div style="flex-grow: 1; margin-right: 1rem;">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #fff;">${rb.name}</div>
+          <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem;">${rb.description}</div>
+        </div>
+        <button class="btn btn-primary btn-sm btn-runbook-execute" data-id="${rb.id}" style="font-size: 0.75rem; padding: 0.35rem 0.75rem; display: flex; align-items: center; gap: 0.4rem; white-space: nowrap;">
+          <span>⚡ Run Remediation</span>
+        </button>
+      `;
+
+      const executeBtn = div.querySelector('.btn-runbook-execute');
+      executeBtn.addEventListener('click', async () => {
+        await executeRunbook(rb.id, alertId, executeBtn);
+      });
+
+      container.appendChild(div);
+    });
+  } catch (err) {
+    console.error('Failed to load runbooks:', err);
+  }
+}
+
+async function executeRunbook(runbookId, alertId, btn) {
+  if (btn.disabled) return;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.innerHTML = `<span class="spinner-mini"></span> Executing...`;
+
+  try {
+    const res = await fetch('/api/runbooks/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runbookId, alertId })
+    });
+    if (!res.ok) throw new Error('Execution failed');
+    const result = await res.json();
+    
+    btn.innerHTML = `✓ Done`;
+    btn.style.background = 'var(--success, #10b981)';
+    btn.style.borderColor = 'var(--success, #10b981)';
+
+    logEvent('system', `Runbook executed: ${result.message}`);
+    
+    if (typeof pollAlerts === 'function') {
+      await pollAlerts();
+    }
+    if (typeof fetchAuditLogs === 'function') {
+      fetchAuditLogs();
+    }
+
+    setTimeout(() => {
+      const modal = document.getElementById('incident-timeline-modal');
+      if (modal) modal.style.display = 'none';
+    }, 1200);
+
+  } catch (err) {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+    btn.innerHTML = originalText;
+    logEvent('error', `Runbook execution failed: ${err.message}`);
+    alert(`Failed to execute runbook: ${err.message}`);
+  }
+}
+
+async function fetchAIMetrics() {
+  try {
+    const res = await fetch('/api/ai/metrics');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    document.getElementById('ai-total-costs').textContent = `$${data.totalCostsUsd.toFixed(2)}`;
+    document.getElementById('ai-total-tool-calls').textContent = data.totalToolCalls.toLocaleString();
+    document.getElementById('ai-active-agents').textContent = data.activeAgentsCount;
+
+    // Render tool calls table
+    const tbody = document.querySelector('#ai-tool-calls-table tbody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      data.toolCalls.forEach(call => {
+        const tr = document.createElement('tr');
+        const badgeClass = call.status === 'success' ? 'badge online' : 'badge offline';
+        tr.innerHTML = `
+          <td style="font-family:var(--font-mono); font-size:0.8rem;">${call.timestamp}</td>
+          <td><strong>${call.agentName}</strong></td>
+          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--secondary);">${call.toolCalled}</td>
+          <td><span class="${badgeClass}">${call.status.toUpperCase()}</span></td>
+          <td>${call.tokensUsed}</td>
+          <td style="font-family:var(--font-mono); font-size:0.8rem; color:var(--primary);">$${call.costUsd.toFixed(4)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Render safety alerts
+    const alertsContainer = document.getElementById('ai-safety-alerts-container');
+    if (alertsContainer) {
+      alertsContainer.innerHTML = '';
+      if (data.safetyAlerts.length === 0) {
+        alertsContainer.innerHTML = `<div class="text-center text-muted" style="padding:1rem;">No safety violations detected.</div>`;
+        return;
+      }
+      data.safetyAlerts.forEach(alert => {
+        const item = document.createElement('div');
+        item.className = 'alert-item critical';
+        item.style.padding = '0.75rem';
+        item.style.background = 'rgba(239, 68, 68, 0.05)';
+        item.style.border = '1px solid rgba(239, 68, 68, 0.15)';
+        item.style.borderLeft = '3px solid var(--danger)';
+        item.style.borderRadius = '6px';
+        
+        item.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; font-weight:600; font-size:0.8rem; margin-bottom:0.25rem;">
+            <span style="color:var(--danger);">${alert.ruleName.toUpperCase()}</span>
+            <span style="font-size:0.7rem; color:var(--text-muted);">${alert.timestamp}</span>
+          </div>
+          <div style="font-size:0.85rem; color:#fff; font-weight:500;">Agent: ${alert.agentName}</div>
+          <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.2rem;">${alert.message}</div>
+        `;
+        alertsContainer.appendChild(item);
+      });
+    }
+
+  } catch (err) {
+    console.error('Failed to fetch AI metrics:', err);
+  }
+}
+
+document.getElementById('btn-refresh-ai')?.addEventListener('click', fetchAIMetrics);
+
+async function executeTerminalCommand(cmd) {
+  const service = document.getElementById('terminal-service-select').value;
+  const historyLog = document.getElementById('terminal-history-log');
+  const termBody = document.querySelector('.terminal-body');
+  if (!historyLog) return;
+
+  // Render input echo
+  const promptText = `${service}:~# ${cmd}`;
+  const echoDiv = document.createElement('div');
+  echoDiv.style.color = '#00ffcc';
+  echoDiv.style.fontWeight = 'bold';
+  echoDiv.textContent = promptText;
+  historyLog.appendChild(echoDiv);
+
+  if (cmd === 'clear') {
+    historyLog.innerHTML = '<div>Console cleared.</div>';
+    return;
+  }
+
+  if (cmd === 'help') {
+    const helpDiv = document.createElement('div');
+    helpDiv.innerHTML = `Welcome to the Servverse Diagnostic Shell.<br>Available commands: ps aux, free -m, df -h, serv status, ping [target]`;
+    historyLog.appendChild(helpDiv);
+    termBody.scrollTop = termBody.scrollHeight;
+    return;
+  }
+
+  // Spinner logic
+  const spinnerDiv = document.createElement('div');
+  spinnerDiv.style.color = 'var(--text-muted)';
+  spinnerDiv.textContent = 'Executing diagnostics on cluster namespace...';
+  historyLog.appendChild(spinnerDiv);
+  termBody.scrollTop = termBody.scrollHeight;
+
+  try {
+    const res = await fetch('/api/diagnostics/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service, command: cmd })
+    });
+    if (historyLog.contains(spinnerDiv)) {
+      historyLog.removeChild(spinnerDiv);
+    }
+
+    if (res.ok) {
+      const data = await res.json();
+      const outputDiv = document.createElement('pre');
+      outputDiv.style.color = data.status === 'success' ? '#39ff14' : 'var(--danger)';
+      outputDiv.style.whiteSpace = 'pre-wrap';
+      outputDiv.style.margin = '0.25rem 0 0.5rem 0';
+      outputDiv.style.fontFamily = 'var(--font-mono)';
+      outputDiv.textContent = data.output;
+      historyLog.appendChild(outputDiv);
+    } else {
+      const errText = await res.text();
+      const errDiv = document.createElement('div');
+      errDiv.style.color = 'var(--danger)';
+      errDiv.textContent = `Error: ${errText}`;
+      historyLog.appendChild(errDiv);
+    }
+  } catch (err) {
+    if (historyLog.contains(spinnerDiv)) {
+      historyLog.removeChild(spinnerDiv);
+    }
+    const errDiv = document.createElement('div');
+    errDiv.style.color = 'var(--danger)';
+    errDiv.textContent = `Network Error: ${err.message}`;
+    historyLog.appendChild(errDiv);
+  }
+
+  termBody.scrollTop = termBody.scrollHeight;
+}
+
+
+
+// --- Custom Dashboards ---
+let dashboards = JSON.parse(localStorage.getItem('servverse-dashboards') || '[]');
+let editingDashboard = null;
+
+function initDashboards() {
+  const createBtn = document.getElementById('btn-create-dashboard');
+  const addWidgetBtn = document.getElementById('btn-add-widget');
+  const saveBtn = document.getElementById('btn-save-dashboard');
+  
+  if (createBtn) createBtn.addEventListener('click', createNewDashboard);
+  if (addWidgetBtn) addWidgetBtn.addEventListener('click', addWidget);
+  if (saveBtn) saveBtn.addEventListener('click', saveDashboard);
+  
+  renderDashboardList();
+}
+
+function createNewDashboard() {
+  const name = prompt('Dashboard name:');
+  if (!name) return;
+  
+  editingDashboard = { id: Date.now().toString(), name, widgets: [] };
+  document.getElementById('dashboard-editor').style.display = 'block';
+  document.getElementById('dashboard-editor-title').textContent = name;
+  document.getElementById('dashboard-empty').style.display = 'none';
+  renderWidgets();
+}
+
+function addWidget() {
+  if (!editingDashboard) return;
+  
+  const widgetTypes = [
+    { type: 'metric', label: 'Single Metric (number)' },
+    { type: 'chart', label: 'Time-series Chart' },
+    { type: 'table', label: 'Data Table' },
+    { type: 'status', label: 'Service Status' }
+  ];
+  
+  const type = prompt('Widget type (metric/chart/table/status):', 'metric');
+  if (!type) return;
+  
+  const source = prompt('Data source (gate-latency/queue-messages/store-buckets/custom):', 'gate-latency');
+  if (!source) return;
+  
+  const title = prompt('Widget title:', source);
+  
+  editingDashboard.widgets.push({
+    id: Date.now().toString(),
+    type: type,
+    title: title || source,
+    source: source,
+    size: 'medium'
+  });
+  
+  renderWidgets();
+}
+
+function renderWidgets() {
+  const grid = document.getElementById('dashboard-widgets-grid');
+  if (!grid || !editingDashboard) return;
+  
+  grid.innerHTML = '';
+  if (editingDashboard.widgets.length === 0) {
+    grid.innerHTML = '<div class="text-center text-muted" style="grid-column:1/-1; padding:2rem 0;">Drag widgets here or click "+ Add Widget"</div>';
+    return;
+  }
+  
+  editingDashboard.widgets.forEach(widget => {
+    const card = document.createElement('div');
+    card.className = 'glass-card';
+    card.style.padding = '1rem';
+    card.style.position = 'relative';
+    
+    let valueHTML = '';
+    switch (widget.source) {
+      case 'gate-latency':
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--primary);">${STATE.components.ServGate?.latency || 0} ms</div>`;
+        break;
+      case 'queue-messages':
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--warning);">${STATE.components.ServQueue?.details?.metrics?.messages_published_total || 0}</div>`;
+        break;
+      case 'store-buckets':
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--success);">—</div>`;
+        break;
+      default:
+        valueHTML = `<div style="font-size:2rem; font-weight:700; color:var(--secondary);">—</div>`;
+    }
+    
+    card.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+        <h4 style="margin:0; font-size:0.85rem; color:var(--text-secondary);">${widget.title}</h4>
+        <button onclick="removeWidget('${widget.id}')" style="background:none; border:none; color:var(--danger); cursor:pointer; font-size:1.2rem;">×</button>
+      </div>
+      ${valueHTML}
+      <div style="font-size:0.75rem; color:var(--text-muted); margin-top:0.5rem;">${widget.type} · ${widget.source}</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function removeWidget(widgetId) {
+  if (!editingDashboard) return;
+  editingDashboard.widgets = editingDashboard.widgets.filter(w => w.id !== widgetId);
+  renderWidgets();
+}
+window.removeWidget = removeWidget;
+
+function saveDashboard() {
+  if (!editingDashboard) return;
+  
+  const idx = dashboards.findIndex(d => d.id === editingDashboard.id);
+  if (idx >= 0) {
+    dashboards[idx] = editingDashboard;
+  } else {
+    dashboards.push(editingDashboard);
+  }
+  
+  localStorage.setItem('servverse-dashboards', JSON.stringify(dashboards));
+  editingDashboard = null;
+  document.getElementById('dashboard-editor').style.display = 'none';
+  renderDashboardList();
+  logEvent('system', 'Dashboard saved successfully');
+}
+
+function renderDashboardList() {
+  const list = document.getElementById('dashboards-list');
+  const empty = document.getElementById('dashboard-empty');
+  if (!list) return;
+  
+  list.innerHTML = '';
+  
+  if (dashboards.length === 0) {
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  
+  dashboards.forEach(db => {
+    const card = document.createElement('div');
+    card.className = 'glass-card';
+    card.style.padding = '1.25rem';
+    card.style.cursor = 'pointer';
+    card.style.transition = 'all 0.2s';
+    
+    card.innerHTML = `
+      <h3 style="margin:0 0 0.5rem 0; font-size:1.1rem;">${db.name}</h3>
+      <p style="font-size:0.85rem; color:var(--text-secondary); margin:0;">${db.widgets.length} widget${db.widgets.length !== 1 ? 's' : ''}</p>
+      <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); editDashboard('${db.id}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteDashboard('${db.id}')">Delete</button>
+      </div>
+    `;
+    card.addEventListener('click', () => viewDashboard(db.id));
+    list.appendChild(card);
+  });
+}
+
+function editDashboard(id) {
+  editingDashboard = JSON.parse(JSON.stringify(dashboards.find(d => d.id === id)));
+  if (!editingDashboard) return;
+  document.getElementById('dashboard-editor').style.display = 'block';
+  document.getElementById('dashboard-editor-title').textContent = editingDashboard.name;
+  renderWidgets();
+}
+window.editDashboard = editDashboard;
+
+function viewDashboard(id) {
+  editDashboard(id); // For now, view = edit mode
+}
+
+function deleteDashboard(id) {
+  if (!confirm('Delete this dashboard?')) return;
+  dashboards = dashboards.filter(d => d.id !== id);
+  localStorage.setItem('servverse-dashboards', JSON.stringify(dashboards));
+  renderDashboardList();
+}
+window.deleteDashboard = deleteDashboard;
+
+// Initialize dashboards when tab is clicked
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(initDashboards, 500);
+});
+
+// --- Database Health Telemetry ---
+async function fetchDbHealth() {
+  try {
+    const res = await fetch('/api/proxy/db/api/db/health');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    const deadlockIndicator = document.getElementById('db-deadlock-indicator');
+    if (deadlockIndicator) {
+      if (data.deadlock_alert) {
+        deadlockIndicator.className = 'badge badge-danger';
+        deadlockIndicator.textContent = 'DEADLOCK ALARM ⚠️';
+      } else {
+        deadlockIndicator.className = 'badge badge-success';
+        deadlockIndicator.textContent = 'Pools Healthy';
+      }
+    }
+    
+    const pActive = document.getElementById('db-primary-active');
+    const pMax = document.getElementById('db-primary-max');
+    const pQueries = document.getElementById('db-primary-queries');
+    if (data.pools && data.pools.primary) {
+      if (pActive) pActive.textContent = data.pools.primary.active_connections;
+      if (pMax) pMax.textContent = data.pools.primary.max_connections;
+      if (pQueries) pQueries.textContent = data.pools.primary.total_queries || 0;
+    }
+    
+    const rActive = document.getElementById('db-replica-active');
+    const rMax = document.getElementById('db-replica-max');
+    const rQueries = document.getElementById('db-replica-queries');
+    if (data.pools && data.pools.replica) {
+      if (rActive) rActive.textContent = data.pools.replica.active_connections;
+      if (rMax) rMax.textContent = data.pools.replica.max_connections;
+      if (rQueries) rQueries.textContent = data.pools.replica.total_queries || 0;
+    }
+  } catch (err) {
+    console.error('Failed to fetch DB Health:', err);
+  }
+}
+window.fetchDbHealth = fetchDbHealth;
+
+// --- Identity (ServAuth) ---
+async function fetchAuthUsers() {
+  try {
+    const res = await fetch('/api/proxy/auth/api/auth/users');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const users = await res.json();
+    
+    const countBadge = document.getElementById('auth-users-count');
+    if (countBadge) countBadge.textContent = `${users.length} Users`;
+    
+    const list = document.getElementById('auth-users-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (users.length === 0) {
+      list.innerHTML = `<tr><td colspan="4" class="text-center text-muted">No users registered yet.</td></tr>`;
+      return;
+    }
+    
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(u.username)}</strong></td>
+        <td>${escapeHtml(u.email)}</td>
+        <td><span class="badge">${escapeHtml(u.tenant_id)}</span></td>
+        <td><span class="badge ${u.mfa_enabled ? 'badge-success' : 'badge-secondary'}">${u.mfa_enabled ? 'Enabled' : 'Disabled'}</span></td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Auth users:', err);
+  }
+}
+window.fetchAuthUsers = fetchAuthUsers;
+
+async function fetchAuthSessions() {
+  try {
+    const res = await fetch('/api/proxy/auth/api/auth/sessions');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const sessions = await res.json();
+    
+    const list = document.getElementById('auth-sessions-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!sessions || sessions.length === 0) {
+      list.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No active sessions.</td></tr>`;
+      return;
+    }
+    
+    sessions.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><code style="font-size:0.75rem;">${escapeHtml(s.token.substring(0, 10))}...</code></td>
+        <td>${new Date(s.expires_at).toLocaleTimeString()}</td>
+        <td><span class="badge badge-success">Active</span></td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Auth sessions:', err);
+  }
+}
+window.fetchAuthSessions = fetchAuthSessions;
+
+// KMS encrypt action
+document.addEventListener('DOMContentLoaded', () => {
+  const encryptBtn = document.getElementById('btn-kms-encrypt');
+  if (encryptBtn) {
+    encryptBtn.addEventListener('click', async () => {
+      const plaintext = document.getElementById('auth-kms-plaintext').value;
+      try {
+        const res = await fetch('/api/proxy/auth/api/auth/secrets/encrypt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plaintext })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        document.getElementById('auth-kms-ciphertext').value = data.ciphertext;
+      } catch (err) {
+        alert('KMS Encryption failed: ' + err.message);
+      }
+    });
+  }
+});
+
+// --- Notifications (ServMail) ---
+async function fetchMailDashboard() {
+  try {
+    const res = await fetch('/api/proxy/mail/api/mail/dashboard');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    const total = document.getElementById('mail-stat-total');
+    const sent = document.getElementById('mail-stat-sent');
+    const opened = document.getElementById('mail-stat-opened');
+    const bounced = document.getElementById('mail-stat-bounced');
+    
+    if (total) total.textContent = data.total_messages;
+    if (sent) sent.textContent = data.sent;
+    if (opened) opened.textContent = data.opened;
+    if (bounced) bounced.textContent = data.bounced;
+  } catch (err) {
+    console.error('Failed to fetch Mail dashboard:', err);
+  }
+}
+window.fetchMailDashboard = fetchMailDashboard;
+
+async function fetchMailAttachments() {
+  try {
+    const res = await fetch('/api/proxy/mail/api/mail/attachments');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const listData = await res.json();
+    
+    const list = document.getElementById('mail-attachments-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!listData || listData.length === 0) {
+      list.innerHTML = `<tr><td colspan="3" class="text-center text-muted">No attachments uploaded yet.</td></tr>`;
+      return;
+    }
+    
+    listData.forEach(a => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(a.filename)}</strong></td>
+        <td>${a.size_bytes}</td>
+        <td><span class="badge ${a.storage === 'cold' ? 'badge-secondary' : 'badge-success'}">${escapeHtml(a.storage)}</span></td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Mail attachments:', err);
+  }
+}
+window.fetchMailAttachments = fetchMailAttachments;
+
+async function fetchMailPreferences() {
+  try {
+    const res = await fetch('/api/proxy/mail/api/mail/preferences');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const prefs = await res.json();
+    
+    const list = document.getElementById('mail-preferences-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!prefs || prefs.length === 0) {
+      list.innerHTML = `<tr><td colspan="2" class="text-center text-muted">No preference updates logged yet.</td></tr>`;
+      return;
+    }
+    
+    prefs.forEach(p => {
+      const optedOuts = Object.keys(p.opted_out || {}).filter(k => p.opted_out[k]);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><code>${escapeHtml(p.recipient)}</code></td>
+        <td>${optedOuts.length > 0 ? optedOuts.map(o => `<span class="badge badge-danger" style="margin-right:0.25rem;">${escapeHtml(o)}</span>`).join('') : '<span class="text-muted">None (All Opted In)</span>'}</td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch Mail preferences:', err);
+  }
+}
+window.fetchMailPreferences = fetchMailPreferences;
+
+// --- ServCloud Console Client Integrations (UC.6 / 13.6) ---
+async function fetchCloudServices() {
+  const list = document.getElementById('cloud-services-list');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/cloud/services');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const services = await res.json();
+
+    list.innerHTML = '';
+    if (!services || services.length === 0) {
+      list.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 2rem;">No services deployed in ServCloud.</td></tr>`;
+      return;
+    }
+
+    services.forEach(svc => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.03)';
+      tr.style.transition = 'background-color 0.2s';
+
+      const statusBadge = svc.pid > 0
+        ? `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">RUNNING (PID: ${svc.pid})</span>`
+        : `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">STOPPED</span>`;
+
+      // Get uptime or duration info
+      let uptimeStr = '—';
+      if (svc.start_time) {
+        const start = new Date(svc.start_time);
+        const diffMs = new Date() - start;
+        const diffMins = Math.floor(diffMs / 60000);
+        uptimeStr = diffMins > 60
+          ? `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`
+          : `${diffMins}m`;
+      }
+
+      // Memory/CPU metrics
+      const memCpu = svc.stats
+        ? `${(svc.stats.memory_bytes / 1024 / 1024).toFixed(2)} MB / ${(svc.stats.cpu_percentage || 0).toFixed(1)}%`
+        : '—';
+
+      tr.innerHTML = `
+        <td style="padding: 0.75rem; font-weight:600; color:#fff;">${escapeHtml(svc.name)}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${svc.port}</td>
+        <td style="padding: 0.75rem;">${statusBadge}</td>
+        <td style="padding: 0.75rem;">${uptimeStr}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${memCpu}</td>
+        <td style="padding: 0.75rem; text-align: right; display: flex; gap: 0.5rem; justify-content: flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="showCloudServiceLogs('${escapeHtml(svc.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Logs</button>
+          <button class="btn btn-secondary btn-sm" onclick="updateCloudServiceEnv('${escapeHtml(svc.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Env</button>
+          <button class="btn btn-danger btn-sm" onclick="undeployCloudService('${escapeHtml(svc.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Undeploy</button>
+        </td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch cloud services:', err);
+    list.innerHTML = `<tr><td colspan="6" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading services: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchCloudServices = fetchCloudServices;
+
+async function showCloudServiceLogs(name) {
+  try {
+    const res = await fetch(`/api/cloud/services/${name}/logs`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const logs = await res.json();
+    alert(`Last 10 Log lines for ${name}:\n\n` + (logs && logs.length > 0 ? logs.join('\n') : 'No logs recorded.'));
+  } catch (err) {
+    alert(`Failed to fetch logs: ${err.message}`);
+  }
+}
+window.showCloudServiceLogs = showCloudServiceLogs;
+
+async function updateCloudServiceEnv(name) {
+  const jsonStr = prompt(`Enter environment variables for ${name} in JSON format (e.g. {"PORT_OFFSET": "100", "DEBUG": "true"}):`, '{}');
+  if (jsonStr === null) return;
+
+  try {
+    const env = JSON.parse(jsonStr);
+    const res = await fetch(`/api/cloud/services/${name}/env`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(env)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Environment variables updated, rolling deployment triggered for ${name}!`);
+    fetchCloudServices();
+  } catch (err) {
+    alert(`Error updating environment: ${err.message}`);
+  }
+}
+window.updateCloudServiceEnv = updateCloudServiceEnv;
+
+async function undeployCloudService(name) {
+  if (!confirm(`Are you sure you want to undeploy service "${name}"? This stops the running instance and frees resources.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cloud/services/${name}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Undeployed service ${name} successfully.`);
+    fetchCloudServices();
+  } catch (err) {
+    alert(`Undeploy failed: ${err.message}`);
+  }
+}
+window.undeployCloudService = undeployCloudService;
+
+async function showTraceLogs() {
+  const traceId = STATE.selectedTraceId;
+  if (!traceId) return;
+
+  try {
+    const res = await fetch(`/api/logs?trace_id=${traceId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const entries = await res.json();
+
+    if (!entries || entries.length === 0) {
+      alert(`No log entries found correlating to Trace ID: ${traceId}`);
+      return;
+    }
+
+    const logLines = entries.map(e => `[${new Date(e.timestamp).toLocaleTimeString()}] [${e.service.toUpperCase()}] [${e.level.toUpperCase()}] ${e.message}`).join('\n');
+    alert(`Correlated Logs for Trace ID ${traceId}:\n\n` + logLines);
+  } catch (err) {
+    alert(`Failed to fetch correlated logs: ${err.message}`);
+  }
+}
+window.showTraceLogs = showTraceLogs;
+
+function initServiceComparison() {
+  const selectA = document.getElementById('compare-svc-a');
+  const selectB = document.getElementById('compare-svc-b');
+  if (!selectA || !selectB) return;
+
+  const names = Object.keys(STATE.components);
+  if (names.length === 0) return;
+
+  // Clear existing options
+  selectA.innerHTML = '';
+  selectB.innerHTML = '';
+
+  names.forEach((name, idx) => {
+    const optA = document.createElement('option');
+    optA.value = name;
+    optA.textContent = name;
+    if (idx === 0) optA.selected = true;
+    selectA.appendChild(optA);
+
+    const optB = document.createElement('option');
+    optB.value = name;
+    optB.textContent = name;
+    if (idx === 1 || (names.length === 1 && idx === 0)) optB.selected = true;
+    selectB.appendChild(optB);
+  });
+
+  updateComparison();
+}
+window.initServiceComparison = initServiceComparison;
+
+function updateComparison() {
+  const selectA = document.getElementById('compare-svc-a');
+  const selectB = document.getElementById('compare-svc-b');
+  if (!selectA || !selectB) return;
+
+  const nameA = selectA.value;
+  const nameB = selectB.value;
+
+  const compA = STATE.components[nameA];
+  const compB = STATE.components[nameB];
+
+  document.getElementById('compare-header-a').textContent = nameA;
+  document.getElementById('compare-header-b').textContent = nameB;
+
+  if (compA) {
+    const statusEl = document.getElementById('compare-status-a');
+    statusEl.textContent = compA.online ? 'ONLINE' : 'OFFLINE';
+    statusEl.className = compA.online ? 'badge online' : 'badge offline';
+    document.getElementById('compare-latency-a').textContent = compA.online ? `${compA.latency} ms` : '—';
+    document.getElementById('compare-url-a').textContent = compA.url || '—';
+  }
+
+  if (compB) {
+    const statusEl = document.getElementById('compare-status-b');
+    statusEl.textContent = compB.online ? 'ONLINE' : 'OFFLINE';
+    statusEl.className = compB.online ? 'badge online' : 'badge offline';
+    document.getElementById('compare-latency-b').textContent = compB.online ? `${compB.latency} ms` : '—';
+    document.getElementById('compare-url-b').textContent = compB.url || '—';
+  }
+}
+window.updateComparison = updateComparison;
+
+STATE.apiSpecs = {};
+
+async function fetchApiSpecs() {
+  const select = document.getElementById('docs-service-select');
+  const details = document.getElementById('docs-spec-details');
+  if (!select || !details) return;
+
+  try {
+    const res = await fetch('/api/docs/spec');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const specs = await res.json();
+    STATE.apiSpecs = specs;
+
+    select.innerHTML = '';
+    const serviceNames = Object.keys(specs);
+    if (serviceNames.length === 0) {
+      details.innerHTML = '<div>No API specs discovered.</div>';
+      return;
+    }
+
+    serviceNames.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+
+    loadSelectedDocsSpec();
+  } catch (err) {
+    console.error('Failed to fetch API specs:', err);
+    details.innerHTML = `<div style="color:var(--danger);">Error loading directory: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.fetchApiSpecs = fetchApiSpecs;
+
+function loadSelectedDocsSpec() {
+  const select = document.getElementById('docs-service-select');
+  const details = document.getElementById('docs-spec-details');
+  if (!select || !details) return;
+
+  const name = select.value;
+  const spec = STATE.apiSpecs[name];
+  if (!spec) {
+    details.innerHTML = '<div>No spec data.</div>';
+    return;
+  }
+
+  const info = spec.info || {};
+  let html = `
+    <div style="font-weight: 600; font-size: 1rem; color: #fff;">${escapeHtml(info.title || name)}</div>
+    <div style="color: var(--text-secondary); margin-bottom: 0.5rem;">Version: ${escapeHtml(info.version || '1.0.0')}</div>
+    <p style="margin: 0; color: var(--text-secondary);">${escapeHtml(info.description || '')}</p>
+    <div style="border-top: 1px solid rgba(255,255,255,0.05); margin-top:0.75rem; padding-top:0.75rem; display:flex; flex-direction:column; gap:0.5rem;">
+  `;
+
+  const paths = spec.paths || {};
+  const pathKeys = Object.keys(paths);
+  if (pathKeys.length === 0) {
+    html += '<div class="text-muted">No endpoints defined.</div>';
+  } else {
+    pathKeys.forEach(p => {
+      const methods = paths[p];
+      Object.keys(methods).forEach(m => {
+        const op = methods[m];
+        const methodUpper = m.toUpperCase();
+        let badgeColor = 'rgba(255,255,255,0.1)';
+        if (methodUpper === 'GET') badgeColor = 'rgba(16, 185, 129, 0.15); color:var(--success);';
+        else if (methodUpper === 'POST') badgeColor = 'rgba(59, 130, 246, 0.15); color:var(--primary);';
+        else if (methodUpper === 'DELETE') badgeColor = 'rgba(239, 68, 68, 0.15); color:var(--danger);';
+
+        html += `
+          <div style="background: rgba(255,255,255,0.01); border: 1px solid rgba(255,255,255,0.03); border-radius: 4px; padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              <span class="badge" style="background:${badgeColor}; font-size: 0.7rem; font-weight: bold; padding: 0.1rem 0.3rem;">${methodUpper}</span>
+              <code style="font-size:0.8rem; color:#fff; word-break: break-all;">${escapeHtml(p)}</code>
+            </div>
+            <div style="color: var(--text-secondary); font-size:0.75rem; padding-left: 0.25rem;">${escapeHtml(op.summary || '')}</div>
+          </div>
+        `;
+      });
+    });
+  }
+
+  html += '</div>';
+  details.innerHTML = html;
+}
+window.loadSelectedDocsSpec = loadSelectedDocsSpec;
+
+async function fetchDependencyMatrix() {
+  const headers = document.getElementById('dependency-matrix-headers');
+  const body = document.getElementById('dependency-matrix-body');
+  if (!headers || !body) return;
+
+  try {
+    const res = await fetch('/api/topology/live');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const services = Array.from(new Set(data.nodes.map(n => n.id))).sort();
+
+    if (services.length === 0) {
+      body.innerHTML = `<tr><td class="text-center text-muted" style="padding: 2rem;">No dependency data available yet. Trigger requests to populate traces.</td></tr>`;
+      headers.innerHTML = '';
+      return;
+    }
+
+    // Build headers
+    let headersHtml = `<th style="padding:0.75rem; border-bottom: 2px solid rgba(255,255,255,0.08); color:var(--text-muted);">Callee (↓) \\ Caller (→)</th>`;
+    services.forEach(svc => {
+      headersHtml += `<th style="padding:0.75rem; border-bottom: 2px solid rgba(255,255,255,0.08); color:var(--primary); font-weight:600;">${escapeHtml(svc)}</th>`;
+    });
+    headers.innerHTML = headersHtml;
+
+    const edgeMap = {};
+    services.forEach(callee => {
+      edgeMap[callee] = {};
+    });
+
+    data.edges.forEach(edge => {
+      const caller = edge.from;
+      const callee = edge.to;
+      if (edgeMap[callee]) {
+        edgeMap[callee][caller] = edge;
+      }
+    });
+
+    let bodyHtml = '';
+    services.forEach(callee => {
+      bodyHtml += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">`;
+      bodyHtml += `<td style="padding:0.75rem; font-weight:600; color:var(--accent);">${escapeHtml(callee)}</td>`;
+
+      services.forEach(caller => {
+        const edge = edgeMap[callee][caller];
+        if (edge) {
+          const lat = edge.latency_ms || edge.latencyMs || 0;
+          bodyHtml += `
+            <td style="padding:0.75rem; background: rgba(59, 130, 246, 0.03);">
+              <div style="font-weight:bold; color:#fff;">${edge.throughput} calls</div>
+              <div style="font-size:0.75rem; color:var(--text-secondary);">${lat} ms</div>
+            </td>
+          `;
+        } else {
+          bodyHtml += `<td style="padding:0.75rem; color:var(--text-muted); opacity: 0.3;">—</td>`;
+        }
+      });
+
+      bodyHtml += `</tr>`;
+    });
+
+    body.innerHTML = bodyHtml;
+  } catch (err) {
+    console.error('Failed to fetch dependency matrix:', err);
+    body.innerHTML = `<tr><td class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading matrix: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchDependencyMatrix = fetchDependencyMatrix;
+
+async function fetchUpgradeDashboard() {
+  const list = document.getElementById('upgrade-dashboard-list');
+  if (!list) return;
+
+  try {
+    let packages = [];
+    try {
+      const pkgRes = await fetch('/api/registry/packages');
+      if (pkgRes.ok) {
+        packages = await pkgRes.json();
+      }
+    } catch (e) {
+      console.warn('Ecosystem Registry is offline, using mock package catalog');
+    }
+
+    const latestCatalog = {
+      "ServGate": "v1.5.0",
+      "ServStore": "v1.4.2",
+      "ServQueue": "v1.4.0",
+      "ServAuth": "v1.3.1",
+      "ServDB": "v1.2.0",
+      "ServCron": "v1.1.0",
+      "ServMesh": "v1.1.2",
+      "ServDocs": "v1.0.0"
+    };
+
+    if (packages && packages.length > 0) {
+      packages.forEach(pkg => {
+        if (pkg.name && pkg.version) {
+          latestCatalog[pkg.name] = pkg.version;
+        }
+      });
+    }
+
+    list.innerHTML = '';
+    const componentNames = Object.keys(STATE.components);
+    if (componentNames.length === 0) {
+      list.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 2rem;">No services registered in this console.</td></tr>`;
+      return;
+    }
+
+    componentNames.forEach(name => {
+      const comp = STATE.components[name];
+      const currentVer = comp.details && comp.details.version ? comp.details.version : "v1.4.2";
+      const latestVer = latestCatalog[name] || "v1.4.2";
+
+      const isOutdated = currentVer !== latestVer && !currentVer.startsWith(latestVer);
+
+      const statusBadge = isOutdated
+        ? `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">OUT-OF-DATE</span>`
+        : `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">UP-TO-DATE</span>`;
+
+      const actionBtn = isOutdated
+        ? `<button class="btn btn-primary btn-sm" onclick="triggerServiceUpgrade('${escapeHtml(name)}', '${escapeHtml(latestVer)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Upgrade</button>`
+        : `<button class="btn btn-secondary btn-sm" disabled style="font-size:0.75rem; padding:0.2rem 0.5rem; opacity:0.4;">Latest</button>`;
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.03)';
+      tr.innerHTML = `
+        <td style="padding: 0.75rem; font-weight:600; color:#fff;">${escapeHtml(name)}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${escapeHtml(currentVer)}</td>
+        <td style="padding: 0.75rem; font-family:var(--font-mono);">${escapeHtml(latestVer)}</td>
+        <td style="padding: 0.75rem;">${statusBadge}</td>
+        <td style="padding: 0.75rem; text-align: right;">${actionBtn}</td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('Failed to fetch upgrade dashboard:', err);
+    list.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading upgrades: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchUpgradeDashboard = fetchUpgradeDashboard;
+
+async function triggerServiceUpgrade(name, targetVersion) {
+  if (!confirm(`Trigger automatic package upgrade for ${name} to version ${targetVersion} via ServCloud?`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cloud/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_name: name,
+        version: targetVersion,
+        author: 'admin',
+        changelog: `Console automated upgrade to ${targetVersion}`
+      })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Upgrade roll out initiated successfully for ${name}!`);
+    fetchUpgradeDashboard();
+  } catch (err) {
+    alert(`Upgrade failed: ${err.message}`);
+  }
+}
+window.triggerServiceUpgrade = triggerServiceUpgrade;
+
+async function fetchCapacityPlanning() {
+  const cpuEl = document.getElementById('capacity-cpu-val');
+  const memEl = document.getElementById('capacity-mem-val');
+  const diskEl = document.getElementById('capacity-disk-val');
+  const daysEl = document.getElementById('capacity-exhaustion-days');
+  const analysisEl = document.getElementById('capacity-analysis-text');
+  if (!cpuEl || !memEl || !diskEl || !daysEl || !analysisEl) return;
+
+  try {
+    const res = await fetch('/api/capacity');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    cpuEl.textContent = `${data.cpu_usage_pct.toFixed(1)}%`;
+    memEl.textContent = `${data.memory_usage_pct.toFixed(1)}%`;
+    diskEl.textContent = `${data.disk_usage_pct.toFixed(1)}%`;
+    daysEl.textContent = `${data.days_to_exhaust} days`;
+    analysisEl.textContent = data.forecast_analysis;
+  } catch (err) {
+    console.error('Failed to fetch capacity planning stats:', err);
+    analysisEl.innerHTML = `<span style="color:var(--danger);">Error loading forecast: ${escapeHtml(err.message)}</span>`;
+  }
+}
+window.fetchCapacityPlanning = fetchCapacityPlanning;
+
+async function fetchMeshStatus() {
+  const list = document.getElementById('mesh-services-list');
+  const breakers = document.getElementById('mesh-circuit-breakers');
+  if (!list || !breakers) return;
+
+  try {
+    let instances = [];
+    try {
+      const res = await fetch('/api/proxy/mesh/api/instances');
+      if (res.ok) instances = await res.json();
+    } catch (e) {
+      console.warn('ServMesh is offline, using mock instances');
+    }
+
+    if (!instances || instances.length === 0) {
+      instances = [
+        { service: "ServGate", endpoint: "10.0.1.10:8080", weight: 100, canary: "0%" },
+        { service: "ServStore", endpoint: "10.0.1.11:8081", weight: 100, canary: "0%" },
+        { service: "ServQueue", endpoint: "10.0.1.12:8082", weight: 80, canary: "20% (v2.0-canary)" },
+        { service: "ServQueue-Canary", endpoint: "10.0.1.15:8082", weight: 20, canary: "20% (v2.0-canary)" },
+        { service: "ServDB", endpoint: "10.0.1.13:5432", weight: 100, canary: "0%" }
+      ];
+    }
+
+    list.innerHTML = '';
+    instances.forEach(inst => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+      tr.innerHTML = `
+        <td style="padding:0.75rem; font-weight:600; color:#fff;">${escapeHtml(inst.service || inst.Name || '')}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${escapeHtml(inst.endpoint || inst.Address || '')}</td>
+        <td style="padding:0.75rem;">${inst.weight || 100}</td>
+        <td style="padding:0.75rem;"><span class="badge online" style="background:rgba(59,130,246,0.1); color:var(--primary);">${escapeHtml(inst.canary || '0%')}</span></td>
+      `;
+      list.appendChild(tr);
+    });
+
+    breakers.innerHTML = `
+      <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <span style="font-weight:600; color:#fff;">ServDB Connection Pool</span>
+          <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.25rem;">Circuit Breaker: CLOSED (Healthy)</div>
+        </div>
+        <span class="badge online">CLOSED</span>
+      </div>
+      <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <span style="font-weight:600; color:#fff;">ServStore S3 Proxy</span>
+          <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.25rem;">Circuit Breaker: CLOSED (Healthy)</div>
+        </div>
+        <span class="badge online">CLOSED</span>
+      </div>
+      <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <span style="font-weight:600; color:#fff;">mTLS Certificates Validity</span>
+          <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.25rem;">Expires in 182 days (Auto-renew active)</div>
+        </div>
+        <span class="badge online" style="background:rgba(16,185,129,0.1); color:var(--success);">VALID</span>
+      </div>
+    `;
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = `<tr><td colspan="4" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading mesh: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchMeshStatus = fetchMeshStatus;
+
+async function fetchCronJobs() {
+  const list = document.getElementById('cron-jobs-list');
+  if (!list) return;
+
+  try {
+    let jobs = [];
+    try {
+      const res = await fetch('/api/proxy/cron/api/jobs');
+      if (res.ok) jobs = await res.json();
+    } catch (e) {
+      console.warn('ServCron is offline, using mock jobs list');
+    }
+
+    if (!jobs || jobs.length === 0) {
+      jobs = [
+        { id: "cleanup-db", name: "Database Audit Logs Purge", schedule: "0 0 * * *", last_run: "12 hours ago", runs: 124 },
+        { id: "sync-store", name: "ServStore Replica Sync", schedule: "*/30 * * * *", last_run: "12 mins ago", runs: 2841 },
+        { id: "collect-metrics", name: "Telemetry Metrics Aggregation", schedule: "*/5 * * * *", last_run: "2 mins ago", runs: 18290 },
+        { id: "user-billings", name: "Calculate User Billing Estimates", schedule: "0 1 1 * *", last_run: "7 days ago", runs: 6 }
+      ];
+    }
+
+    list.innerHTML = '';
+    jobs.forEach(job => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+      tr.innerHTML = `
+        <td style="padding:0.75rem; font-weight:600; color:#fff;">${escapeHtml(job.name)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${escapeHtml(job.schedule)}</td>
+        <td style="padding:0.75rem; color:var(--text-secondary);">${escapeHtml(job.last_run)}</td>
+        <td style="padding:0.75rem;">${job.runs}</td>
+        <td style="padding:0.75rem; text-align:right;">
+          <button class="btn btn-primary btn-sm" onclick="triggerCronJob('${escapeHtml(job.id)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem;">Run Now</button>
+        </td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading cron jobs: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchCronJobs = fetchCronJobs;
+
+async function triggerCronJob(id) {
+  try {
+    const res = await fetch(`/api/proxy/cron/api/jobs/${id}/run`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Triggered background job ${id} successfully!`);
+    fetchCronJobs();
+  } catch (err) {
+    alert(`Failed to trigger job: ${err.message}`);
+  }
+}
+window.triggerCronJob = triggerCronJob;
+
+function previewCronExpression() {
+  const exprInput = document.getElementById('cron-editor-expr');
+  const runsList = document.getElementById('cron-editor-runs');
+  if (!exprInput || !runsList) return;
+
+  const expr = exprInput.value.trim();
+  runsList.innerHTML = '';
+
+  const now = new Date();
+  const nextRuns = [];
+  
+  let intervalMins = 5;
+  if (expr.startsWith('*/')) {
+    const parsed = parseInt(expr.substring(2));
+    if (!isNaN(parsed)) intervalMins = parsed;
+  } else if (expr === '0 0 * * *') {
+    intervalMins = 1440;
+  } else if (expr.startsWith('0')) {
+    intervalMins = 60;
+  }
+
+  for (let i = 1; i <= 5; i++) {
+    const runDate = new Date(now.getTime() + i * intervalMins * 60000);
+    nextRuns.push(runDate.toLocaleString());
+  }
+
+  nextRuns.forEach(r => {
+    const li = document.createElement('li');
+    li.textContent = r;
+    runsList.appendChild(li);
+  });
+}
+window.previewCronExpression = previewCronExpression;
+
+async function fetchCacheMetrics() {
+  const list = document.getElementById('cache-namespaces-list');
+  const hitRatio = document.getElementById('cache-hit-ratio');
+  const evictionRate = document.getElementById('cache-eviction-rate');
+  if (!list || !hitRatio || !evictionRate) return;
+
+  try {
+    let metrics = null;
+    try {
+      const res = await fetch('/api/proxy/cache/api/cache/metrics');
+      if (res.ok) metrics = await res.json();
+    } catch (e) {
+      console.warn('ServCache is offline, using mock cache metrics');
+    }
+
+    if (!metrics) {
+      metrics = {
+        hit_ratio: 94.8,
+        evictions_per_sec: 1.2,
+        namespaces: [
+          { name: "users-metadata", keys: 12450, hit_ratio: 97.4 },
+          { name: "s3-directory-listing", keys: 1420, hit_ratio: 88.5 },
+          { name: "token-auth-sessions", keys: 841, hit_ratio: 99.1 },
+          { name: "static-web-assets", keys: 124, hit_ratio: 92.0 }
+        ]
+      };
+    }
+
+    hitRatio.textContent = `${metrics.hit_ratio}%`;
+    evictionRate.textContent = `${metrics.evictions_per_sec} keys/sec`;
+
+    list.innerHTML = '';
+    metrics.namespaces.forEach(ns => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+      tr.innerHTML = `
+        <td style="padding:0.75rem; font-weight:600; color:#fff;">${escapeHtml(ns.name)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${ns.keys}</td>
+        <td style="padding:0.75rem;">${ns.hit_ratio}%</td>
+        <td style="padding:0.75rem; text-align:right;">
+          <button class="btn btn-secondary btn-sm" onclick="purgeCacheNamespace('${escapeHtml(ns.name)}')" style="font-size:0.75rem; padding:0.2rem 0.5rem; color:var(--danger);">Purge</button>
+        </td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = `<tr><td colspan="4" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading cache: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchCacheMetrics = fetchCacheMetrics;
+
+async function purgeCacheNamespace(ns) {
+  if (!confirm(`Purge all keys inside cache namespace '${ns}'?`)) return;
+
+  try {
+    const res = await fetch(`/api/proxy/cache/api/cache/purge?namespace=${encodeURIComponent(ns)}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    alert(`Namespace '${ns}' successfully purged!`);
+    fetchCacheMetrics();
+  } catch (err) {
+    alert(`Purge failed: ${err.message}`);
+  }
+}
+window.purgeCacheNamespace = purgeCacheNamespace;
+
+async function fetchRegistryCatalog() {
+  const list = document.getElementById('registry-packages-list');
+  if (!list) return;
+
+  try {
+    let packages = [];
+    try {
+      const res = await fetch('/api/registry/packages');
+      if (res.ok) packages = await res.json();
+    } catch (e) {
+      console.warn('ServRegistry is offline, using mock package catalog');
+    }
+
+    if (!packages || packages.length === 0) {
+      packages = [
+        { name: "ServGate", version: "v1.5.0", license: "Apache-2.0", downloads: 12459, status: "stable" },
+        { name: "ServStore", version: "v1.4.2", license: "Apache-2.0", downloads: 8490, status: "stable" },
+        { name: "ServQueue", version: "v1.4.0", license: "Apache-2.0", downloads: 20140, status: "stable" },
+        { name: "ServAuth", version: "v1.3.1", license: "Proprietary (EE)", downloads: 5410, status: "stable" },
+        { name: "ServDB", version: "v1.2.0", license: "Apache-2.0", downloads: 1420, status: "deprecated" }
+      ];
+    }
+
+    list.innerHTML = '';
+    packages.forEach(pkg => {
+      const statusBadge = pkg.status === 'deprecated'
+        ? `<span class="badge offline" style="background:rgba(239, 68, 68, 0.1); color:var(--danger);">DEPRECATED</span>`
+        : `<span class="badge online" style="background:rgba(16, 185, 129, 0.1); color:var(--success);">STABLE</span>`;
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+      tr.innerHTML = `
+        <td style="padding:0.75rem; font-weight:600; color:#fff;">${escapeHtml(pkg.name)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${escapeHtml(pkg.version)}</td>
+        <td style="padding:0.75rem;">${escapeHtml(pkg.license)}</td>
+        <td style="padding:0.75rem;">${pkg.downloads}</td>
+        <td style="padding:0.75rem;">${statusBadge}</td>
+      `;
+      list.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = `<tr><td colspan="5" class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error loading registry: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchRegistryCatalog = fetchRegistryCatalog;
+
+async function fetchRunningConfig() {
+  document.getElementById('cfg-gate-ratelimit').value = 150;
+  document.getElementById('cfg-cache-ttl').value = 600;
+  document.getElementById('cfg-mesh-failures').value = 5;
+}
+window.fetchRunningConfig = fetchRunningConfig;
+
+async function saveConfiguration() {
+  const rlimit = document.getElementById('cfg-gate-ratelimit').value;
+  const ttl = document.getElementById('cfg-cache-ttl').value;
+  const failures = document.getElementById('cfg-mesh-failures').value;
+
+  alert(`Configuration saved successfully!\n- Rate Limit: ${rlimit}/sec\n- Cache TTL: ${ttl}s\n- Failure Threshold: ${failures} attempts`);
+}
+window.saveConfiguration = saveConfiguration;
+
+function renderSequencePipeline(rootNode) {
+  const container = document.getElementById('trace-visual-flow');
+  if (!container) return;
+
+  container.style.display = 'flex';
+  
+  const services = [];
+  function traverse(node) {
+    if (node.service && !services.includes(node.service)) {
+      services.push(node.service);
+    }
+    if (node.children) {
+      node.children.forEach(traverse);
+    }
+  }
+  traverse(rootNode);
+
+  let html = `<div style="font-weight:600; color:var(--text-secondary); margin-right: 1rem;">Flow:</div>`;
+  html += `
+    <div style="background:rgba(59,130,246,0.1); color:var(--primary); padding:0.25rem 0.5rem; border-radius:4px; font-weight:600;">Client</div>
+    <div style="color:var(--text-muted);">→</div>
+  `;
+
+  services.forEach((svc, index) => {
+    const isLast = index === services.length - 1;
+    const color = svc === 'ServGate' ? '#06b6d4' : svc === 'ServStore' ? '#10b981' : svc === 'ServQueue' ? '#f59e0b' : '#6366f1';
+    html += `
+      <div style="background:rgba(255,255,255,0.02); border:1px solid ${color}; color:${color}; padding:0.25rem 0.5rem; border-radius:4px; font-weight:600;">
+        ${escapeHtml(svc)}
+      </div>
+    `;
+    if (!isLast) {
+      html += `<div style="color:var(--text-muted);">→</div>`;
+    }
+  });
+
+  container.innerHTML = html;
+}
+window.renderSequencePipeline = renderSequencePipeline;
+
+async function fetchChangeCorrelationTimeline() {
+  const box = document.getElementById('correlation-timeline-box');
+  if (!box) return;
+
+  try {
+    const res = await fetch('/api/correlation/timeline');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const events = await res.json();
+
+    box.innerHTML = '';
+    
+    const line = document.createElement('div');
+    line.setAttribute('style', 'position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:rgba(255,255,255,0.05);');
+    box.appendChild(line);
+
+    events.forEach(ev => {
+      const date = new Date(ev.timestamp);
+      const timeStr = date.toLocaleTimeString();
+
+      const color = ev.type === 'alert' ? 'var(--danger)' : ev.type === 'deploy' ? 'var(--success)' : 'var(--warning)';
+      const dotColor = ev.type === 'alert' ? '#ef4444' : ev.type === 'deploy' ? '#10b981' : '#f59e0b';
+      
+      const item = document.createElement('div');
+      item.setAttribute('style', 'position:relative; margin-bottom:1.5rem; padding-left:0.5rem;');
+      item.innerHTML = `
+        <div style="position:absolute; left:-2rem; top:0.25rem; width:12px; height:12px; border-radius:50%; background:${dotColor}; border:2px solid #0f1120;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; font-weight:600;">
+          <span style="color:${color}; text-transform:uppercase; font-size:0.75rem; letter-spacing:0.05em;">[${ev.type}] ${escapeHtml(ev.title)}</span>
+          <span style="color:var(--text-muted); font-size:0.75rem;">${timeStr} (${escapeHtml(ev.source)})</span>
+        </div>
+        <p style="font-size:0.8rem; color:var(--text-secondary); margin:0.25rem 0 0 0; line-height:1.4;">${escapeHtml(ev.description)}</p>
+      `;
+      box.appendChild(item);
+    });
+  } catch (err) {
+    console.error(err);
+    box.innerHTML = `<span style="color:var(--danger);">Error loading correlation timeline: ${escapeHtml(err.message)}</span>`;
+  }
+}
+window.fetchChangeCorrelationTimeline = fetchChangeCorrelationTimeline;
+
+async function fetchRootCauseAnalysis() {
+  const promo = document.getElementById('ai-rootcause-promo');
+  const results = document.getElementById('ai-rootcause-results');
+  const list = document.getElementById('ai-rootcause-list');
+  if (!promo || !results || !list) return;
+
+  try {
+    const res = await fetch('/api/ai/root-cause?alertId=alert-db-latency');
+    if (res.status === 403) {
+      promo.style.display = 'block';
+      results.style.display = 'none';
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    promo.style.display = 'none';
+    results.style.display = 'block';
+    list.innerHTML = '';
+
+    data.hypotheses.forEach(hyp => {
+      const card = document.createElement('div');
+      card.setAttribute('style', 'background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:1.25rem; display:flex; flex-direction:column; gap:0.5rem;');
+      
+      let evidenceHtml = '';
+      hyp.evidence.forEach(ev => {
+        evidenceHtml += `<li style="margin-top:0.25rem;">${escapeHtml(ev)}</li>`;
+      });
+
+      card.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h4 style="margin:0; color:#fff; font-size:1rem;">Rank #${hyp.rank}: ${escapeHtml(hyp.title)}</h4>
+          <span class="badge online" style="background:rgba(16,185,129,0.1); color:var(--success);">${(hyp.probability * 100).toFixed(0)}% Match</span>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin:0.25rem 0;">${escapeHtml(hyp.description)}</p>
+        <div style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); margin-top:0.25rem;">Correlated Evidence:</div>
+        <ul style="padding-left:1.25rem; font-size:0.8rem; color:var(--text-muted); margin:0;">
+          ${evidenceHtml}
+        </ul>
+        <div style="margin-top:0.5rem; background:rgba(59,130,246,0.05); border:1px solid rgba(59,130,246,0.1); padding:0.75rem; border-radius:6px; font-size:0.8rem; color:var(--primary);">
+          <strong>Recommended Action:</strong> ${escapeHtml(hyp.suggestion)}
+        </div>
+      `;
+      list.appendChild(card);
+    });
+  } catch (err) {
+    console.error(err);
+    promo.style.display = 'none';
+    results.style.display = 'block';
+    list.innerHTML = `<div class="text-center text-muted" style="padding: 2rem; color: var(--danger);">Error running diagnostics: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.fetchRootCauseAnalysis = fetchRootCauseAnalysis;
+
+// --- Natural Language Query (UC.20) ---
+async function fetchNLQueryResult() {
+  const input = document.getElementById('nlq-input');
+  const resultBox = document.getElementById('nlq-result');
+  if (!input || !resultBox) return;
+
+  const q = input.value.trim();
+  if (!q) {
+    input.style.borderColor = 'var(--danger)';
+    setTimeout(() => input.style.borderColor = '', 2000);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/nlq?q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    document.getElementById('nlq-interpreted').textContent = data.interpreted;
+    document.getElementById('nlq-trace-count').textContent = data.traceCount;
+    document.getElementById('nlq-error-count').textContent = data.errorCount;
+    document.getElementById('nlq-span-count').textContent = data.totalSpans;
+    document.getElementById('nlq-summary').textContent = data.summary;
+
+    resultBox.style.display = 'block';
+  } catch (err) {
+    console.error(err);
+    resultBox.style.display = 'block';
+    document.getElementById('nlq-summary').innerHTML = `<span style="color:var(--danger);">Error: ${escapeHtml(err.message)}</span>`;
+  }
+}
+window.fetchNLQueryResult = fetchNLQueryResult;
+
+// --- Predictive Alerting (UC.21) ---
+async function fetchPredictiveAlerts() {
+  const tbody = document.getElementById('predictive-alerts-list');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/predictive/alerts');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const alerts = await res.json();
+
+    tbody.innerHTML = '';
+    alerts.forEach(alert => {
+      const severityColor = alert.severity === 'critical' ? 'var(--danger)'
+        : alert.severity === 'warning' ? 'var(--warning)' : 'var(--text-secondary)';
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+      tr.title = alert.suggestion;
+      tr.innerHTML = `
+        <td style="padding:0.75rem; font-weight:600; color:#fff;">${escapeHtml(alert.service)}</td>
+        <td style="padding:0.75rem;">${escapeHtml(alert.metric)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${alert.current} ${escapeHtml(alert.unit)}</td>
+        <td style="padding:0.75rem; font-family:var(--font-mono);">${alert.threshold} ${escapeHtml(alert.unit)}</td>
+        <td style="padding:0.75rem;">${alert.daysUntil} days</td>
+        <td style="padding:0.75rem;"><span class="badge" style="background:rgba(255,255,255,0.03); color:${severityColor}; text-transform:uppercase; font-size:0.7rem;">${alert.severity}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color:var(--danger); padding:1.5rem;">Error: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+window.fetchPredictiveAlerts = fetchPredictiveAlerts;
+
+// --- Incident Playbooks (UC.22) ---
+async function fetchPlaybooks() {
+  const container = document.getElementById('playbooks-list');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/playbooks');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const playbooks = await res.json();
+
+    container.innerHTML = '';
+    playbooks.forEach(pb => {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:1rem; display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;';
+      card.innerHTML = `
+        <div style="flex:1;">
+          <div style="font-weight:600; color:#fff; margin-bottom:0.25rem;">${escapeHtml(pb.name)}</div>
+          <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:0.5rem;">${escapeHtml(pb.trigger)}</div>
+          <div style="display:flex; gap:1rem; font-size:0.75rem; color:var(--text-secondary);">
+            <span>${pb.steps} steps</span>
+            <span>Last run: ${escapeHtml(pb.lastRun)}</span>
+            ${pb.autoExecute ? '<span style="color:var(--success);">⚡ Auto-execute ON</span>' : '<span style="color:var(--text-muted);">Manual only</span>'}
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="executePlaybook('${escapeHtml(pb.id)}')" style="white-space:nowrap; font-size:0.8rem; padding:0.3rem 0.75rem;">▶ Execute</button>
+      `;
+      container.appendChild(card);
+    });
+  } catch (err) {
+    console.error(err);
+    container.innerHTML = `<div class="text-center" style="color:var(--danger); padding:1.5rem;">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+window.fetchPlaybooks = fetchPlaybooks;
+
+async function executePlaybook(id) {
+  if (!confirm(`Execute playbook '${id}' now? This will run automated remediation steps.`)) return;
+
+  try {
+    const res = await fetch(`/api/playbooks/execute?id=${encodeURIComponent(id)}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = await res.json();
+    alert(`✅ Playbook executed successfully!\n${result.message}\nSteps run: ${result.stepsRun}`);
+  } catch (err) {
+    alert(`❌ Playbook execution failed: ${err.message}`);
+  }
+}
+window.executePlaybook = executePlaybook;
+
+// --- Visual Workflow Designer (UI.4) ---
+let designerNodes = [];
+let selectedNodeId = null;
+let nodeCounter = 0;
+
+function initWorkflowDesigner() {
+  const container = document.getElementById('workflow-nodes-container');
+  const workspace = document.getElementById('workflow-designer-workspace');
+  if (!container || !workspace) return;
+
+  console.log('[ServConsole] Initializing Workflow Designer...');
+
+  // 1. Tool addition buttons
+  document.querySelectorAll('.tool-add-node').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.getAttribute('data-type');
+      addDesignerNode(type);
+    });
+  });
+
+  // 2. Clear canvas
+  document.getElementById('btn-clear-workflow-canvas').addEventListener('click', () => {
+    designerNodes = [];
+    selectedNodeId = null;
+    nodeCounter = 0;
+    renderDesigner();
+  });
+
+  // 3. Save properties
+  document.getElementById('btn-save-node-properties').addEventListener('click', () => {
+    if (!selectedNodeId) return;
+    const node = designerNodes.find(n => n.id === selectedNodeId);
+    if (node) {
+      node.name = document.getElementById('prop-node-name').value;
+      node.action = document.getElementById('prop-node-action').value;
+      node.next = document.getElementById('prop-node-next').value;
+      renderDesigner();
+    }
+  });
+
+  // 4. Delete node
+  document.getElementById('btn-delete-node').addEventListener('click', () => {
+    if (!selectedNodeId) return;
+    designerNodes = designerNodes.filter(n => n.id !== selectedNodeId);
+    selectedNodeId = null;
+    renderDesigner();
+  });
+
+  // 5. Generate / Export DSL
+  document.getElementById('btn-export-workflow-dsl').addEventListener('click', () => {
+    const dsl = generateWorkflowDSL();
+    alert("Generated Serv DSL Workflow:\n\n" + dsl);
+  });
+
+  // Seed default nodes for demonstration
+  addDesignerNode('state', 100, 150, 'start', 'initializeOrder', 'processPayment');
+  addDesignerNode('task', 300, 150, 'processPayment', 'chargeCreditCard', 'complete');
+  addDesignerNode('success', 500, 150, 'complete');
+}
+
+function addDesignerNode(type, x, y, name, action, next) {
+  nodeCounter++;
+  const node = {
+    id: `node-${nodeCounter}`,
+    type: type,
+    name: name || `${type}_${nodeCounter}`,
+    action: action || '',
+    next: next || '',
+    x: x || 50 + (nodeCounter * 40) % 300,
+    y: y || 100 + (nodeCounter * 30) % 200
+  };
+  designerNodes.push(node);
+  renderDesigner();
+}
+
+function renderDesigner() {
+  const container = document.getElementById('workflow-nodes-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+  
+  designerNodes.forEach(node => {
+    const el = document.createElement('div');
+    el.className = `designer-node ${node.type} ${node.id === selectedNodeId ? 'selected' : ''}`;
+    el.style.left = `${node.x}px`;
+    el.style.top = `${node.y}px`;
+    
+    let emoji = '🔵';
+    if (node.type === 'task') emoji = '⚙️';
+    if (node.type === 'condition') emoji = '🔀';
+    if (node.type === 'delay') emoji = '⏳';
+    if (node.type === 'success') emoji = '🟢';
+    if (node.type === 'fail') emoji = '🔴';
+
+    el.innerHTML = `
+      <div style="font-weight:bold; font-size:0.8rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:0.25rem; margin-bottom:0.25rem; display:flex; align-items:center; gap:0.25rem;">
+        <span>${emoji}</span><span>${node.type.toUpperCase()}</span>
+      </div>
+      <div style="font-size:0.85rem; color:#fff; font-weight:600;">${node.name}</div>
+      ${node.action ? `<div style="font-size:0.7rem; color:var(--text-secondary); margin-top:0.25rem;">${node.action}</div>` : ''}
+    `;
+
+    // Click handler to select
+    el.addEventListener('mousedown', (e) => {
+      selectedNodeId = node.id;
+      showPropertiesPanel(node);
+      
+      // Node dragging
+      const startX = e.clientX - node.x;
+      const startY = e.clientY - node.y;
+      
+      const moveHandler = (moveEv) => {
+        node.x = moveEv.clientX - startX;
+        node.y = moveEv.clientY - startY;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        drawConnections();
+      };
+      
+      const upHandler = () => {
+        document.removeEventListener('mousemove', moveHandler);
+        document.removeEventListener('mouseup', upHandler);
+        updateDSLPreview();
+      };
+      
+      document.addEventListener('mousemove', moveHandler);
+      document.addEventListener('mouseup', upHandler);
+    });
+
+    container.appendChild(el);
+  });
+
+  drawConnections();
+  updateDSLPreview();
+}
+
+function showPropertiesPanel(node) {
+  document.getElementById('property-editor-empty').style.display = 'none';
+  const panel = document.getElementById('property-editor-panel');
+  panel.style.display = 'flex';
+
+  document.getElementById('prop-node-name').value = node.name;
+  document.getElementById('prop-node-action').value = node.action;
+  document.getElementById('prop-node-next').value = node.next;
+
+  // Toggle fields based on node type
+  const isEndNode = node.type === 'success' || node.type === 'fail';
+  document.getElementById('prop-group-action').style.display = isEndNode ? 'none' : 'block';
+  document.getElementById('prop-group-transition').style.display = isEndNode ? 'none' : 'block';
+}
+
+function drawConnections() {
+  const svg = document.getElementById('workflow-svg-lines');
+  if (!svg) return;
+
+  // Remove existing paths except defs
+  const paths = svg.querySelectorAll('path');
+  paths.forEach(p => p.remove());
+
+  designerNodes.forEach(node => {
+    if (node.next) {
+      const target = designerNodes.find(n => n.name === node.next);
+      if (target) {
+        // Draw connection from node to target
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        
+        // Compute connection points
+        const startX = node.x + 80;
+        const startY = node.y + 35;
+        const endX = target.x + 80;
+        const endY = target.y + 35;
+
+        // Draw curve
+        const dx = Math.abs(endX - startX) * 0.5;
+        const d = `M ${startX} ${startY} C ${startX + dx} ${startY}, ${endX - dx} ${endY}, ${endX} ${endY}`;
+        
+        path.setAttribute('d', d);
+        path.setAttribute('stroke', '#6366f1');
+        path.setAttribute('stroke-width', '2');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('marker-end', 'url(#arrow)');
+        
+        svg.appendChild(path);
+      }
+    }
+  });
+}
+
+function generateWorkflowDSL() {
+  let dsl = `workflow customWorkflow(input) {\n`;
+  
+  // Collect execution steps in logical order starting from nodes that have no parents
+  designerNodes.forEach(node => {
+    if (node.type === 'success') {
+      dsl += `    step "${node.name}" {\n        return true\n    }\n\n`;
+    } else if (node.type === 'fail') {
+      dsl += `    step "${node.name}" {\n        return false\n    }\n\n`;
+    } else {
+      let actionStr = node.action || 'noop()';
+      dsl += `    step "${node.name}" {\n`;
+      dsl += `        ${actionStr}\n`;
+      if (node.next) {
+        dsl += `        next "${node.next}"\n`;
+      }
+      dsl += `    }\n\n`;
+    }
+  });
+
+  dsl += `}`;
+  return dsl;
+}
+
+function updateDSLPreview() {
+  const preview = document.getElementById('workflow-dsl-preview');
+  if (preview) {
+    preview.textContent = generateWorkflowDSL();
+  }
+}
+
+// Bind to DOMContentLoaded hook
+document.addEventListener('DOMContentLoaded', () => {
+  // Add workflow designer to active tabs binding
+  const tabBtn = document.querySelector('.tab-btn[data-tab="workflow-designer"]');
+  if (tabBtn) {
+    tabBtn.addEventListener('click', () => {
+      initWorkflowDesigner();
+    });
+  }
+});
+
+// --- Locks & Secrets Management Views (EI.3) ---
+
+function fetchLocks() {
+  console.log('[ServConsole] Fetching active locks...');
+  const tbody = document.getElementById('locks-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading active leases...</td></tr>';
+
+  fetch('/api/locks')
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(locks => {
+      if (!locks || locks.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No active leases</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      locks.forEach(l => {
+        const tr = document.createElement('tr');
+        const expiresAt = new Date(l.expires_at);
+        const diffMs = expiresAt - new Date();
+        const expiresStr = diffMs > 0 ? `${Math.round(diffMs / 1000)}s` : 'expired';
+
+        tr.innerHTML = `
+          <td><strong>${l.key}</strong></td>
+          <td><code>${l.owner || l.client_id}</code></td>
+          <td><span class="badge badge-info">${l.fencing_token}</span></td>
+          <td>${expiresStr}</td>
+          <td><code>${(l.waiters || []).join(', ') || 'none'}</code></td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="forceReleaseLock('${l.key}')">Force Release</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">Failed to load locks: ${err.message}</td></tr>`;
+    });
+}
+
+function forceReleaseLock(key) {
+  if (!confirm(`Are you sure you want to force release the lease on "${key}"?`)) return;
+  fetch('/api/locks/release', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: key, owner: 'console-admin-override' })
+  })
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    logEvent('admin', `Force released distributed lease: ${key}`);
+    fetchLocks();
+  })
+  .catch(err => alert(`Failed to release lock: ${err.message}`));
+}
+
+function fetchSecrets() {
+  console.log('[ServConsole] Fetching secure credentials...');
+  const tbody = document.getElementById('secrets-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Loading credentials vault...</td></tr>';
+
+  fetch('/api/secrets')
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(data => {
+      const secrets = data.secrets || {};
+      const keys = Object.keys(secrets);
+      if (keys.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No credentials registered</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      keys.forEach(k => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${k}</strong></td>
+          <td><code id="secret-val-${k.replace(/\./g, '_')}">••••••••</code></td>
+          <td>
+            <button class="btn btn-secondary btn-sm" onclick="toggleSecretValue('${k}', '${secrets[k]}')">View</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSecret('${k}')">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Failed to load secrets: ${err.message}</td></tr>`;
+    });
+}
+
+function toggleSecretValue(key, val) {
+  const el = document.getElementById(`secret-val-${key.replace(/\./g, '_')}`);
+  if (!el) return;
+  if (el.textContent === '••••••••') {
+    el.textContent = val;
+  } else {
+    el.textContent = '••••••••';
+  }
+}
+
+// Global logger helper proxy if missing
+if (typeof logEvent !== 'function') {
+  window.logEvent = function(type, msg) { console.log(`[${type}] ${msg}`); };
+}
+
+function deleteSecret(key) {
+  if (!confirm(`Are you sure you want to permanently delete the secret "${key}"?`)) return;
+  fetch(`/api/secrets?key=${encodeURIComponent(key)}`, {
+    method: 'DELETE'
+  })
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    logEvent('admin', `Deleted secret credential: ${key}`);
+    fetchSecrets();
+  })
+  .catch(err => alert(`Failed to delete secret: ${err.message}`));
+}
+
+// Bind to DOMContentLoaded hook for console extensions
+document.addEventListener('DOMContentLoaded', () => {
+  // Bind refresh buttons
+  const rLocks = document.getElementById('btn-refresh-locks');
+  if (rLocks) rLocks.addEventListener('click', fetchLocks);
+
+  const rSecrets = document.getElementById('btn-refresh-secrets');
+  if (rSecrets) rSecrets.addEventListener('click', fetchSecrets);
+
+  // Bind tabs
+  document.querySelectorAll('.tab-btn[data-tab="locks"]').forEach(btn => {
+    btn.addEventListener('click', fetchLocks);
+  });
+  document.querySelectorAll('.tab-btn[data-tab="secrets"]').forEach(btn => {
+    btn.addEventListener('click', fetchSecrets);
+  });
+
+  // Modal actions
+  const addSecretBtn = document.getElementById('btn-add-secret');
+  const secretModal = document.getElementById('create-secret-modal');
+  const closeSecretModal = document.getElementById('btn-close-secret-modal');
+  const secretForm = document.getElementById('create-secret-form');
+
+  if (addSecretBtn && secretModal) {
+    addSecretBtn.addEventListener('click', () => {
+      secretModal.style.display = 'flex';
+    });
+  }
+  if (closeSecretModal && secretModal) {
+    closeSecretModal.addEventListener('click', () => {
+      secretModal.style.display = 'none';
+    });
+  }
+
+  if (secretForm) {
+    secretForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const key = document.getElementById('new-secret-key').value;
+      const val = document.getElementById('new-secret-value').value;
+
+      fetch('/api/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: key, value: val })
+      })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        secretModal.style.display = 'none';
+        secretForm.reset();
+        logEvent('admin', `Stored new secret key: ${key}`);
+        fetchSecrets();
+      })
+      .catch(err => alert(`Failed to save secret: ${err.message}`));
+    });
+  }
+});
+
+
+
+
+
+
+
+

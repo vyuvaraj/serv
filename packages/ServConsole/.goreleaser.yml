@@ -1,0 +1,101 @@
+project_name: servconsole
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servconsole
+    main: .
+    binary: servconsole
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servconsole
+    builds: [servconsole]
+    name_template: "servconsole_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servconsole:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servconsole:latest"
+    dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - web/
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServConsole"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServConsole"
+
+brews:
+  - name: servconsole
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServConsole"
+    description: "Management console and dashboard for the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servconsole"
+    test: |
+      system "#{bin}/servconsole", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServConsole"
+    description: "Management console and dashboard for the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servconsole-pkg
+    package_name: servconsole
+    builds: [servconsole]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServConsole
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Admin console and observability dashboard from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servconsole/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace

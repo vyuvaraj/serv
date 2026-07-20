@@ -1,0 +1,2374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ServConsole — Unified Servverse Management Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+  <style>
+    /* Premium Observability & Waterfall Tracing Styles */
+    .trace-item-row {
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    .trace-item-row:hover {
+      background-color: rgba(255, 255, 255, 0.05) !important;
+    }
+    .trace-item-row.active {
+      background-color: rgba(99, 102, 241, 0.15) !important;
+      border-left: 3px solid var(--primary);
+    }
+    .waterfall-span-row {
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 0.5rem 0.25rem;
+    }
+    .waterfall-span-row:hover {
+      background-color: rgba(255, 255, 255, 0.02);
+    }
+    .waterfall-span-main {
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+    .waterfall-span-info {
+      width: 35%;
+      min-width: 200px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .waterfall-span-name {
+      font-weight: 500;
+      color: #f1f5f9;
+    }
+    .waterfall-span-service {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+    .service-servgate { background-color: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+    .service-servqueue { background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .service-servstore { background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .service-servtrace { background-color: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+    .service-unknown { background-color: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    
+    .waterfall-timeline-track {
+      flex-grow: 1;
+      height: 24px;
+      position: relative;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 4px;
+    }
+    .waterfall-bar {
+      position: absolute;
+      height: 60%;
+      top: 20%;
+      border-radius: 3px;
+      min-width: 3px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+    .waterfall-bar.success { opacity: 0.85; }
+    .waterfall-bar.error {
+      background-color: rgba(239, 68, 68, 0.7) !important;
+      border: 1px solid #ef4444 !important;
+      box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+    }
+    .waterfall-bar.success.warning-bar {
+      background-color: rgba(245, 158, 11, 0.7) !important;
+      border: 1px solid #fbbf24 !important;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+    }
+    .badge.warning {
+      background-color: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .waterfall-bar-gate { background-color: #06b6d4; border: 1px solid #22d3ee; }
+    .waterfall-bar-queue { background-color: #f59e0b; border: 1px solid #fbbf24; }
+    .waterfall-bar-store { background-color: #10b981; border: 1px solid #34d399; }
+    .waterfall-bar-trace { background-color: #a855f7; border: 1px solid #c084fc; }
+    .waterfall-bar-unknown { background-color: #94a3b8; border: 1px solid #cbd5e1; }
+
+    .waterfall-duration-label {
+      position: absolute;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      font-family: var(--font-mono);
+      top: 50%;
+      transform: translateY(-50%);
+      padding-left: 0.5rem;
+      white-space: nowrap;
+    }
+    .waterfall-span-details {
+      margin-left: 35%;
+      margin-top: 0.25rem;
+      padding: 0.5rem;
+      background: rgba(15, 17, 32, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+      font-size: 0.78rem;
+    }
+    .attributes-grid {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 0.25rem 1rem;
+    }
+    .attr-key { color: #94a3b8; font-family: var(--font-mono); }
+    .attr-val { color: #e2e8f0; word-break: break-all; }
+    .alerts-badge {
+      display: flex;
+      animation: alert-pulse 1.5s infinite;
+    }
+    @keyframes alert-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .alert-item {
+      display: flex;
+      flex-direction: column;
+      padding: 0.5rem;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.03);
+      border-left: 3px solid var(--primary);
+      font-size: 0.8rem;
+    }
+    .alert-item.critical {
+      border-left-color: var(--danger, #ef4444);
+    }
+    .alert-item.warning {
+      border-left-color: var(--warning, #f59e0b);
+    }
+    .alert-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.25rem;
+    }
+    .alert-item-time {
+      font-size: 0.7rem;
+      color: #94a3b8;
+    }
+    
+    /* Interactive Waterfall UI Styles */
+    .waterfall-span-row.critical-path-highlight .waterfall-bar {
+      box-shadow: 0 0 12px rgba(245, 158, 11, 0.9);
+      border: 1.5px solid #fbbf24 !important;
+      animation: pulse-critical 1.5s infinite ease-in-out;
+    }
+    @keyframes pulse-critical {
+      0%, 100% { filter: brightness(1.2); }
+      50% { filter: brightness(1.7); }
+    }
+    .waterfall-toggle-btn {
+      font-size: 0.65rem;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: rgba(255,255,255,0.05);
+      color: #94a3b8;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .waterfall-toggle-btn:hover {
+      background: rgba(255,255,255,0.15);
+      color: #f1f5f9;
+    }
+    .waterfall-children-container {
+      margin-left: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    /* Timeline Grid lines */
+    .waterfall-timeline-track::before {
+      content: "";
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 25%; width: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+    .waterfall-timeline-track::after {
+      content: "";
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 50%; width: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+    .waterfall-timeline-track-75 {
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 75%; width: 1px;
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- Aurora Background Effect -->
+  <div class="aurora-bg"></div>
+
+  <div class="app-container">
+    <!-- Navigation Sidebar/Header -->
+    <header class="navbar">
+      <div class="logo-area">
+        <div class="logo-icon">▲</div>
+        <div class="logo-text">
+          <h1>ServConsole</h1>
+          <span>Unified Servverse Engine</span>
+        </div>
+      </div>
+      
+      <button class="mobile-nav-toggle" id="mobile-menu-btn" aria-label="Toggle navigation menu">
+        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+
+      <div style="display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0;">
+        <!-- Environment Selector -->
+        <div class="env-selector-wrapper" style="display: flex; align-items: center; gap: 0.5rem; background: var(--bg-tab-hover); border: 1px solid var(--border-glass); padding: 0.25rem 0.5rem; border-radius: 8px;">
+          <span style="font-size:0.75rem; color:var(--text-secondary); font-weight:500;">Env:</span>
+          <select id="env-selector" style="background:transparent; border:none; color:var(--text-primary); font-size:0.8rem; font-weight:600; outline:none; cursor:pointer;">
+            <!-- Loaded dynamically -->
+          </select>
+        </div>
+        <!-- Alerts Dropdown Trigger -->
+        <div class="alerts-dropdown-wrapper" style="position: relative;">
+          <button id="btn-alerts-toggle" class="btn btn-secondary" style="border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; border: 1px solid var(--border-glass); position: relative;" title="System Alerts">
+            🔔
+            <span id="alerts-count-badge" class="alerts-badge" style="display: none; position: absolute; top: -5px; right: -5px; background: var(--danger, #ef4444); color: white; border-radius: 50%; width: 18px; height: 18px; font-size: 0.7rem; font-weight: bold; align-items: center; justify-content: center;">0</span>
+          </button>
+          <!-- Alerts Dropdown Panel -->
+          <div id="alerts-dropdown-panel" class="alerts-panel" style="display: none; position: absolute; top: 45px; right: 0; width: 320px; max-height: 400px; background: var(--bg-glass-card); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid var(--border-glass); border-radius: 12px; box-shadow: var(--shadow-lg); z-index: 9999; padding: 1rem; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-glass); padding-bottom: 0.5rem;">
+              <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-primary);">Active Alerts</h4>
+              <button id="btn-alerts-clear" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 0.15rem 0.4rem;">Dismiss All</button>
+            </div>
+            <div id="alerts-list-container" style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <div class="text-center text-muted" style="padding: 1rem 0; font-size: 0.85rem;">No active alerts</div>
+            </div>
+          </div>
+        </div>
+        <button id="btn-theme-toggle" class="btn btn-secondary" style="border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; border: 1px solid var(--border-glass);" title="Toggle Dark/Light Theme">☀️</button>
+        <button id="btn-terminal-toggle" class="btn btn-secondary" style="border-radius: 50%; width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; cursor: pointer; border: 1px solid var(--border-glass);" title="Diagnostics Console Terminal">📟</button>
+        <div class="system-status">
+          <div class="status-indicator online" id="global-status-dot"></div>
+          <span id="global-status-text">Ecosystem Online</span>
+          <div id="user-profile-section" style="display: none; margin-left: 1rem; align-items: center; gap: 0.5rem; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 1rem;">
+            <span id="logged-in-username" style="font-size: 0.85rem; color: #94a3b8; font-weight: 500;"></span>
+            <button id="btn-logout" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Logout</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="sidebar">
+        <button id="btn-sidebar-collapse" title="Toggle Sidebar" aria-label="Toggle sidebar">◀</button>
+        <nav class="nav-tabs" id="main-nav-tabs">
+          <button class="tab-btn active" data-tab="gateways">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V8h14v10zM7 10h2v2H7zm0 4h2v2H7zm4-4h2v2h-2zm0 4h2v2h-2zm4-4h2v2h-2zm0 4h2v2h-2z"/></svg>
+            <span class="tab-label">Gateways (ServGate)</span>
+          </button>
+          <button class="tab-btn" data-tab="queues">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M19 15v4H5v-4h14m1-2H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM19 5v4H5V5h14m1-2H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1z"/></svg>
+            <span class="tab-label">Queues (ServQueue)</span>
+          </button>
+          <button class="tab-btn" data-tab="storage">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+            <span class="tab-label">Storage (ServStore)</span>
+          </button>
+          <button class="tab-btn" data-tab="traces">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+            <span class="tab-label">Telemetry & Traces</span>
+          </button>
+          <button class="tab-btn" data-tab="graph">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 14c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-7c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-6 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm12 0c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zM6 9c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm12 0c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z"/></svg>
+            <span class="tab-label">Dependency Graph</span>
+          </button>
+          <button class="tab-btn" data-tab="database">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 4.02 2 6.5s4.48 4.5 10 4.5 10-2.02 10-4.5S17.52 2 12 2zm0 18c-5.52 0-10-2.02-10-4.5v-4c0 2.48 4.48 4.5 10 4.5s10-2.02 10-4.5v4c0 2.48-4.48 4.5-10 4.5zm0-6c-5.52 0-10-2.02-10-4.5v-4c0 2.48 4.48 4.5 10 4.5s10-2.02 10-4.5v4c0 2.48-4.48 4.5-10 4.5z"/></svg>
+            <span class="tab-label">Database (ORM)</span>
+          </button>
+          <button class="tab-btn" data-tab="auth">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+            <span class="tab-label">Identity (ServAuth)</span>
+          </button>
+          <button class="tab-btn" data-tab="mail">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+            <span class="tab-label">Notifications (ServMail)</span>
+          </button>
+          <button class="tab-btn" data-tab="audit">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+            <span class="tab-label">Audit Logs</span>
+          </button>
+          <button class="tab-btn" data-tab="policies">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+            <span class="tab-label">Policies (RBAC)</span>
+          </button>
+          <button class="tab-btn" data-tab="cost">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            <span class="tab-label">Cost Optimizer</span>
+          </button>
+          <button class="tab-btn" data-tab="slo">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+            <span class="tab-label">SLO Tracker</span>
+          </button>
+          <button class="tab-btn" data-tab="workflow-designer">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4 6h-6v2h6V9zm0 4h-6v2h6v-2z"/></svg>
+            <span class="tab-label">Workflow Designer</span>
+          </button>
+          <button class="tab-btn" data-tab="deployments">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+            <span class="tab-label">Deployments</span>
+          </button>
+          <button class="tab-btn" data-tab="ai-observatory">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l2.79-2.79C10.09 18.72 11.03 19 12 19c4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/></svg>
+            <span class="tab-label">AI Observatory</span>
+          </button>
+          <button class="tab-btn" data-tab="topology">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M22 13v-2l-2.6-1.5c-.3-.9-.8-1.7-1.4-2.4l1.6-2.3-1.4-1.4-2.3 1.6c-.7-.6-1.5-1.1-2.4-1.4L13 2h-2l-1.5 2.6c-.9.3-1.7.8-2.4 1.4L5.8 4.4 4.4 5.8l1.6 2.3c-.6.7-1.1 1.5-1.4 2.4L2 11v2l2.6 1.5c.3.9.8 1.7 1.4 2.4l-1.6 2.3 1.4 1.4 2.3-1.6c.7.6 1.5 1.1 2.4 1.4L11 22h2l1.5-2.6c.9-.3 1.7-.8 2.4-1.4l2.3 1.6 1.4-1.4-1.6-2.3c.6-.7 1.1-1.5 1.4-2.4L22 13zM12 16c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4z"/></svg>
+            <span class="tab-label">Live Topology</span>
+          </button>
+          <button class="tab-btn" data-tab="mesh">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.26-.81-1-1.4-1.9-1.4h-1v-3c0-.55-.45-1-1-1h-6v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+            <span class="tab-label">ServMesh</span>
+          </button>
+          <button class="tab-btn" data-tab="cron">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+            <span class="tab-label">ServCron</span>
+          </button>
+          <button class="tab-btn" data-tab="cache">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm0-4H9V5h10v2z"/></svg>
+            <span class="tab-label">ServCache</span>
+          </button>
+          <button class="tab-btn" data-tab="registry">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H9v-2h6v2zm3-4H6V8h12v6z"/></svg>
+            <span class="tab-label">ServRegistry</span>
+          </button>
+          <button class="tab-btn" data-tab="config">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>
+            <span class="tab-label">Config Editor</span>
+          </button>
+          <button class="tab-btn" data-tab="dashboards">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            <span class="tab-label">Dashboards</span>
+          </button>
+          <button class="tab-btn" data-tab="locks">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+            <span class="tab-label">Locks (ServLock)</span>
+          </button>
+          <button class="tab-btn" data-tab="secrets">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12.65 11.3c.02-.1.05-.2.05-.3 0-2.21-1.79-4-4-4S4.7 8.79 4.7 11s1.79 4 4 4c.1 0 .2-.03.3-.05l5.7 5.7c.39.39 1.02.39 1.41 0l1.41-1.41c.39-.39.39-1.02 0-1.41l-5.67-5.63zm-3.95.7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/></svg>
+            <span class="tab-label">Secrets (ServSecret)</span>
+          </button>
+          <button class="tab-btn" data-tab="docs">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93z"/></svg>
+            <span class="tab-label">Documentation</span>
+          </button>
+        </nav>
+      </aside>
+
+      <!-- Main Content Panel -->
+      <main class="main-panel">
+      <!-- Status Cards Summary Grid -->
+      <section class="summary-cards">
+        <div class="card glass-card" id="gate-summary-card">
+          <div class="card-header">
+            <h3>ServGate</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="gate-latency">— ms</div>
+          <div class="card-desc">API Proxy Gateway on :8080</div>
+        </div>
+        <div class="card glass-card" id="queue-summary-card">
+          <div class="card-header">
+            <h3>ServQueue</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="queue-messages">0 msg</div>
+          <div class="card-desc">Broker on :8082</div>
+        </div>
+        <div class="card glass-card" id="store-summary-card">
+          <div class="card-header">
+            <h3>ServStore</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="store-buckets">0 bkts</div>
+          <div class="card-desc">Consensus Storage on :8081</div>
+        </div>
+        <div class="card glass-card" id="tunnel-summary-card">
+          <div class="card-header">
+            <h3>ServTunnel</h3>
+            <span class="badge online">ONLINE</span>
+          </div>
+          <div class="card-value" id="tunnel-active">— ms</div>
+          <div class="card-desc">Relay Server on :8443</div>
+        </div>
+      </section>
+
+      <!-- TAB: GATEWAYS -->
+      <div class="tab-pane active" id="tab-gateways">
+        <div class="pane-grid">
+          <!-- Left: Route Management -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Configured Routes</h2>
+              <button class="btn btn-primary" id="btn-add-route">+ Add Route</button>
+            </div>
+            <div class="table-container">
+              <table id="routes-table">
+                <thead>
+                  <tr>
+                    <th>Prefix</th>
+                    <th>Target Path</th>
+                    <th>Rate Limit</th>
+                    <th>AI Security</th>
+                    <th>Semantic Cache</th>
+                    <th>PII Redact</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically by app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: WASM Middleware Hot-Swap -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>WASM Hot-Swap</h2>
+            </div>
+            <p class="section-desc">Instantly compile and load new WASM middleware to modify headers/payloads in real-time.</p>
+            <form id="wasm-upload-form" class="upload-box">
+              <label for="wasm-file-input" class="file-label">
+                <div class="upload-icon">✦</div>
+                <span>Choose WASM middleware file</span>
+                <span class="subtext">or drag and drop here</span>
+              </label>
+              <input type="file" id="wasm-file-input" accept=".wasm" style="display: none;">
+              <div class="form-group">
+                <input type="text" id="wasm-name-input" placeholder="Middleware name (e.g. auth-scrub)" required>
+              </div>
+              <button type="submit" class="btn btn-success w-100">Upload & Hot-Swap</button>
+            </form>
+            <div id="wasm-status-message" class="status-message"></div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Active Connections Panel -->
+          <div class="card glass-card span-3">
+            <div class="card-header">
+              <h2>Active Gateway Connections</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-connections">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Real-time connection metrics showing active workloads per target server backend routed via ServGate.</p>
+            <div class="table-container">
+              <table id="connections-table">
+                <thead>
+                  <tr>
+                    <th>Backend Target URL</th>
+                    <th>Active Connections Count</th>
+                    <th>Load Indicator</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="3" class="text-center text-muted">No active connections recorded</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: QUEUES -->
+      <div class="tab-pane" id="tab-queues">
+        <div class="pane-grid">
+          <!-- Left: Active Queues/Topics -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Broker Topics & Active Queues</h2>
+            </div>
+            <div class="table-container">
+              <table id="queues-table">
+                <thead>
+                  <tr>
+                    <th>Topic / Queue Name</th>
+                    <th>Registered Transforms</th>
+                    <th>Messages In/Out</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card-header mt-4">
+              <h2>Topic Administration</h2>
+              <button class="btn btn-primary" id="btn-create-topic">+ Create Topic</button>
+            </div>
+            <div class="table-container">
+              <table id="topic-admin-table">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Subscribers</th>
+                    <th>Partitions</th>
+                    <th>WASM Transform</th>
+                    <th>DLQ</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+            <div id="topic-admin-status" class="status-message"></div>
+
+            <div class="card-header mt-4">
+              <h2>Register Transform Filter</h2>
+            </div>
+            <form id="queue-transform-form" class="inline-form">
+              <input type="text" id="transform-topic" placeholder="Topic name (e.g. orders)" required>
+              <input type="file" id="transform-file" accept=".wasm" required>
+              <button type="submit" class="btn btn-primary">Attach WASM Filter</button>
+            </form>
+            <div id="queue-transform-status"></div>
+          </div>
+
+          <!-- Right: Test publisher -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Publish Test Message</h2>
+            </div>
+            <form id="publish-message-form">
+              <div class="form-group">
+                <label for="pub-topic">Topic Name</label>
+                <input type="text" id="pub-topic" placeholder="e.g. orders" required>
+              </div>
+              <div class="form-group">
+                <label for="pub-payload">JSON Payload</label>
+                <textarea id="pub-payload" rows="6" placeholder='{"id": 42, "item": "gadget"}' required></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Send STOMP Message</button>
+            </form>
+            <div id="publish-status" class="status-message"></div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Left: WAL Inspector -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Write-Ahead Log (WAL) Inspector</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-wal">Refresh WAL</button>
+            </div>
+            <p class="section-desc">Inspect hot raw incoming messages appended to the write-ahead log (WAL) on disk before rotation.</p>
+            <div class="table-container">
+              <table id="wal-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Topic</th>
+                    <th>Payload Size</th>
+                    <th>Payload Preview</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="4" class="text-center text-muted">No WAL entries recorded</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Delayed Queue Visualization -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Delayed & Scheduled Messages</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-delayed">Refresh Delayed</button>
+            </div>
+            <p class="section-desc">View messages currently stored in the timed-wheel memory queue waiting for delivery.</p>
+            <div class="table-container">
+              <table id="delayed-messages-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Topic</th>
+                    <th>Delay Remaining</th>
+                    <th>Payload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="4" class="text-center text-muted">No delayed messages scheduled</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: STORAGE -->
+      <div class="tab-pane" id="tab-storage">
+        <div class="pane-grid">
+          <!-- Left: Bucket Browser & Consistent Hash Ring -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Consistent Hash Ring & Node Placement</h2>
+            </div>
+            <div class="ring-visualizer-container">
+              <canvas id="ring-canvas" width="300" height="300"></canvas>
+              <div class="ring-legend">
+                <h3>Nodes in Ring</h3>
+                <ul id="ring-nodes-list">
+                  <!-- Node list loaded dynamically -->
+                </ul>
+              </div>
+            </div>
+
+            <div class="card-header mt-4">
+              <h2>Bucket Browser</h2>
+              <button class="btn btn-primary" id="btn-create-bucket">+ Create Bucket</button>
+            </div>
+            <div class="bucket-browser-grid">
+              <div class="bucket-list" id="buckets-container">
+                <!-- Loaded dynamically -->
+              </div>
+              <div class="bucket-objects-list">
+                <h3>Objects in Bucket: <span id="current-bucket-name">None</span></h3>
+                <div class="table-container">
+                  <table id="objects-table">
+                    <thead>
+                      <tr>
+                        <th>Key / Filename</th>
+                        <th>Size</th>
+                        <th>Last Modified</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td colspan="3" class="text-center text-muted">Select a bucket to view objects</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Placement Checker -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Object Node Router</h2>
+            </div>
+            <p class="section-desc">Simulate a client request to see exactly which node in the hash ring owns the data.</p>
+            <div class="form-group">
+              <label for="placement-bucket">Bucket Name</label>
+              <input type="text" id="placement-bucket" placeholder="e.g. static-assets">
+            </div>
+            <div class="form-group">
+              <label for="placement-key">Object Key / File</label>
+              <input type="text" id="placement-key" placeholder="e.g. logos/logo.png">
+            </div>
+            <button id="btn-check-placement" class="btn btn-primary w-100">Trace Ring Node Placement</button>
+            <div id="placement-result" class="placement-result-box mt-3" style="display: none;">
+              <div class="result-label">Target Node:</div>
+              <div class="result-value" id="placement-node-id">-</div>
+              <div class="result-label mt-2">Node Address:</div>
+              <div class="result-value" id="placement-node-addr">-</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 3: Cluster Operations & Repair Panel -->
+        <div class="pane-grid cluster-ops-grid">
+          <!-- Node Replication Lag -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Node Replication Lag &amp; Heartbeat Status</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-cluster">↻ Refresh</button>
+            </div>
+            <div class="table-container">
+              <table id="cluster-nodes-table">
+                <thead>
+                  <tr>
+                    <th>Node ID</th>
+                    <th>Address</th>
+                    <th>Region</th>
+                    <th>Status</th>
+                    <th>Last Heartbeat</th>
+                    <th>Replication Lag</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="cluster-nodes-body">
+                  <tr><td colspan="6" class="text-center text-muted">Loading cluster data...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Erasure Coding Health -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Erasure Coding Health</h2>
+            </div>
+            <div id="erasure-health-panel">
+              <div class="shard-diagram" id="shard-diagram">
+                <!-- Rendered dynamically -->
+              </div>
+              <div class="erasure-meta" id="erasure-meta">
+                <div class="result-label">Mode</div>
+                <div class="result-value" id="ec-mode">Replication</div>
+                <div class="result-label mt-2">Data Shards</div>
+                <div class="result-value" id="ec-data">2</div>
+                <div class="result-label mt-2">Parity Shards</div>
+                <div class="result-value" id="ec-parity">1</div>
+                <div class="result-label mt-2">Cluster State</div>
+                <div class="result-value" id="ec-state">—</div>
+              </div>
+            </div>
+
+            <div class="card-header mt-4">
+              <h2>Rebalance Trigger</h2>
+            </div>
+            <p class="section-desc">Force a gossip round across all cluster peers to trigger hash ring rebalancing and P2P self-healing.</p>
+            <button id="btn-trigger-rebalance" class="btn btn-warning w-100">⚡ Trigger Cluster Rebalance</button>
+            <div id="rebalance-status" class="status-message mt-3"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: TELEMETRY -->
+      <div class="tab-pane" id="tab-traces">
+        <div class="pane-grid">
+          <!-- Left: Traces List -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Trace Logs</h2>
+              <div class="filter-group" style="display:flex; gap:0.5rem; align-items:center;">
+                <input type="text" id="trace-search" placeholder="Filter by root span / service..." class="form-control" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.4rem; border-radius:6px; outline:none; font-size:0.85rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-traces">↻ Refresh</button>
+                <button class="btn btn-danger btn-sm" id="btn-clear-traces">Clear Traces</button>
+              </div>
+            </div>
+            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+              <table id="traces-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Trace ID</th>
+                    <th>Root Operation</th>
+                    <th>Service</th>
+                    <th>Duration</th>
+                    <th>Spans</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="7" class="text-center text-muted">Click Refresh to load traces</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Selected Trace Waterfall -->
+          <div class="card glass-card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <h2>Trace Timeline Waterfall</h2>
+              <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <button id="btn-expand-all-spans" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-radius: 4px; display: none;">Expand All</button>
+                <button id="btn-collapse-all-spans" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-radius: 4px; display: none;">Collapse All</button>
+                <label style="display: none; align-items: center; gap: 0.25rem; font-size: 0.8rem; color: #cbd5e1; cursor: pointer;" id="critical-path-toggle-label">
+                  <input type="checkbox" id="checkbox-critical-path" style="cursor: pointer;">
+                  Show Critical Path
+                </label>
+                <button id="btn-replay-trace" class="btn btn-warning btn-sm" style="display: none; padding: 0.25rem 0.5rem; font-size: 0.8rem; font-weight: bold; border-radius: 4px; cursor: pointer;">⚡ Replay Request</button>
+                <button id="btn-trace-logs" class="btn btn-secondary btn-sm" style="display: none; padding: 0.25rem 0.5rem; font-size: 0.8rem; font-weight: bold; border-radius: 4px; cursor: pointer;">📋 Show Trace Logs</button>
+                <span class="badge online" id="waterfall-trace-id-badge">No Trace Selected</span>
+              </div>
+            </div>
+            <div id="trace-visual-flow" style="display:none; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px; margin:1rem 0; justify-content:space-between; align-items:center; gap:0.5rem; font-size:0.8rem; overflow-x:auto;">
+              <!-- Dynamic flowchart blocks -->
+            </div>
+            <div class="trace-spans-container" id="traces-timeline" style="margin-top: 1rem; min-height: 300px; max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem;">
+              <div class="text-center text-muted" style="padding: 4rem 0;">Select a trace from the logs on the left to view the distributed spans execution tree.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid vertical-stack mt-4">
+          <!-- Bottom: Live Logs Console -->
+          <div class="card glass-card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <h2>Ecosystem Live Console Logs</h2>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <select id="log-filter-service" class="form-control form-control-sm" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem; border-radius:4px; font-size:0.8rem; outline:none; cursor:pointer;">
+                  <option value="">All Services</option>
+                  <option value="ServGate">ServGate</option>
+                  <option value="ServStore">ServStore</option>
+                  <option value="ServQueue">ServQueue</option>
+                  <option value="ServTunnel">ServTunnel</option>
+                  <option value="system">System</option>
+                </select>
+                <select id="log-filter-level" class="form-control form-control-sm" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem; border-radius:4px; font-size:0.8rem; outline:none; cursor:pointer;">
+                  <option value="">All Levels</option>
+                  <option value="info">Info</option>
+                  <option value="warn">Warn</option>
+                  <option value="error">Error</option>
+                </select>
+                <input type="text" id="log-search-text" placeholder="Search message..." style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; outline:none; width:150px;">
+                <button class="btn btn-secondary btn-sm" id="btn-clear-logs">Clear Screen</button>
+              </div>
+            </div>
+            <div class="console-logs-box" id="console-logs-screen">
+              <div class="log-line system">[SYSTEM] ServConsole connected. Listening for events...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Change Correlation Timeline -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Change Correlation Timeline</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchChangeCorrelationTimeline()">↻ Refresh Correlation</button>
+            </div>
+            <p class="section-desc">Correlate system events chronologically: deployments, config edits, and alerts overlaid on a single timeline.</p>
+            <div style="position:relative; padding-left:2.5rem; margin-top:2rem;" id="correlation-timeline-box">
+              <!-- Chronological timeline list -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: DEPENDENCY GRAPH -->
+      <div class="tab-pane" id="tab-graph">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Cross-Service Dependency Graph</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-graph">Refresh Graph</button>
+            </div>
+            <p class="section-desc">Visual topological dependency map auto-discovered from OpenTelemetry traces.</p>
+            <div style="display: flex; gap: 1.5rem; margin-top: 1.5rem; flex-wrap: wrap; width: 100%;">
+              <!-- Left: Canvas -->
+              <div class="graph-container" style="flex: 2; min-width: 450px; background: rgba(15,17,32,0.3); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); position: relative; display: flex; justify-content: center; align-items: center; min-height: 500px;">
+                <canvas id="graph-canvas" width="800" height="500" style="max-width: 100%; height: auto;"></canvas>
+              </div>
+              <!-- Right: Selection Inspector -->
+              <div class="card glass-card" style="flex: 1; min-width: 280px; margin-top: 0; background: rgba(15, 17, 32, 0.4); border: 1px solid rgba(255,255,255,0.05);" id="graph-inspector">
+                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.75rem;">
+                  <h3 id="inspector-title" style="margin: 0; font-size: 1.1rem; color: #fff;">No Node Selected</h3>
+                </div>
+                <div id="inspector-body" style="padding: 1rem; font-size: 0.85rem; color: #94a3b8; display: flex; flex-direction: column; gap: 1rem;">
+                  <p>Click on any service node in the topology graph on the left to inspect its real-time metrics, error rate, throughput, and active dependencies.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: AUDIT LOGS -->
+      <div class="tab-pane" id="tab-audit">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Ecosystem Security Audit Logs</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-audit">Refresh Audit Logs</button>
+            </div>
+            <p class="section-desc">Immutable timeline of administrative operations, security policy updates, and WASM hot-swaps.</p>
+            <div class="table-container">
+              <table id="audit-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically by app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: DATABASE -->
+      <div class="tab-pane" id="tab-database">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card" style="margin-bottom: 2rem;">
+            <div class="card-header">
+              <h2>Database Connection Pools & Health</h2>
+              <div id="db-deadlock-indicator" class="badge badge-success">Pools Healthy</div>
+            </div>
+            <p class="section-desc">Real-time health status, active leases, and connection pools metrics of ServDB.</p>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1.5rem; margin-top:1.5rem;">
+              <div style="padding:1rem; border-radius:6px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05);">
+                <h3 style="margin-bottom:0.5rem; font-size:1rem; color:var(--text-primary);">Primary Connection Pool</h3>
+                <p style="margin:0.25rem 0; font-size:0.9rem;">Active Connections: <span id="db-primary-active" style="font-weight:bold; color:var(--accent);">0</span> / <span id="db-primary-max">0</span></p>
+                <p style="margin:0.25rem 0; font-size:0.9rem;">Total Queries Executed: <span id="db-primary-queries" style="font-weight:bold;">0</span></p>
+              </div>
+              <div style="padding:1rem; border-radius:6px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05);">
+                <h3 style="margin-bottom:0.5rem; font-size:1rem; color:var(--text-primary);">Replica Connection Pool</h3>
+                <p style="margin:0.25rem 0; font-size:0.9rem;">Active Connections: <span id="db-replica-active" style="font-weight:bold; color:var(--accent);">0</span> / <span id="db-replica-max">0</span></p>
+                <p style="margin:0.25rem 0; font-size:0.9rem;">Total Queries Executed: <span id="db-replica-queries" style="font-weight:bold;">0</span></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Database Schema ORM Viewer</h2>
+              <div style="display:flex; gap:1rem;">
+                <select id="db-service-select" class="btn btn-secondary btn-sm" style="background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.25rem 0.5rem; border-radius:6px; outline:none; cursor:pointer;">
+                  <option value="">Select Service...</option>
+                </select>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-database">Refresh Schema</button>
+              </div>
+            </div>
+            <p class="section-desc">Visual representation of compiled Serv-lang ORM schemas registered across the ecosystem.</p>
+            
+            <div class="db-viewer-container" style="display:flex; flex-direction:column; gap:1.5rem; margin-top:1.5rem;">
+              <div id="db-no-schema" class="text-center text-muted" style="padding:4rem 0; text-align:center;">
+                <p style="font-size:2rem; margin-bottom:1rem;">📂</p>
+                <p>Select a service to load and visualize its database schema.</p>
+              </div>
+              <div id="db-schema-visual" style="display:none; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:1.5rem;">
+                <!-- Tables rendered dynamically by app.js -->
+              </div>
+            </div>
+          </div>
+
+          <div class="card glass-card" style="margin-top:2rem;">
+            <div class="card-header">
+              <h2>SQL Query Workbench</h2>
+              <div class="badge badge-accent">Interactive</div>
+            </div>
+            <p class="section-desc">Execute raw SQL queries against your database backends (SQLite, PostgreSQL, MySQL, Oracle).</p>
+            
+            <div class="workbench-form-grid" style="display:grid; grid-template-columns: 1fr 2fr; gap:1.5rem; margin-top:1.5rem;">
+              <div class="workbench-config-panel" style="display:flex; flex-direction:column; gap:1rem;">
+                <div class="form-group">
+                  <label for="wb-driver-select" style="display:block; margin-bottom:0.5rem; font-size:0.85rem; color:var(--text-muted);">Database Driver</label>
+                  <select id="wb-driver-select" class="form-control" style="width:100%; padding:0.6rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; cursor:pointer;">
+                    <option value="sqlite">SQLite</option>
+                    <option value="postgres">PostgreSQL</option>
+                    <option value="mysql">MySQL</option>
+                    <option value="oracle">Oracle</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="wb-conn-str" style="display:block; margin-bottom:0.5rem; font-size:0.85rem; color:var(--text-muted);">Connection String / DSN</label>
+                  <input type="text" id="wb-conn-str" class="form-control" placeholder="./dev.db" value="./dev.db" style="width:100%; padding:0.6rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none;">
+                  <span id="wb-conn-hint" style="font-size:0.75rem; color:var(--text-muted); margin-top:0.25rem; display:block;">Filepath for SQLite, or DSN for other drivers.</span>
+                </div>
+                <button class="btn btn-primary" id="btn-run-query" style="width:100%; margin-top:0.5rem;">Run Query</button>
+              </div>
+              
+              <div class="workbench-editor-panel" style="display:flex; flex-direction:column; gap:0.5rem;">
+                <label for="wb-query-text" style="font-size:0.85rem; color:var(--text-muted);">SQL Query</label>
+                <textarea id="wb-query-text" style="flex-grow:1; min-height:160px; font-family:'Courier New', Courier, monospace; font-size:0.9rem; padding:0.8rem; background:#0b0c16; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#a9b2c3; resize:vertical; outline:none;" placeholder="e.g. SELECT * FROM sqlite_master;"></textarea>
+              </div>
+            </div>
+            
+            <div id="wb-results-container" style="margin-top:2rem; display:none;">
+              <hr style="border:0; border-top:1px solid rgba(255,255,255,0.05); margin-bottom:1.5rem;">
+              <div class="results-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h3 style="font-size:1.1rem; margin:0;">Execution Results</h3>
+                <span id="wb-results-stats" style="font-size:0.8rem; color:var(--text-muted);">Executed in 0ms</span>
+              </div>
+              
+              <div id="wb-error-alert" class="alert alert-danger" style="display:none; padding:1rem; border-radius:6px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); color:#fca5a5; margin-bottom:1rem; font-family:monospace; font-size:0.85rem;"></div>
+              <div id="wb-success-alert" class="alert alert-success" style="display:none; padding:1rem; border-radius:6px; background:rgba(34,197,94,0.1); border:1px solid rgba(34,197,94,0.2); color:#86efac; margin-bottom:1rem; font-size:0.9rem;"></div>
+              
+              <div class="table-container" id="wb-table-wrapper" style="overflow-x:auto; max-height:400px; border:1px solid rgba(255,255,255,0.05); border-radius:6px; background:rgba(15,17,32,0.5); display:none;">
+                <table id="wb-results-table" class="table" style="width:100%; border-collapse:collapse; text-align:left; font-size:0.85rem;">
+                  <thead>
+                    <!-- Column headers rendered dynamically -->
+                  </thead>
+                  <tbody>
+                    <!-- Row values rendered dynamically -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        
+          <div class="card glass-card" style="margin-top:2rem;">
+            <div class="card-header">
+              <h2>Migration Auditing</h2>
+              <div style="display:flex; gap:0.75rem; align-items:center;">
+                <div class="badge badge-accent">Schema Revisions</div>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-migrations">↻ Refresh</button>
+              </div>
+            </div>
+            <p class="section-desc">Track database schema revisions, apply migrations, and audit all schema changes across your database backends.</p>
+
+            <div class="migration-layout" style="display:grid; grid-template-columns:1fr 1fr; gap:2rem; margin-top:1.5rem;">
+              <!-- Left: Migration Runner Form -->
+              <div class="migration-runner-panel">
+                <h3 style="font-size:1rem; font-weight:600; margin-bottom:1rem; color:var(--text-primary);">Apply New Migration</h3>
+                <form id="migration-form" style="display:flex; flex-direction:column; gap:1rem;">
+                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                      <label for="mig-driver" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Driver</label>
+                      <select id="mig-driver" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; cursor:pointer; font-family:var(--font-sans); font-size:0.85rem;">
+                        <option value="sqlite">SQLite</option>
+                        <option value="postgres">PostgreSQL</option>
+                        <option value="mysql">MySQL</option>
+                        <option value="oracle">Oracle</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                      <label for="mig-revision" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Revision ID</label>
+                      <input type="text" id="mig-revision" placeholder="e.g. v1.0.0 or 001" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; font-size:0.85rem;" required>
+                    </div>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label for="mig-dsn" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Connection String / DSN</label>
+                    <input type="text" id="mig-dsn" placeholder="./dev.db" value="./dev.db" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; font-size:0.85rem;" required>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label for="mig-description" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">Description</label>
+                    <input type="text" id="mig-description" placeholder="e.g. Create users table" style="width:100%; padding:0.55rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; outline:none; font-size:0.85rem;">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label for="mig-sql" style="display:block; margin-bottom:0.4rem; font-size:0.8rem; color:var(--text-muted);">SQL Migration Script</label>
+                    <textarea id="mig-sql" rows="5" style="width:100%; font-family:var(--font-mono); font-size:0.85rem; padding:0.7rem; background:#0b0c16; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#a9b2c3; resize:vertical; outline:none;" placeholder="CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE);" required></textarea>
+                  </div>
+                  <button type="submit" class="btn btn-primary" id="btn-apply-migration" style="width:100%;">⚡ Apply Migration</button>
+                </form>
+                <div id="migration-status" class="status-message" style="margin-top:0.75rem;"></div>
+              </div>
+
+              <!-- Right: Applied Revisions Table -->
+              <div class="migration-log-panel">
+                <h3 style="font-size:1rem; font-weight:600; margin-bottom:1rem; color:var(--text-primary);">Applied Revisions</h3>
+                <div class="table-container" style="max-height:420px; overflow-y:auto;">
+                  <table id="migrations-table">
+                    <thead>
+                      <tr>
+                        <th>Rev</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Delta</th>
+                        <th>Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td colspan="5" class="text-center text-muted">No migrations applied yet. Use the form to apply your first schema revision.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: IDENTITY (ServAuth) -->
+      <div class="tab-pane" id="tab-auth">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>User Directory Browser</h2>
+              <div class="badge badge-accent" id="auth-users-count">0 Users</div>
+            </div>
+            <p class="section-desc">Search registered tenants, list isolated user pools, and manage roles.</p>
+            <div class="table-container" style="margin-top:1rem; overflow-x:auto;">
+              <table id="auth-users-table" class="table">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Tenant ID</th>
+                    <th>MFA Status</th>
+                  </tr>
+                </thead>
+                <tbody id="auth-users-list">
+                  <tr><td colspan="4" class="text-center text-muted">No users registered yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:2rem; margin-top:2rem;">
+            <div class="card glass-card">
+              <div class="card-header">
+                <h2>Active Login Sessions</h2>
+              </div>
+              <p class="section-desc">Currently tracked user session tokens and active devices.</p>
+              <div class="table-container" style="margin-top:1rem;">
+                <table id="auth-sessions-table" class="table">
+                  <thead>
+                    <tr>
+                      <th>Token Hash</th>
+                      <th>Expiry</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auth-sessions-list">
+                    <tr><td colspan="3" class="text-center text-muted">No active sessions.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card glass-card">
+              <div class="card-header">
+                <h2>KMS Secrets Envelope Encrypter</h2>
+              </div>
+              <p class="section-desc">Simulate AES-GCM envelope encryption key generation and payload sealing.</p>
+              <div style="display:flex; flex-direction:column; gap:1rem; margin-top:1rem;">
+                <div class="form-group">
+                  <label style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.4rem;">Plaintext Message</label>
+                  <input type="text" id="auth-kms-plaintext" class="form-control" style="width:100%; padding:0.6rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" value="servverse-super-secret-key-123">
+                </div>
+                <button class="btn btn-primary" id="btn-kms-encrypt" style="width:100%;">Encrypt Payload</button>
+                <div class="form-group" style="margin-top:0.5rem;">
+                  <label style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.4rem;">Ciphertext Result</label>
+                  <textarea id="auth-kms-ciphertext" rows="2" style="width:100%; font-family:monospace; padding:0.6rem; background:#0b0c16; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#a9b2c3;" readonly></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: NOTIFICATIONS (ServMail) -->
+      <div class="tab-pane" id="tab-mail">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Delivery Telemetry Dashboard</h2>
+              <div class="badge badge-accent">Live Status</div>
+            </div>
+            <p class="section-desc">Aggregate message tracking states across all notification delivery channels.</p>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:1.5rem; margin-top:1.5rem;">
+              <div style="padding:1rem; border-radius:6px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); text-align:center;">
+                <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">Total Messages</p>
+                <h3 id="mail-stat-total" style="font-size:2rem; margin:0.5rem 0 0 0; color:var(--accent);">0</h3>
+              </div>
+              <div style="padding:1rem; border-radius:6px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); text-align:center;">
+                <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">Sent successfully</p>
+                <h3 id="mail-stat-sent" style="font-size:2rem; margin:0.5rem 0 0 0; color:#86efac;">0</h3>
+              </div>
+              <div style="padding:1rem; border-radius:6px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); text-align:center;">
+                <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">Opened / Read</p>
+                <h3 id="mail-stat-opened" style="font-size:2rem; margin:0.5rem 0 0 0; color:#93c5fd;">0</h3>
+              </div>
+              <div style="padding:1rem; border-radius:6px; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); text-align:center;">
+                <p style="margin:0; font-size:0.85rem; color:var(--text-muted);">Bounced / Failed</p>
+                <h3 id="mail-stat-bounced" style="font-size:2rem; margin:0.5rem 0 0 0; color:#fca5a5;">0</h3>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:2rem; margin-top:2rem;">
+            <div class="card glass-card">
+              <div class="card-header">
+                <h2>Attachment Cold Tier Catalog</h2>
+              </div>
+              <p class="section-desc">Uploaded attachment files, sizes, and active storage tiers (local vs. cold tier).</p>
+              <div class="table-container" style="margin-top:1rem;">
+                <table id="mail-attachments-table" class="table">
+                  <thead>
+                    <tr>
+                      <th>Filename</th>
+                      <th>Size (Bytes)</th>
+                      <th>Storage Tier</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mail-attachments-list">
+                    <tr><td colspan="3" class="text-center text-muted">No attachments uploaded yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card glass-card">
+              <div class="card-header">
+                <h2>Notification Preferences Registry</h2>
+              </div>
+              <p class="section-desc">Global opt-out preferences and subscription configuration rules per recipient.</p>
+              <div class="table-container" style="margin-top:1rem;">
+                <table id="mail-preferences-table" class="table">
+                  <thead>
+                    <tr>
+                      <th>Recipient</th>
+                      <th>Category Opt-Outs</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mail-preferences-list">
+                    <tr><td colspan="2" class="text-center text-muted">No preference updates logged yet.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: POLICIES (RBAC) -->
+      <div class="tab-pane" id="tab-policies">
+        <div class="pane-grid">
+          <!-- Left: User List & Management -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>IAM Users</h2>
+            </div>
+            <p class="section-desc">Select an IAM user to inspect and edit access control policies.</p>
+            <div class="form-group inline-form">
+              <input type="text" id="new-user-name" placeholder="Username (e.g. developer-bob)" style="flex-grow: 1;">
+              <button class="btn btn-primary" id="btn-select-user">Select / Add</button>
+            </div>
+            <div class="user-select-list" id="policy-users-list" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
+              <!-- Loaded dynamically -->
+            </div>
+          </div>
+
+          <!-- Right: Policy Editor -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>IAM Policy Editor: <span id="policy-current-user">None Selected</span></h2>
+            </div>
+            <p class="section-desc">Create or edit a JSON IAM policy document for S3 bucket and STOMP topic access.</p>
+            
+            <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+              <div class="form-group">
+                <label for="policy-json-area" style="font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">JSON Policy Document</label>
+                <textarea id="policy-json-area" rows="14" class="code-editor" style="width: 100%; font-family: var(--font-mono); font-size: 0.9rem; padding: 0.8rem; background: #0f1120; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; outline: none; resize: vertical;" placeholder='{"Statement":[]}'></textarea>
+              </div>
+
+              <!-- Quick Templates -->
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                <span style="font-size: 0.8rem; color: var(--text-secondary); align-self: center; margin-right: 0.5rem;">Templates:</span>
+                <button class="btn btn-secondary btn-sm" id="tpl-s3-allow">S3 Read/Write</button>
+                <button class="btn btn-secondary btn-sm" id="tpl-stomp-allow">STOMP Pub/Sub</button>
+                <button class="btn btn-secondary btn-sm" id="tpl-full-access">Full Access</button>
+              </div>
+
+              <div class="policy-actions" style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">
+                <button class="btn btn-danger" id="btn-delete-policy" disabled>Delete Policy</button>
+                <button class="btn btn-primary" id="btn-save-policy" disabled>Save Policy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: COST OPTIMIZER -->
+      <div class="tab-pane" id="tab-cost">
+        <div class="pane-grid">
+          <!-- Left: Cost Estimation -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Infrastructure Monthly Cost Estimation</h2>
+              <span class="badge online" id="cost-budget-badge">Within Budget</span>
+            </div>
+            <p class="section-desc">Real-time cost projection calculated from active service requests, storage size, and queue messages throughput.</p>
+            
+            <div class="cost-summary-flex" style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1.5rem; border-radius:8px; margin-top:1.5rem;">
+              <div>
+                <span style="font-size:0.85rem; color:var(--text-secondary);">Estimated Monthly Cost</span>
+                <h2 style="font-size:2.5rem; margin-top:0.25rem; color:var(--primary);" id="cost-estimated-total">$0.00</h2>
+              </div>
+              <div style="text-align:right;">
+                <span style="font-size:0.85rem; color:var(--text-secondary);">Monthly Budget Limit</span>
+                <h3 style="font-size:1.5rem; margin-top:0.25rem; color:#fff;" id="cost-budget-limit">$0.00</h3>
+              </div>
+            </div>
+
+            <div style="margin-top:2rem;">
+              <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:0.5rem;">
+                <span>Budget Consumption</span>
+                <span id="cost-budget-percent">0%</span>
+              </div>
+              <div class="progress-bar-container" style="background:rgba(255,255,255,0.05); height:12px; border-radius:6px; overflow:hidden;">
+                <div id="cost-budget-progress" style="background:var(--primary); width:0%; height:100%; transition:width 0.5s ease;"></div>
+              </div>
+            </div>
+
+            <div style="margin-top:2rem;">
+              <h3>Cost Breakdown by Service</h3>
+              <div id="cost-breakdown-list" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+                <!-- Filled dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Recommendations -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Cost Optimization Tips</h2>
+            </div>
+            <p class="section-desc">Automated recommendations compiled by the compiler-linked cost optimizer to reduce monthly spend.</p>
+            <div id="cost-recommendations-container" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1.5rem;">
+              <!-- Filled dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Capacity Planning Forecast -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Capacity Planning Forecast</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchCapacityPlanning()">↻ Refresh Forecast</button>
+            </div>
+            <p class="section-desc">Aggregate resource utilization metrics and 7-day projected capacity limits.</p>
+            
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Avg CPU Utilization</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--primary);" id="capacity-cpu-val">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Memory Pressure</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--accent);" id="capacity-mem-val">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Disk Storage Used</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:#fff;" id="capacity-disk-val">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Days to Eviction / Exhaustion</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--warning);" id="capacity-exhaustion-days">—</h3>
+              </div>
+            </div>
+            
+            <div style="margin-top:2rem; background:rgba(255,255,255,0.01); border:1px solid rgba(255,255,255,0.03); border-radius:8px; padding:1.5rem;">
+              <h3 style="font-size:1.1rem; margin-bottom:0.75rem;">Capacity Forecast Analysis</h3>
+              <p id="capacity-analysis-text" style="color:var(--text-secondary); line-height:1.6; font-size:0.9rem; margin:0;"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SLO TRACKER -->
+      <div class="tab-pane" id="tab-slo">
+        <div class="pane-grid">
+          <!-- Left: SLO Compliance Overview -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Service Level Objectives (SLOs)</h2>
+            </div>
+            <p class="section-desc">Track real-time SLI compliance percentages against target SLO levels, budget burn rates, and error budgets.</p>
+            
+            <div id="slo-indicators-container" style="display:flex; flex-direction:column; gap:1.5rem; margin-top:1.5rem;">
+              <!-- Filled dynamically by JavaScript -->
+            </div>
+          </div>
+
+          <!-- Right: Error Budget Burn Details & Recommendations -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Budget Status & Uptime Alerts</h2>
+            </div>
+            <p class="section-desc">Ecosystem error budget summary and critical active alerts affecting SLO burn rates.</p>
+            
+            <div id="slo-summary-panel" style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1.25rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <div style="font-size:0.8rem; color:var(--text-secondary);">Overall Compliance Health</div>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--success);" id="slo-overall-status">100% Operational</h3>
+              </div>
+              
+              <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                <span style="font-weight:600; font-size:0.9rem;">SLO Action Items & Advice</span>
+                <div id="slo-recs-container" style="display:flex; flex-direction:column; gap:0.50rem;">
+                  <!-- Dynamically filled -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      <!-- TAB: WORKFLOW DESIGNER -->
+      <div class="tab-pane" id="tab-workflow-designer">
+        <div class="pane-grid" style="grid-template-columns: 220px 1fr 320px; gap: 1rem; height: calc(100vh - 160px);">
+          <!-- Left: Nodes Toolbox -->
+          <div class="card glass-card" style="padding: 1rem; display: flex; flex-direction: column; gap: 1rem; height: 100%;">
+            <h3>Node Toolbox</h3>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Click on a tool to add it to the designer canvas:</p>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+              <button class="btn btn-secondary w-100 tool-add-node" data-type="state" style="text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                🔵 <span>State</span>
+              </button>
+              <button class="btn btn-secondary w-100 tool-add-node" data-type="task" style="text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                ⚙️ <span>Task</span>
+              </button>
+              <button class="btn btn-secondary w-100 tool-add-node" data-type="condition" style="text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                🔀 <span>Condition</span>
+              </button>
+              <button class="btn btn-secondary w-100 tool-add-node" data-type="delay" style="text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                ⏳ <span>Delay</span>
+              </button>
+              <button class="btn btn-secondary w-100 tool-add-node" data-type="success" style="text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                🟢 <span>Success End</span>
+              </button>
+              <button class="btn btn-secondary w-100 tool-add-node" data-type="fail" style="text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                🔴 <span>Fail End</span>
+              </button>
+            </div>
+            <div style="margin-top: auto; border-top: 1px solid var(--border-glass); padding-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+              <button class="btn btn-primary w-100" id="btn-export-workflow-dsl">Generate DSL</button>
+              <button class="btn btn-secondary w-100" id="btn-clear-workflow-canvas">Clear Canvas</button>
+            </div>
+          </div>
+
+          <!-- Center: Interactive Canvas -->
+          <div class="card glass-card" style="padding: 0; position: relative; overflow: hidden; height: 100%; display: flex; flex-direction: column; background: rgba(0, 0, 0, 0.2);">
+            <div class="card-header" style="padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border-glass);">
+              <h2>Visual Designer Canvas</h2>
+            </div>
+            <div id="workflow-designer-workspace" style="flex-grow: 1; position: relative; overflow: auto; cursor: crosshair;">
+              <svg id="workflow-svg-lines" style="position: absolute; top: 0; left: 0; width: 2000px; height: 2000px; pointer-events: none; z-index: 1;">
+                <defs>
+                  <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#6366f1" />
+                  </marker>
+                </defs>
+              </svg>
+              <div id="workflow-nodes-container" style="position: absolute; top: 0; left: 0; width: 2000px; height: 2000px; z-index: 2;">
+                <!-- Dragged nodes are spawned here dynamically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Properties & Live DSL Preview -->
+          <div style="display: flex; flex-direction: column; gap: 1rem; height: 100%; overflow-y: auto;">
+            <!-- Properties Panel -->
+            <div class="card glass-card" style="padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+              <h3>Node Properties</h3>
+              <div id="property-editor-empty" class="text-center text-muted" style="padding: 1.5rem 0; font-size: 0.85rem;">
+                Select a node to edit its properties
+              </div>
+              <div id="property-editor-panel" style="display: none; flex-direction: column; gap: 0.75rem;">
+                <div class="form-group">
+                  <label for="prop-node-name">Step Name</label>
+                  <input type="text" id="prop-node-name" class="w-100" style="padding: 0.4rem; font-size: 0.85rem;">
+                </div>
+                <div class="form-group" id="prop-group-action">
+                  <label for="prop-node-action">Action / Target</label>
+                  <input type="text" id="prop-node-action" class="w-100" style="padding: 0.4rem; font-size: 0.85rem;" placeholder="e.g. validateOrder">
+                </div>
+                <div class="form-group" id="prop-group-transition">
+                  <label for="prop-node-next">Next Step (Name)</label>
+                  <input type="text" id="prop-node-next" class="w-100" style="padding: 0.4rem; font-size: 0.85rem;" placeholder="Next step name">
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-save-node-properties" style="font-size: 0.8rem; padding: 0.4rem;">Save Properties</button>
+                <button class="btn btn-secondary btn-sm" id="btn-delete-node" style="font-size: 0.8rem; padding: 0.4rem; background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">Delete Node</button>
+              </div>
+            </div>
+
+            <!-- Code Preview Panel -->
+            <div class="card glass-card" style="padding: 1rem; flex-grow: 1; display: flex; flex-direction: column; gap: 0.5rem; overflow: hidden;">
+              <h3>Live DSL Code</h3>
+              <pre id="workflow-dsl-preview" style="flex-grow: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border-glass); border-radius: 8px; padding: 0.75rem; font-family: var(--font-mono); font-size: 0.8rem; overflow: auto; margin: 0; color: #a5b4fc;">// Build your workflow to preview code...</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: DEPLOYMENTS -->
+      <div class="tab-pane" id="tab-deployments">
+        <div class="pane-grid">
+          <!-- Left: Deployment Log & Status -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Deployment Version History & Control</h2>
+            </div>
+            <p class="section-desc">Track and audit compiler-generated deployments. Rollback runtime services to previous versions in one click.</p>
+            
+            <div style="overflow-x: auto; margin-top: 1rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="deployments-history-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Version</th>
+                    <th style="padding: 0.75rem;">Timestamp</th>
+                    <th style="padding: 0.75rem;">Author</th>
+                    <th style="padding: 0.75rem;">Changelog</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="deployments-list" style="font-size: 0.85rem;">
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Active Version Details -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Active Environment Info</h2>
+            </div>
+            <p class="section-desc">Details of the current active system binary and compilation properties.</p>
+            
+            <div id="active-version-info" style="display:flex; flex-direction:column; gap:1.25rem; margin-top:1rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <div style="font-size:0.8rem; color:var(--text-secondary);">Active Release Version</div>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--primary);" id="active-deployment-version">v1.4.2</h3>
+              </div>
+
+              <div style="display:flex; flex-direction:column; gap:0.5rem; font-size:0.85rem;">
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-secondary);">Active Environment:</span>
+                  <strong id="active-env-display">Development</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-secondary);">Deployer Account:</span>
+                  <strong id="active-env-author">alice</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                  <span style="color:var(--text-secondary);">Committed At:</span>
+                  <strong id="active-env-time">1 hour ago</strong>
+                </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- ServCloud Managed Services -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>ServCloud Managed Services</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-cloud" onclick="fetchCloudServices()">↻ Refresh Services</button>
+            </div>
+            <p class="section-desc">Monitor live running microservices deployed in the Servverse serverless PaaS runtime.</p>
+            <div class="table-container" style="margin-top: 1rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="cloud-services-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Service Name</th>
+                    <th style="padding: 0.75rem;">Internal Port</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem;">Uptime</th>
+                    <th style="padding: 0.75rem;">Memory / CPU</th>
+                    <th style="padding: 0.75rem; text-align: right;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="cloud-services-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="6" class="text-center text-muted" style="padding: 2rem;">Loading services...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Ecosystem Upgrade Dashboard -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Upgrade Dashboard</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchUpgradeDashboard()">↻ Check Updates</button>
+            </div>
+            <p class="section-desc">Compare current running versions of ecosystem services against published releases.</p>
+            <div class="table-container" style="margin-top: 1rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="upgrade-dashboard-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Service</th>
+                    <th style="padding: 0.75rem;">Current Version</th>
+                    <th style="padding: 0.75rem;">Latest Version</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="upgrade-dashboard-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="5" class="text-center text-muted" style="padding: 2rem;">Loading updates...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: AI OBSERVATORY -->
+      <div class="tab-pane" id="tab-ai-observatory">
+        <div class="pane-grid">
+          <!-- Left: Summary Metrics -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>LLM Budget Consumption</h3>
+            </div>
+            <div class="card-value" id="ai-total-costs">$24.85</div>
+            <div class="card-desc">Calculated tokens cost forecast</div>
+          </div>
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>MCP Tool Executions</h3>
+            </div>
+            <div class="card-value" id="ai-total-tool-calls">1,420</div>
+            <div class="card-desc">Successful tool calls across services</div>
+          </div>
+          <div class="card glass-card">
+            <div class="card-header">
+              <h3>Active Autonomous Agents</h3>
+            </div>
+            <div class="card-value" id="ai-active-agents">3</div>
+            <div class="card-desc">Active MCP clients recorded</div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Left: Tool Calls Table -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>MCP Tool Call Logs</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-ai">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Audit trail of autonomous AI agents invoking MCP tools via ServGate router.</p>
+            <div class="table-container">
+              <table id="ai-tool-calls-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Agent Name</th>
+                    <th>Tool Invoked</th>
+                    <th>Status</th>
+                    <th>Tokens</th>
+                    <th>Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Safety Guard alerts -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Prompt Guard & PII Safety Alerts</h2>
+            </div>
+            <p class="section-desc">Active security alerts triggered by prompt injection filters or sensitive data leak blockers.</p>
+            <div id="ai-safety-alerts-container" style="display:flex; flex-direction:column; gap:0.75rem;">
+              <!-- Filled dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- AI Root Cause Analysis -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>AI Root Cause Analysis (EE Only)</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchRootCauseAnalysis()">⚡ Run Diagnostics</button>
+            </div>
+            <p class="section-desc">Correlate deployments, configuration parameters, and recent metric anomalies to identify root cause.</p>
+            
+            <!-- EE Promotional Banner -->
+            <div id="ai-rootcause-promo" style="display:none; background:rgba(245,158,11,0.05); border:1px solid rgba(245,158,11,0.2); border-radius:8px; padding:1.5rem; text-align:center; margin-top:1.5rem;">
+              <span style="font-size:1.5rem;">🔒</span>
+              <h3 style="margin-top:0.5rem; color:var(--warning);">Enterprise Edition Required</h3>
+              <p style="font-size:0.85rem; color:var(--text-secondary); max-width:500px; margin:0.5rem auto 0 auto;">Unlock automated root-cause diagnostics, ranked fault hypothesis correlation, and self-healing recommendation steps by upgrading to Servverse Enterprise Edition.</p>
+            </div>
+            
+            <div id="ai-rootcause-results" style="display:none; margin-top:1.5rem;">
+              <h3 style="font-size:1.1rem; margin-bottom:1rem;">Ranked Hypotheses:</h3>
+              <div id="ai-rootcause-list" style="display:flex; flex-direction:column; gap:1rem;">
+                <!-- Dynamically filled -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Natural Language Query -->
+        <div class="pane-grid mt-4">
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Natural Language Operations Query</h2>
+              <span class="badge online" style="background:rgba(16,185,129,0.1); color:var(--success);">OSS</span>
+            </div>
+            <p class="section-desc">Ask questions in plain English — the engine maps them to trace/log filters and returns aggregated results.</p>
+            <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+              <input type="text" id="nlq-input" placeholder='e.g. "Show failed requests in last hour touching ServDB"'
+                style="flex:1; background:#0f1120; border:1px solid rgba(255,255,255,0.1); color:#fff; padding:0.6rem 1rem; border-radius:8px; font-size:0.9rem; outline:none;">
+              <button class="btn btn-primary" id="btn-nlq-submit" onclick="fetchNLQueryResult()">⚡ Run Query</button>
+            </div>
+            <div id="nlq-result" style="display:none; margin-top:1.5rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:8px; padding:1.25rem;">
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem;">Interpreted as:</div>
+                <div id="nlq-interpreted" style="font-family:var(--font-mono); font-size:0.85rem; color:var(--primary);"></div>
+                <div style="display:flex; gap:2rem; margin-top:1rem; flex-wrap:wrap;">
+                  <div><div style="font-size:0.75rem; color:var(--text-muted);">Traces</div><div id="nlq-trace-count" class="card-value" style="font-size:1.5rem;"></div></div>
+                  <div><div style="font-size:0.75rem; color:var(--text-muted);">Errors</div><div id="nlq-error-count" class="card-value" style="font-size:1.5rem; color:var(--danger);"></div></div>
+                  <div><div style="font-size:0.75rem; color:var(--text-muted);">Total Spans</div><div id="nlq-span-count" class="card-value" style="font-size:1.5rem;"></div></div>
+                </div>
+                <p id="nlq-summary" style="margin:1rem 0 0 0; font-size:0.85rem; color:var(--text-secondary); line-height:1.6;"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Predictive Alerts + Incident Playbooks -->
+        <div class="pane-grid mt-4">
+          <!-- Predictive Alerting -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Predictive Alerting</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchPredictiveAlerts()">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Trend-based predictions: disk exhaustion, cert expiry, approaching rate limits.</p>
+            <div class="table-container" style="margin-top:1rem;">
+              <table style="width:100%; border-collapse:collapse; text-align:left;">
+                <thead>
+                  <tr style="border-bottom:2px solid rgba(255,255,255,0.08); font-size:0.8rem; text-transform:uppercase;">
+                    <th style="padding:0.75rem;">Service</th>
+                    <th style="padding:0.75rem;">Metric</th>
+                    <th style="padding:0.75rem;">Current</th>
+                    <th style="padding:0.75rem;">Threshold</th>
+                    <th style="padding:0.75rem;">ETA</th>
+                    <th style="padding:0.75rem;">Severity</th>
+                  </tr>
+                </thead>
+                <tbody id="predictive-alerts-list">
+                  <tr><td colspan="6" class="text-center text-muted" style="padding:2rem;">Loading predictions...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Incident Playbooks -->
+          <div class="card glass-card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Incident Playbooks</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchPlaybooks()">↻ Refresh</button>
+            </div>
+            <p class="section-desc">Registered runbooks triggered by alert patterns. Click Execute to run immediately.</p>
+            <div id="playbooks-list" style="display:flex; flex-direction:column; gap:0.75rem; margin-top:1rem;">
+              <!-- Filled dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: LIVE TOPOLOGY -->
+
+      <div class="tab-pane" id="tab-topology">
+        <div class="pane-grid">
+          <!-- Left: Live Topology Info -->
+          <div class="card glass-card span-2">
+            <div class="card-header">
+              <h2>Live Service Topology</h2>
+            </div>
+            <p class="section-desc">Real-time service connectivity map auto-discovered from OTel trace spans and ServMesh heartbeats.</p>
+            <div class="text-center text-muted" style="padding: 4rem 0;">
+              <p style="font-size:2rem; margin-bottom:1rem;">🌐</p>
+              <p>Topology data populates as services emit traces. Use the Dependency Graph tab for the force-directed view.</p>
+            </div>
+          </div>
+
+          <!-- Right: Service Comparison Mode (13.16 / UC.16) -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Service Comparison</h2>
+            </div>
+            <p class="section-desc">Select any two services to compare their runtime health metrics side-by-side.</p>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+              <div style="flex: 1;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">Service A</label>
+                <select id="compare-svc-a" class="form-control" style="width:100%; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" onchange="updateComparison()"></select>
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size:0.75rem; color:var(--text-muted);">Service B</label>
+                <select id="compare-svc-b" class="form-control" style="width:100%; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" onchange="updateComparison()"></select>
+              </div>
+            </div>
+            <div class="comparison-results" style="margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+              <div style="display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem; font-size:0.9rem;">
+                <span style="font-weight: 600;">Metric</span>
+                <span id="compare-header-a" style="color: var(--primary); font-weight: 600;">Svc A</span>
+                <span id="compare-header-b" style="color: var(--accent); font-weight: 600;">Svc B</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size:0.85rem;">
+                <span>Status</span>
+                <span id="compare-status-a" class="badge">—</span>
+                <span id="compare-status-b" class="badge">—</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size:0.85rem;">
+                <span>Latency</span>
+                <span id="compare-latency-a">—</span>
+                <span id="compare-latency-b">—</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size:0.85rem;">
+                <span>Endpoint URL</span>
+                <span id="compare-url-a" style="font-family:var(--font-mono); font-size:0.75rem; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+                <span id="compare-url-b" style="font-family:var(--font-mono); font-size:0.75rem; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+              </div>
+            </div>
+        </div>
+
+        <div class="pane-grid mt-4">
+          <!-- Ecosystem Dependency Matrix -->
+          <div class="card glass-card span-3">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Dependency Matrix</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchDependencyMatrix()">↻ Refresh Matrix</button>
+            </div>
+            <p class="section-desc">Caller-to-callee runtime invocation grid. Columns represent callers, rows represent callees.</p>
+            <div class="table-container" style="margin-top: 1rem; overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;" id="dependency-matrix-table">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08);" id="dependency-matrix-headers">
+                    <!-- Filled dynamically -->
+                  </tr>
+                </thead>
+                <tbody id="dependency-matrix-body" style="font-size: 0.85rem;">
+                  <tr><td class="text-center text-muted" style="padding: 2rem;">Loading dependency matrix...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+      </div>
+
+      <!-- TAB: SERVMESH -->
+      <div class="tab-pane" id="tab-mesh">
+        <div class="pane-grid">
+          <!-- Left: ServMesh Service Registry & Routing Rules -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Mesh Service Discovery & Routing</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchMeshStatus()">↻ Refresh Mesh</button>
+            </div>
+            <p class="section-desc">Active instances, dynamic routes, and routing configurations inside the service mesh.</p>
+            <div class="table-container" style="margin-top: 1.5rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Service</th>
+                    <th style="padding: 0.75rem;">Endpoint</th>
+                    <th style="padding: 0.75rem;">Weight</th>
+                    <th style="padding: 0.75rem;">Canary Split</th>
+                  </tr>
+                </thead>
+                <tbody id="mesh-services-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="4" class="text-center text-muted" style="padding: 2rem;">Loading service mesh state...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Right: Circuit Breakers & Certs -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Mesh Circuit Breaker Status</h2>
+            </div>
+            <p class="section-desc">Circuit breaking status and mTLS certificates expiration monitoring.</p>
+            <div id="mesh-circuit-breakers" style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1rem;">
+              <!-- Filled dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SERVCRON -->
+      <div class="tab-pane" id="tab-cron">
+        <div class="pane-grid">
+          <!-- Left: Jobs List -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Scheduled Jobs</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchCronJobs()">↻ Refresh Jobs</button>
+            </div>
+            <p class="section-desc">Manage system triggers, background tasks, and check their execution counts/schedules.</p>
+            <div class="table-container" style="margin-top: 1.5rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Job Name</th>
+                    <th style="padding: 0.75rem;">Schedule</th>
+                    <th style="padding: 0.75rem;">Last Run</th>
+                    <th style="padding: 0.75rem;">Runs</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="cron-jobs-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="5" class="text-center text-muted" style="padding: 2rem;">Loading jobs...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Right: Cron Expression Editor -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Visual Cron Expression Editor</h2>
+            </div>
+            <p class="section-desc">Validate expressions and preview upcoming run times.</p>
+            <div style="margin-top: 1.5rem; display:flex; flex-direction:column; gap:1.25rem;">
+              <div>
+                <label style="font-size:0.75rem; color:var(--text-muted);">Expression (Standard 5-Field)</label>
+                <input type="text" id="cron-editor-expr" class="form-control" style="width:100%; margin-top:0.25rem; font-family:var(--font-mono); font-size:1.1rem; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" value="*/5 * * * *" oninput="previewCronExpression()">
+              </div>
+              <div>
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Projected Next 5 Run Times:</span>
+                <ul id="cron-editor-runs" style="margin-top:0.5rem; padding-left:1.25rem; font-family:var(--font-mono); font-size:0.8rem; display:flex; flex-direction:column; gap:0.25rem; color:var(--primary);">
+                  <!-- Dynamically projected -->
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SERVCACHE -->
+      <div class="tab-pane" id="tab-cache">
+        <div class="pane-grid">
+          <!-- Left: Cache Namespaces & Purge -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Cache Namespaces</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchCacheMetrics()">↻ Refresh Cache</button>
+            </div>
+            <p class="section-desc">Active caching segments, keys counts, and namespace optimization triggers.</p>
+            <div class="table-container" style="margin-top: 1.5rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Namespace</th>
+                    <th style="padding: 0.75rem;">Keys Count</th>
+                    <th style="padding: 0.75rem;">Hit Ratio</th>
+                    <th style="padding: 0.75rem; text-align: right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="cache-namespaces-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="4" class="text-center text-muted" style="padding: 2rem;">Loading cache status...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Right: Eviction & Memory metrics -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Cache Performance</h2>
+            </div>
+            <p class="section-desc">Global hit ratios, eviction trends, and memory load metrics.</p>
+            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1.25rem;">
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Overall Hit/Miss Ratio</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--success);" id="cache-hit-ratio">—</h3>
+              </div>
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                <span style="font-size:0.8rem; color:var(--text-secondary);">Eviction Rate</span>
+                <h3 style="font-size:1.8rem; margin-top:0.25rem; color:var(--warning);" id="cache-eviction-rate">—</h3>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SERVREGISTRY -->
+      <div class="tab-pane" id="tab-registry">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Package Registry</h2>
+              <button class="btn btn-secondary btn-sm" onclick="fetchRegistryCatalog()">↻ Refresh Registry</button>
+            </div>
+            <p class="section-desc">Ecosystem packages directory, versions list, download volume, and licenses status.</p>
+            <div class="table-container" style="margin-top: 1.5rem;">
+              <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 2px solid rgba(255,255,255,0.08); font-size: 0.8rem; text-transform: uppercase;">
+                    <th style="padding: 0.75rem;">Package Name</th>
+                    <th style="padding: 0.75rem;">Published Version</th>
+                    <th style="padding: 0.75rem;">License</th>
+                    <th style="padding: 0.75rem;">Total Downloads</th>
+                    <th style="padding: 0.75rem;">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="registry-packages-list" style="font-size: 0.85rem;">
+                  <tr><td colspan="5" class="text-center text-muted" style="padding: 2rem;">Loading packages...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: CONFIG EDITOR -->
+      <div class="tab-pane" id="tab-config">
+        <div class="pane-grid">
+          <!-- Left: Central Settings Form -->
+          <div class="card glass-card span-2">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Ecosystem Config Editor</h2>
+              <button class="btn btn-primary" onclick="saveConfiguration()">Save Changes</button>
+            </div>
+            <p class="section-desc">Edit ecosystem configurations: Rate Limiting, TTLs, and Routing Splits.</p>
+            <div style="margin-top:1.5rem; display:flex; flex-direction:column; gap:1.5rem;">
+              <div>
+                <label style="font-weight:600; font-size:0.9rem; color:#fff;">ServGate Rate Limit (req/sec)</label>
+                <input type="number" id="cfg-gate-ratelimit" class="form-control" style="width:100%; margin-top:0.25rem; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" value="100">
+              </div>
+              <div>
+                <label style="font-weight:600; font-size:0.9rem; color:#fff;">ServCache Default TTL (seconds)</label>
+                <input type="number" id="cfg-cache-ttl" class="form-control" style="width:100%; margin-top:0.25rem; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" value="300">
+              </div>
+              <div>
+                <label style="font-weight:600; font-size:0.9rem; color:#fff;">ServMesh Circuit Breaker Failure Threshold</label>
+                <input type="number" id="cfg-mesh-failures" class="form-control" style="width:100%; margin-top:0.25rem; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff;" value="5">
+              </div>
+            </div>
+          </div>
+          <!-- Right: Validation status -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>Configuration Validation</h2>
+            </div>
+            <p class="section-desc">Check configuration consistency and parameters validation.</p>
+            <div style="margin-top:1.5rem; background:rgba(16, 185, 129, 0.05); border:1px solid rgba(16, 185, 129, 0.1); padding:1rem; border-radius:8px;">
+              <div style="color:var(--success); font-weight:600;">Status: Ready</div>
+              <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:0.5rem; margin-bottom:0;">All parameters conform to core schema requirements.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: CUSTOM DASHBOARDS -->
+      <div class="tab-pane" id="tab-dashboards">
+        <div class="pane-grid vertical-stack">
+          <div class="card glass-card">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Custom Dashboards</h2>
+              <button class="btn btn-primary" id="btn-create-dashboard">+ New Dashboard</button>
+            </div>
+            <p class="section-desc">Create custom monitoring dashboards with drag-and-drop metric widgets. Save and share per team.</p>
+
+            <div id="dashboards-list" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:1.5rem; margin-top:1.5rem;">
+              <!-- Dashboards rendered dynamically -->
+            </div>
+
+            <div id="dashboard-empty" class="text-center text-muted" style="padding:3rem 0;">
+              <p style="font-size:2rem; margin-bottom:1rem;">📊</p>
+              <p>No custom dashboards yet. Click "+ New Dashboard" to create one.</p>
+            </div>
+          </div>
+
+          <!-- Dashboard Editor (shown when editing) -->
+          <div class="card glass-card" id="dashboard-editor" style="display:none; margin-top:2rem;">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+              <h2>Dashboard Editor: <span id="dashboard-editor-title">Untitled</span></h2>
+              <div style="display:flex; gap:0.5rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-add-widget">+ Add Widget</button>
+                <button class="btn btn-primary btn-sm" id="btn-save-dashboard">Save Dashboard</button>
+              </div>
+            </div>
+
+            <div id="dashboard-widgets-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:1rem; margin-top:1.5rem; min-height:200px; border:2px dashed rgba(255,255,255,0.08); border-radius:12px; padding:1rem;">
+              <div class="text-center text-muted" style="grid-column:1/-1; padding:2rem 0;">
+                Drag widgets here or click "+ Add Widget"
+              </div>
+            </div>
+        </div>
+      </div>
+
+      <!-- TAB: DOCUMENTATION -->
+      <div class="tab-pane" id="tab-docs">
+        <div class="pane-grid">
+          <!-- Left: Ecosystem API Specs Explorer -->
+          <div class="card glass-card">
+            <div class="card-header">
+              <h2>API Spec Directory</h2>
+            </div>
+            <p class="section-desc">Inspect auto-discovered service endpoint schemas.</p>
+            <select id="docs-service-select" class="form-control" style="width:100%; padding:0.5rem; background:#0f1120; border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; margin-bottom: 1rem;" onchange="loadSelectedDocsSpec()"></select>
+            
+            <div id="docs-spec-details" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.05); border-radius:6px; padding:1rem; overflow-y:auto; max-height: 500px; font-size:0.85rem; display:flex; flex-direction:column; gap:0.75rem;">
+              <div>Loading API directory...</div>
+            </div>
+          </div>
+
+          <!-- Right: Ecosystem Documentation (ServDocs) -->
+          <div class="card glass-card span-2" style="padding: 0; min-height: calc(100vh - 120px); display: flex; flex-direction: column;">
+            <div class="card-header" style="padding: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <h2>Ecosystem Documentation (ServDocs)</h2>
+            </div>
+            <div style="flex-grow: 1; width: 100%; position: relative; min-height: 600px;">
+              <iframe id="docs-frame" src="/api/proxy/docs/" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; background: #0f1120;"></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: LOCKS -->
+      <div class="tab-pane" id="tab-locks">
+        <div class="pane-grid">
+          <div class="card glass-card span-3">
+            <div class="card-header">
+              <h2>Active Distributed Leases (ServLock)</h2>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-locks">🔄 Refresh</button>
+            </div>
+            <p class="section-desc">Monitor real-time distributed resource locks, fencing tokens, and process owners.</p>
+            <div class="table-container">
+              <table id="locks-table">
+                <thead>
+                  <tr>
+                    <th>Lock Key</th>
+                    <th>Process Owner</th>
+                    <th>Fencing Token</th>
+                    <th>Expires In</th>
+                    <th>Wait Queue</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="locks-table-body">
+                  <tr><td colspan="6" class="text-center text-muted">No active leases</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: SECRETS -->
+      <div class="tab-pane" id="tab-secrets">
+        <div class="pane-grid">
+          <div class="card glass-card span-3">
+            <div class="card-header">
+              <h2>Secure Credentials Vault (ServSecret)</h2>
+              <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-secrets">🔄 Refresh</button>
+                <button class="btn btn-primary btn-sm" id="btn-add-secret">+ Create Secret</button>
+              </div>
+            </div>
+            <p class="section-desc">Manage encrypted service tokens, api keys, and rotate environment keys securely.</p>
+            <div class="table-container">
+              <table id="secrets-table">
+                <thead>
+                  <tr>
+                    <th>Secret Key</th>
+                    <th>Encrypted Value</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="secrets-table-body">
+                  <tr><td colspan="3" class="text-center text-muted">No credentials registered</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+  <!-- Add Route Modal -->
+  <div class="modal-backdrop" id="add-route-modal">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Add API Proxy Route</h3>
+        <button class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <form id="add-route-form">
+        <div class="form-group">
+          <label for="route-prefix">Path Prefix</label>
+          <input type="text" id="route-prefix" placeholder="e.g. /api/v1/orders" required>
+        </div>
+        <div class="form-group">
+          <label for="route-target">Target URL</label>
+          <input type="text" id="route-target" placeholder="e.g. http://localhost:8081" required>
+        </div>
+        <div class="form-group">
+          <label for="route-rpm">Rate Limit (Requests/Min)</label>
+          <input type="number" id="route-rpm" placeholder="60">
+        </div>
+        <div class="form-row">
+          <div class="form-check">
+            <input type="checkbox" id="route-ai-guard">
+            <label for="route-ai-guard">Prompt Guard (AI Safety)</label>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" id="route-ai-cache">
+            <label for="route-ai-cache">Semantic Caching</label>
+          </div>
+          <div class="form-check">
+            <input type="checkbox" id="route-ai-pii">
+            <label for="route-ai-pii">PII Redactor</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">Register Route</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Incident Timeline Modal -->
+  <div class="modal-backdrop" id="incident-timeline-modal" style="display: none;">
+    <div class="modal glass-card" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 id="incident-modal-title">Incident Analysis</h3>
+        <button class="modal-close" id="incident-modal-close-btn">&times;</button>
+      </div>
+      <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; background: rgba(255,255,255,0.02); padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+          <div>
+            <span style="color:var(--text-secondary);">Target Service:</span>
+            <strong id="incident-modal-component" style="margin-left:0.5rem; color:#fff;">-</strong>
+          </div>
+          <div>
+            <span style="color:var(--text-secondary);">Severity:</span>
+            <span class="badge" id="incident-modal-severity" style="margin-left:0.5rem;">-</span>
+          </div>
+        </div>
+
+        <div style="position: relative; margin-top: 1.5rem; padding-left: 2rem;" class="incident-timeline-container">
+          <div class="timeline-line"></div>
+          <div id="incident-timeline-events" style="display: flex; flex-direction: column; gap: 1.5rem;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <div id="incident-runbook-section" style="margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem; display: none;">
+          <h4 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 0.9rem; color: #fff; display: flex; align-items: center; gap: 0.5rem;">
+            <span>⚡ Suggested Remediations (Runbooks)</span>
+          </h4>
+          <div id="incident-runbooks-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <!-- Filled dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Login Screen Overlay -->
+  <div id="login-screen" class="login-overlay" style="display: none;">
+    <div class="login-card glass-card">
+      <div class="logo-area" style="margin-bottom: 2rem; justify-content: center;">
+        <div class="logo-icon">▲</div>
+        <div class="logo-text">
+          <h1>ServConsole</h1>
+          <span>Unified Servverse Engine</span>
+        </div>
+      </div>
+      <h2>SSO Authentication Required</h2>
+      <p class="section-desc" style="text-align: center; margin-bottom: 2rem;">Please authenticate via your configured OpenID Connect (OIDC) identity provider to access the administration dashboard.</p>
+      <button id="btn-sso-login" class="btn btn-primary w-100" style="padding: 1rem; font-weight: 600;">🔑 Login with SSO</button>
+    </div>
+  </div>
+
+  <!-- Create Bucket Modal -->
+  <div class="modal-backdrop" id="create-bucket-modal" style="display: none;">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Provision New Storage Bucket</h3>
+        <button class="modal-close" id="btn-close-bucket-modal">&times;</button>
+      </div>
+      <form id="create-bucket-form">
+        <div class="form-group">
+          <label for="new-bucket-name">Bucket Name</label>
+          <input type="text" id="new-bucket-name" placeholder="e.g. static-assets" required>
+          <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Must be lowercase, alphanumeric, and start with a letter.</span>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">⚡ Provision Bucket</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Topic Modal -->
+  <div class="modal-backdrop" id="create-topic-modal" style="display: none;">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Provision New Messaging Topic</h3>
+        <button class="modal-close" id="btn-close-topic-modal">&times;</button>
+      </div>
+      <form id="create-topic-form">
+        <div class="form-group">
+          <label for="new-topic-name">Topic Name</label>
+          <input type="text" id="new-topic-name" placeholder="e.g. email-delivery" required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">⚡ Provision Topic</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Secret Modal -->
+  <div class="modal-backdrop" id="create-secret-modal" style="display: none;">
+    <div class="modal glass-card">
+      <div class="modal-header">
+        <h3>Store New Secret Credential</h3>
+        <button class="modal-close" id="btn-close-secret-modal">&times;</button>
+      </div>
+      <form id="create-secret-form">
+        <div class="form-group">
+          <label for="new-secret-key">Secret Key</label>
+          <input type="text" id="new-secret-key" placeholder="e.g. database.password" required>
+        </div>
+        <div class="form-group">
+          <label for="new-secret-value">Secret Value</label>
+          <input type="password" id="new-secret-value" placeholder="Enter plaintext value to encrypt" required>
+        </div>
+        <button type="submit" class="btn btn-primary w-100 mt-3">🔐 Encrypt & Store</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Diagnostics Terminal Modal -->
+  <div class="modal-backdrop" id="diagnostics-terminal-modal" style="display: none;">
+    <div class="modal glass-card" style="max-width: 720px; width: 90%;">
+      <div class="modal-header">
+        <h3>Ecosystem Diagnostic Console</h3>
+        <button class="modal-close" id="btn-close-terminal-modal">&times;</button>
+      </div>
+      <p class="section-desc">Interactive troubleshooting shell executed inside isolated container namespace nodes.</p>
+      
+      <div class="form-group" style="margin-bottom: 1rem;">
+        <label for="terminal-service-select">Target Service Instance</label>
+        <select id="terminal-service-select" class="form-control" style="padding: 0.5rem; background: #0f1120; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #fff; outline: none; cursor: pointer;">
+          <option value="ServGate">ServGate (Gateway on :8080)</option>
+          <option value="ServStore">ServStore (Storage on :8081)</option>
+          <option value="ServQueue">ServQueue (Broker on :8082)</option>
+          <option value="ServTunnel">ServTunnel (Relay on :8443)</option>
+        </select>
+      </div>
+
+      <div class="terminal-body" style="background: #05050c; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem; font-family: var(--font-mono); font-size: 0.85rem; height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; color: #39ff14; box-shadow: inset 0 0 10px rgba(0,0,0,0.8);">
+        <div class="terminal-history" id="terminal-history-log">
+          <div>Welcome to the Servverse Diagnostic Shell.</div>
+          <div>Available commands: ps aux, free -m, df -h, serv status, ping [target]</div>
+          <div style="margin-bottom: 0.5rem;">Type 'help' to show this message.</div>
+        </div>
+        <div class="terminal-input-line" style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="color: #00ffcc; font-weight: bold;" id="terminal-prompt-prefix">ServGate:~#</span>
+          <input type="text" id="terminal-cmd-input" style="flex-grow: 1; background: transparent; border: none; outline: none; color: #39ff14; font-family: var(--font-mono); font-size: 0.85rem; padding: 0;" autocomplete="off" autofocus>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
