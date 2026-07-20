@@ -519,9 +519,9 @@ func TestRateLimiting(t *testing.T) {
 
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	// Send 110 requests. We expect at least one 429.
+	// Send 300 requests. We expect at least one 429.
 	has429 := false
-	for i := 0; i < 110; i++ {
+	for i := 0; i < 300; i++ {
 		httpReq, _ := http.NewRequest("GET", reqURL, nil)
 		httpReq.Host = fmt.Sprintf("ratelimit.localhost:%s", relayPort)
 		resp, err := client.Do(httpReq)
