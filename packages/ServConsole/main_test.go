@@ -742,7 +742,7 @@ func TestHandleIncidentAnalysis(t *testing.T) {
 }
 
 func TestHandleRunbookExecution(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/runbooks?component=ServGate", nil)
+	req := httptest.NewRequest("GET", "/api/runbooks?component=github.com/vyuvaraj/serv/packages/ServGate", nil)
 	w := httptest.NewRecorder()
 	handleRunbooks(w, req)
 
@@ -754,7 +754,7 @@ func TestHandleRunbookExecution(t *testing.T) {
 	var actions []RunbookAction
 	json.NewDecoder(resp.Body).Decode(&actions)
 	if len(actions) < 1 {
-		t.Fatal("expected at least one runbook action for ServGate")
+		t.Fatal("expected at least one runbook action for github.com/vyuvaraj/serv/packages/ServGate")
 	}
 
 	execPayload := `{"runbookId":"rb-gate-cache","alertId":"alert-mock-123"}`
@@ -891,7 +891,7 @@ func TestHandleDiagnosticExec(t *testing.T) {
 	if !res["success"].(bool) {
 		t.Errorf("expected success to be true")
 	}
-	if !strings.Contains(res["output"].(string), "serv ServGate") {
+	if !strings.Contains(res["output"].(string), "serv github.com/vyuvaraj/serv/packages/ServGate") {
 		t.Errorf("expected output to contain command result, got: %s", res["output"])
 	}
 }
