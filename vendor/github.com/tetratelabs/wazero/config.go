@@ -12,6 +12,8 @@ import (
 
 	"github.com/tetratelabs/wazero/api"
 	experimentalsys "github.com/tetratelabs/wazero/experimental/sys"
+	"github.com/tetratelabs/wazero/internal/engine/interpreter"
+	"github.com/tetratelabs/wazero/internal/engine/wazevo"
 	"github.com/tetratelabs/wazero/internal/filecache"
 	"github.com/tetratelabs/wazero/internal/internalapi"
 	"github.com/tetratelabs/wazero/internal/platform"
@@ -173,9 +175,7 @@ type RuntimeConfig interface {
 // NewRuntimeConfig returns a RuntimeConfig using the compiler if it is supported in this environment,
 // or the interpreter otherwise.
 func NewRuntimeConfig() RuntimeConfig {
-	ret := engineLessConfig.clone()
-	ret.engineKind = engineKindAuto
-	return ret
+	return newRuntimeConfig()
 }
 
 type newEngine func(context.Context, api.CoreFeatures, filecache.Cache) wasm.Engine
@@ -203,8 +203,7 @@ var engineLessConfig = &runtimeConfig{
 type engineKind int
 
 const (
-	engineKindAuto engineKind = iota - 1
-	engineKindCompiler
+	engineKindCompiler engineKind = iota
 	engineKindInterpreter
 	engineKindCount
 )
@@ -235,6 +234,7 @@ const (
 func NewRuntimeConfigCompiler() RuntimeConfig {
 	ret := engineLessConfig.clone()
 	ret.engineKind = engineKindCompiler
+	ret.newEngine = wazevo.NewEngine
 	return ret
 }
 
@@ -242,6 +242,7 @@ func NewRuntimeConfigCompiler() RuntimeConfig {
 func NewRuntimeConfigInterpreter() RuntimeConfig {
 	ret := engineLessConfig.clone()
 	ret.engineKind = engineKindInterpreter
+	ret.newEngine = interpreter.NewEngine
 	return ret
 }
 

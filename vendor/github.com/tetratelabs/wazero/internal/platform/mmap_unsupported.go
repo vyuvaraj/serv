@@ -1,4 +1,4 @@
-//go:build !(unix || windows)
+//go:build !(darwin || linux || freebsd || windows) || tinygo
 
 package platform
 
@@ -13,10 +13,14 @@ func munmapCodeSegment(code []byte) error {
 	panic(errUnsupported)
 }
 
-func mmapCodeSegment(size int) ([]byte, error) {
+func mmapCodeSegmentAMD64(size int) ([]byte, error) {
 	panic(errUnsupported)
 }
 
-func MprotectCodeSegment(b []byte) (err error) {
+func mmapCodeSegmentARM64(size int) ([]byte, error) {
+	panic(errUnsupported)
+}
+
+func MprotectRX(b []byte) (err error) {
 	panic(errUnsupported)
 }

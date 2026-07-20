@@ -7,6 +7,7 @@ import (
 
 	"github.com/tetratelabs/wazero/experimental/sys"
 	"github.com/tetratelabs/wazero/internal/descriptor"
+	"github.com/tetratelabs/wazero/internal/fsapi"
 	socketapi "github.com/tetratelabs/wazero/internal/sock"
 	"github.com/tetratelabs/wazero/internal/sysfs"
 )
@@ -50,7 +51,7 @@ type FileEntry struct {
 	FS sys.FS
 
 	// File is always non-nil.
-	File sys.File
+	File fsapi.File
 
 	// direntCache is nil until DirentCache was called.
 	direntCache *DirentCache
@@ -271,7 +272,7 @@ func (c *FSContext) OpenFile(fs sys.FS, path string, flag sys.Oflag, perm fs.Fil
 	if f, errno := fs.OpenFile(path, flag, perm); errno != 0 {
 		return 0, errno
 	} else {
-		fe := &FileEntry{FS: fs, File: f}
+		fe := &FileEntry{FS: fs, File: fsapi.Adapt(f)}
 		if path == "/" || path == "." {
 			fe.Name = ""
 		} else {
@@ -328,14 +329,12 @@ func (c *FSContext) SockAccept(sockFD int32, nonblock bool) (int32, sys.Errno) {
 		return 0, errno
 	}
 
-	fe := &FileEntry{File: conn}
+	fe := &FileEntry{File: fsapi.Adapt(conn)}
 
 	if nonblock {
-		if pf, ok := fe.File.(sys.PollableFile); ok {
-			if errno = pf.SetNonblock(true); errno != 0 {
-				_ = conn.Close()
-				return 0, errno
-			}
+		if errno = fe.File.SetNonblock(true); errno != 0 {
+			_ = conn.Close()
+			return 0, errno
 		}
 	}
 
@@ -413,7 +412,7 @@ func (c *Context) InitFSContext(
 	}
 
 	for _, tl := range tcpListeners {
-		c.fsc.openedFiles.Insert(&FileEntry{IsPreopen: true, File: sysfs.NewTCPListenerFile(tl)})
+		c.fsc.openedFiles.Insert(&FileEntry{IsPreopen: true, File: fsapi.Adapt(sysfs.NewTCPListenerFile(tl))})
 	}
 	return nil
 }

@@ -77,7 +77,6 @@ func NewMemoryInstance(memSec *Memory, allocator experimental.MemoryAllocator, m
 	if allocator != nil {
 		expBuffer = allocator.Allocate(capBytes, maxBytes)
 		buffer = expBuffer.Reallocate(minBytes)
-		_ = buffer[:minBytes] // Bounds check that the minimum was allocated.
 	} else if memSec.IsShared {
 		// Shared memory needs a fixed buffer, so allocate with the maximum size.
 		//
@@ -87,7 +86,8 @@ func NewMemoryInstance(memSec *Memory, allocator experimental.MemoryAllocator, m
 		//
 		// Also, allocating Max here isn't harmful as the Go runtime uses mmap for large allocations, therefore,
 		// the memory buffer allocation here is virtual and doesn't consume physical memory until it's used.
-		// 	* https://github.com/golang/go/blob/go1.24.0/src/runtime/malloc.go#L1059
+		// 	* https://github.com/golang/go/blob/8121604559035734c9677d5281bbdac8b1c17a1e/src/runtime/malloc.go#L1059
+		//	* https://github.com/golang/go/blob/8121604559035734c9677d5281bbdac8b1c17a1e/src/runtime/malloc.go#L1165
 		buffer = make([]byte, minBytes, maxBytes)
 	} else {
 		buffer = make([]byte, minBytes, capBytes)
@@ -238,15 +238,12 @@ func (m *MemoryInstance) Grow(delta uint32) (result uint32, ok bool) {
 		return currentPages, true
 	}
 
+	// If exceeds the max of memory size, we push -1 according to the spec.
 	newPages := currentPages + delta
 	if newPages > m.Max || int32(delta) < 0 {
 		return 0, false
 	} else if m.expBuffer != nil {
 		buffer := m.expBuffer.Reallocate(MemoryPagesToBytesNum(newPages))
-		if buffer == nil {
-			// Allocator failed to grow.
-			return 0, false
-		}
 		if m.Shared {
 			if unsafe.SliceData(buffer) != unsafe.SliceData(m.Buffer) {
 				panic("shared memory cannot move, this is a bug in the memory allocator")

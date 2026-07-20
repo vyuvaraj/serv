@@ -1,3 +1,5 @@
+//go:build linux && !tinygo
+
 package sysfs
 
 import (

@@ -1,19 +1,18 @@
 // Separated from linux which has support for huge pages.
-
-//go:build unix && !linux
+//go:build darwin || freebsd
 
 package platform
 
-import "golang.org/x/sys/unix"
+import "syscall"
 
-func mmapCodeSegment(size int) ([]byte, error) {
-	return unix.Mmap(
+func mmapCodeSegment(size, prot int) ([]byte, error) {
+	return syscall.Mmap(
 		-1,
 		0,
 		size,
-		unix.PROT_READ|unix.PROT_WRITE,
+		prot,
 		// Anonymous as this is not an actual file, but a memory,
 		// Private as this is in-process memory region.
-		unix.MAP_ANON|unix.MAP_PRIVATE,
+		syscall.MAP_ANON|syscall.MAP_PRIVATE,
 	)
 }
