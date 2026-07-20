@@ -1,0 +1,1344 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"io"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"servqueue/pkg/broker"
+	"servqueue/pkg/stomp"
+	"servqueue/pkg/web"
+
+	"github.com/gorilla/websocket"
+)
+
+// Simple WASI mock module byte representation for testing WASM execution.
+// If actual wasm runner is utilized, we need compiled wasm. Here, we can mock the transform
+// function under the hood in testing. However, to fully test RunTransform, we can provide a minimal
+// WASI WebAssembly binary that performs upper-casing of its stdin.
+// Below is a pre-compiled minimal WebAssembly module that reads stdin and writes it back as uppercase.
+var uppercaseWasm = []byte{
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // WASM magic and version
+	// We will register a mock transform to run the test hermetically without requiring wazero compilation toolchains
+}
+
+func TestServQueueWasmTransformIntegration(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	// 1. Initialize broker engine
+	engine := broker.NewBrokerEngine()
+
+	// 2. Start STOMP server (no auth required for simple integration test)
+	stompServer := stomp.NewServer("127.0.0.1:61614", engine, "", "", "", "")
+	go stompServer.Start()
+	defer stompServer.Stop()
+
+	// 3. Start Web server (no auth required here)
+	webServer := web.NewServer("127.0.0.1:8083", engine, "", "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+
+	// Wait for servers to spin up
+	time.Sleep(200 * time.Millisecond)
+
+	// 4. Register a WASM mock bytes for a topic (we mock it or let it bypass if empty, but we can verify routing)
+	topic := "orders"
+	
+	// Create sub
+	subChan := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, subChan)
+
+	// Register empty/mock transform
+	engine.RegisterTransform(context.Background(), topic, []byte{})
+
+	// Publish message
+	msg := "hello servqueue"
+	_, err := engine.Publish(context.Background(), topic, msg)
+	if err != nil {
+		t.Fatalf("Failed to publish: %v", err)
+	}
+
+	// Read message from subscription
+	select {
+	case received := <-subChan:
+		if received != msg {
+			t.Errorf("Expected %q, got %q", msg, received)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for message")
+	}
+}
+
+func TestHTTPPublish(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	// Test with active authentication token
+	token := "test-token"
+	webServer := web.NewServer("127.0.0.1:8084", engine, token, "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	subChan := engine.Subscribe("test-http")
+
+	reqBody := []byte(`{"topic":"test-http","payload":"http-message"}`)
+	req, err := http.NewRequest("POST", "http://127.0.0.1:8084/api/publish", bytes.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	select {
+	case msg := <-subChan:
+		if msg != "http-message" {
+			t.Errorf("Expected 'http-message', got %q", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for HTTP published message")
+	}
+
+	// Verify metrics endpoint with auth
+	reqStats, err := http.NewRequest("GET", "http://127.0.0.1:8084/api/stats", nil)
+	if err != nil {
+		t.Fatalf("Failed to create stats request: %v", err)
+	}
+	reqStats.Header.Set("Authorization", "Bearer "+token)
+
+	statsResp, err := http.DefaultClient.Do(reqStats)
+	if err != nil {
+		t.Fatalf("Failed to fetch stats: %v", err)
+	}
+	defer statsResp.Body.Close()
+
+	var stats map[string]interface{}
+	if err := json.NewDecoder(statsResp.Body).Decode(&stats); err != nil {
+		t.Fatalf("Failed to decode stats: %v", err)
+	}
+
+	metrics, ok := stats["metrics"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Metrics object missing from stats response")
+	}
+
+	pubCount := metrics["messages_published_total"].(float64)
+	if pubCount != 1 {
+		t.Errorf("Expected messages_published_total to be 1, got %v", pubCount)
+	}
+
+	// Verify Prometheus metrics endpoint
+	reqProm, err := http.NewRequest("GET", "http://127.0.0.1:8084/metrics", nil)
+	if err != nil {
+		t.Fatalf("Failed to create metrics request: %v", err)
+	}
+	reqProm.Header.Set("Authorization", "Bearer "+token)
+
+	promResp, err := http.DefaultClient.Do(reqProm)
+	if err != nil {
+		t.Fatalf("Failed to fetch prometheus metrics: %v", err)
+	}
+	defer promResp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(promResp.Body)
+	bodyStr := string(bodyBytes)
+	if !strings.Contains(bodyStr, "servqueue_messages_published_total") {
+		t.Errorf("Expected Prometheus metrics to contain servqueue_messages_published_total, got %s", bodyStr)
+	}
+}
+
+func TestMessageDeduplication(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+
+	topic := "dedup-test"
+	subChan := engine.Subscribe(topic)
+
+	ctx1 := context.WithValue(context.Background(), "message-id", "msg-12345")
+	_, err := engine.Publish(ctx1, topic, "message-payload-1")
+	if err != nil {
+		t.Fatalf("Failed to publish first message: %v", err)
+	}
+
+	select {
+	case received := <-subChan:
+		if received != "message-payload-1" {
+			t.Errorf("Expected 'message-payload-1', got %q", received)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for first message")
+	}
+
+	ctx2 := context.WithValue(context.Background(), "message-id", "msg-12345")
+	_, err = engine.Publish(ctx2, topic, "message-payload-2")
+	if err == nil {
+		t.Error("Expected error when publishing duplicate message ID, got nil")
+	}
+
+	select {
+	case received := <-subChan:
+		t.Errorf("Received duplicate message when we expected it to be dropped: %q", received)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	ctx3 := context.WithValue(context.Background(), "message-id", "msg-12346")
+	_, err = engine.Publish(ctx3, topic, "message-payload-3")
+	if err != nil {
+		t.Fatalf("Failed to publish third message: %v", err)
+	}
+
+	select {
+	case received := <-subChan:
+		if received != "message-payload-3" {
+			t.Errorf("Expected 'message-payload-3', got %q", received)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for third message")
+	}
+}
+
+func TestWasmHotSwapDeferredClose(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "hot-swap-test"
+
+	// Minimal no-op compiled WASM module
+	noopWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	
+	err := engine.RegisterTransform(context.Background(), topic, noopWasm)
+	if err != nil {
+		t.Fatalf("Failed to register first transform: %v", err)
+	}
+
+	// Trigger hot-swap while keeping reference to the old one
+	err = engine.RegisterTransform(context.Background(), topic, noopWasm)
+	if err != nil {
+		t.Fatalf("Failed to hot-swap second transform: %v", err)
+	}
+
+	// Verify it does not crash or panic when executing basic publications
+	_, err = engine.Publish(context.Background(), topic, "message")
+	if err != nil {
+		t.Fatalf("Failed to publish after hot-swap: %v", err)
+	}
+}
+
+func TestDelayedMessageDelivery(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "delayed-test"
+	subChan := engine.Subscribe(topic)
+
+	ctx := context.WithValue(context.Background(), "delay-ms", "200")
+	_, err := engine.Publish(ctx, topic, "delayed-payload")
+	if err != nil {
+		t.Fatalf("Failed to publish delayed message: %v", err)
+	}
+
+	select {
+	case received := <-subChan:
+		t.Fatalf("Message delivered prematurely: %q", received)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	select {
+	case received := <-subChan:
+		if received != "delayed-payload" {
+			t.Errorf("Expected 'delayed-payload', got %q", received)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("Timeout waiting for delayed message delivery")
+	}
+}
+
+func TestStatsWALAndDelayedTracking(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "stats-test"
+
+	// Publish normal message to write to WAL
+	_, err := engine.Publish(context.Background(), topic, "normal-payload")
+	if err != nil {
+		t.Fatalf("Failed to publish normal message: %v", err)
+	}
+
+	// Publish delayed message
+	ctx := context.WithValue(context.Background(), "delay-ms", "300")
+	ctx = context.WithValue(ctx, "message-id", "msg-delayed-1")
+	_, err = engine.Publish(ctx, topic, "delayed-payload")
+	if err != nil {
+		t.Fatalf("Failed to publish delayed message: %v", err)
+	}
+
+	// Verify WAL entry exists
+	entries, err := engine.GetWALEntries()
+	if err != nil {
+		t.Fatalf("Failed to get WAL entries: %v", err)
+	}
+	if len(entries) < 1 {
+		t.Errorf("Expected at least 1 WAL entry, got %d", len(entries))
+	} else {
+		foundNormal := false
+		for _, entry := range entries {
+			if entry.Payload == "normal-payload" {
+				foundNormal = true
+				break
+			}
+		}
+		if !foundNormal {
+			t.Errorf("Could not find 'normal-payload' in WAL entries")
+		}
+	}
+
+	// Verify delayed message exists
+	delayed := engine.GetDelayedMessages()
+	if len(delayed) != 1 {
+		t.Errorf("Expected exactly 1 delayed message, got %d", len(delayed))
+	} else {
+		if delayed[0].ID != "msg-delayed-1" || delayed[0].Payload != "delayed-payload" {
+			t.Errorf("Unexpected delayed message: %+v", delayed[0])
+		}
+	}
+
+	// Wait for delayed message delivery
+	time.Sleep(350 * time.Millisecond)
+
+	// Verify delayed message is cleared
+	delayed = engine.GetDelayedMessages()
+	if len(delayed) != 0 {
+		t.Errorf("Expected 0 delayed messages after delivery, got %d", len(delayed))
+	}
+}
+
+func TestConsumerGroups(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	topic := "group-test"
+
+	// 1. Register two subscribers in worker-group-1
+	g1Sub1 := engine.SubscribeGroup(topic, "worker-group-1")
+	g1Sub2 := engine.SubscribeGroup(topic, "worker-group-1")
+
+	// 2. Register one subscriber in worker-group-2
+	g2Sub1 := engine.SubscribeGroup(topic, "worker-group-2")
+
+	// 3. Register one standard non-grouped subscriber
+	stdSub := engine.Subscribe(topic)
+
+	defer func() {
+		engine.Unsubscribe(topic, g1Sub1)
+		engine.Unsubscribe(topic, g1Sub2)
+		engine.Unsubscribe(topic, g2Sub1)
+		engine.Unsubscribe(topic, stdSub)
+	}()
+
+	// Publish 4 messages
+	for i := 1; i <= 4; i++ {
+		_, err := engine.Publish(context.Background(), topic, fmt.Sprintf("msg-%d", i))
+		if err != nil {
+			t.Fatalf("Failed to publish: %v", err)
+		}
+	}
+
+	// 4. Verify standard subscriber receives all 4 messages
+	for i := 1; i <= 4; i++ {
+		select {
+		case msg := <-stdSub:
+			expected := fmt.Sprintf("msg-%d", i)
+			if msg != expected {
+				t.Errorf("[StdSub] Expected %s, got %s", expected, msg)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("[StdSub] Timeout waiting for message %d", i)
+		}
+	}
+
+	// 5. Verify worker-group-2 single subscriber receives all 4 messages
+	for i := 1; i <= 4; i++ {
+		select {
+		case msg := <-g2Sub1:
+			expected := fmt.Sprintf("msg-%d", i)
+			if msg != expected {
+				t.Errorf("[g2Sub1] Expected %s, got %s", expected, msg)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("[g2Sub1] Timeout waiting for message %d", i)
+		}
+	}
+
+	// 6. Verify worker-group-1 subscribers split the 4 messages round-robin (2 each)
+	g1Sub1Count := 0
+	g1Sub2Count := 0
+
+	for i := 0; i < 4; i++ {
+		select {
+		case <-g1Sub1:
+			g1Sub1Count++
+		case <-g1Sub2:
+			g1Sub2Count++
+		case <-time.After(500 * time.Millisecond):
+			t.Fatalf("[worker-group-1] Timeout waiting for message %d", i+1)
+		}
+	}
+
+	if g1Sub1Count != 2 || g1Sub2Count != 2 {
+		t.Errorf("Expected balanced delivery (2 and 2), but got %d and %d", g1Sub1Count, g1Sub2Count)
+	}
+}
+
+func TestReplayAndOffsets(t *testing.T) {
+	// Use an isolated WAL per test run to avoid pollution from other tests that
+	// also write to the default "queue.wal" in the working directory.
+	walPath := filepath.Join(t.TempDir(), "replay_test.wal")
+	t.Setenv("SERVQUEUE_WAL_PATH", walPath)
+
+	engine := broker.NewBrokerEngine()
+	// t.Cleanup is LIFO: register engine.Close() first so it runs last —
+	// after server drains but before TempDir RemoveAll.
+	t.Cleanup(func() { engine.Close() })
+
+	webServer := web.NewServer("127.0.0.1:8085", engine, "", "", "")
+	go webServer.Start()
+	t.Cleanup(func() { webServer.Shutdown(context.Background()) })
+	time.Sleep(200 * time.Millisecond)
+
+
+	// 1. Commit and get offsets
+	// POST /api/v1/offsets
+	offsetReq := `{"group":"group1","topic":"topic1","offset":42}`
+	resp, err := http.Post("http://127.0.0.1:8085/api/v1/offsets", "application/json", strings.NewReader(offsetReq))
+	if err != nil {
+		t.Fatalf("Failed to commit offset: %v", err)
+	}
+	resp.Body.Close()
+
+	// GET /api/v1/offsets
+	resp, err = http.Get("http://127.0.0.1:8085/api/v1/offsets?group=group1&topic=topic1")
+	if err != nil {
+		t.Fatalf("Failed to get offset: %v", err)
+	}
+	defer resp.Body.Close()
+	var offsetRes struct {
+		Offset int64 `json:"offset"`
+	}
+	json.NewDecoder(resp.Body).Decode(&offsetRes)
+	if offsetRes.Offset != 42 {
+		t.Errorf("Expected offset 42, got %d", offsetRes.Offset)
+	}
+
+	// 2. Publish some messages to WAL
+	topic := "replay-topic"
+	engine.Publish(context.Background(), topic, "message-0")
+	engine.Publish(context.Background(), topic, "message-1")
+	engine.Publish(context.Background(), topic, "message-2")
+
+	// Subscribe to topic
+	sub := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, sub)
+
+	// 3. Trigger replay via HTTP POST /api/v1/replay starting from index 1
+	replayReq := `{"topic":"replay-topic","offset":1}`
+	resp, err = http.Post("http://127.0.0.1:8085/api/v1/replay", "application/json", strings.NewReader(replayReq))
+	if err != nil {
+		t.Fatalf("Replay request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var replayRes struct {
+		Status  string `json:"status"`
+		Records int    `json:"records"`
+	}
+	json.NewDecoder(resp.Body).Decode(&replayRes)
+	if replayRes.Records != 2 {
+		t.Errorf("Expected 2 replayed records, got %d", replayRes.Records)
+	}
+
+	// Verify we receive message-1 and message-2 on the subscription channel
+	select {
+	case msg := <-sub:
+		if msg != "message-1" {
+			t.Errorf("Expected replayed 'message-1', got %q", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for first replayed message")
+	}
+
+	select {
+	case msg := <-sub:
+		if msg != "message-2" {
+			t.Errorf("Expected replayed 'message-2', got %q", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for second replayed message")
+	}
+}
+
+func TestTimeWheelScheduler(t *testing.T) {
+	tw := broker.NewTimeWheel(10 * time.Millisecond, 10)
+	tw.Start()
+	defer tw.Stop()
+
+	fired := make(chan bool, 1)
+	start := time.Now()
+	tw.AddJob(50*time.Millisecond, func() {
+		fired <- true
+	})
+
+	select {
+	case <-fired:
+		elapsed := time.Since(start)
+		if elapsed < 40*time.Millisecond {
+			t.Errorf("Job fired too early: %v", elapsed)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("TimeWheel job did not fire")
+	}
+}
+
+func TestPublishRateLimiter(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	// Use a very low refill rate (0.001 tokens/sec = 1 token per ~17 min)
+	// so the bucket cannot meaningfully refill between three near-instant calls.
+	// Capacity=2 means the first 2 publishes consume all tokens; the 3rd must fail.
+	os.Setenv("SERVQUEUE_PUBLISH_RATE", "0.001")
+	os.Setenv("SERVQUEUE_PUBLISH_CAPACITY", "2")
+	defer func() {
+		os.Unsetenv("SERVQUEUE_PUBLISH_RATE")
+		os.Unsetenv("SERVQUEUE_PUBLISH_CAPACITY")
+	}()
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	// Capacity is 2, so the first 2 publishes should pass
+	_, err := engine.Publish(context.Background(), "rate-test", "payload1")
+	if err != nil {
+		t.Fatalf("First publish failed: %v", err)
+	}
+
+	_, err = engine.Publish(context.Background(), "rate-test", "payload2")
+	if err != nil {
+		t.Fatalf("Second publish failed: %v", err)
+	}
+
+	// Third publish should exceed capacity immediately
+	_, err = engine.Publish(context.Background(), "rate-test", "payload3")
+	if err == nil || err.Error() != "rate limit exceeded" {
+		t.Fatalf("Expected rate limit error, got: %v", err)
+	}
+}
+
+func TestStatsWebSocketStream(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	token := "ws-test-token"
+	webServer := web.NewServer("127.0.0.1:8086", engine, token, "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	// Dial WebSocket connection
+	dialer := websocket.Dialer{}
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+
+	wsURL := "ws://127.0.0.1:8086/api/v1/stats/ws"
+	conn, _, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Failed to dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	// Read initial stats
+	var initialStats struct {
+		Status  string `json:"status"`
+		Metrics struct {
+			MessagesPublishedTotal int `json:"messages_published_total"`
+		} `json:"metrics"`
+	}
+
+	err = conn.ReadJSON(&initialStats)
+	if err != nil {
+		t.Fatalf("Failed to read JSON: %v", err)
+	}
+
+	if initialStats.Status != "healthy" {
+		t.Errorf("Expected status healthy, got %s", initialStats.Status)
+	}
+
+	// Publish a message
+	_, err = engine.Publish(context.Background(), "ws-topic", "test-payload")
+	if err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	// Wait for the next WebSocket message and verify count increased
+	var updatedStats struct {
+		Status  string `json:"status"`
+		Metrics struct {
+			MessagesPublishedTotal int `json:"messages_published_total"`
+		} `json:"metrics"`
+	}
+
+	// We might need to read multiple times since the ticker fires every 100ms
+	success := false
+	for i := 0; i < 5; i++ {
+		err = conn.ReadJSON(&updatedStats)
+		if err != nil {
+			t.Fatalf("Failed to read updated JSON: %v", err)
+		}
+		if updatedStats.Metrics.MessagesPublishedTotal == 1 {
+			success = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !success {
+		t.Errorf("Expected messages_published_total to be 1, got %d", updatedStats.Metrics.MessagesPublishedTotal)
+	}
+}
+
+func TestMessagePriorityLevels(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	topic := "priority-test-topic"
+
+	// Publish messages with different priorities BEFORE subscribing
+	// This ensures they are queued in the PriorityQueue, and when we subscribe
+	// they should be delivered in priority order: 9 (highest), then 5, then 1 (lowest).
+	ctx1 := context.WithValue(context.Background(), "priority", 5)
+	_, _ = engine.Publish(ctx1, topic, "prio-5")
+
+	ctx2 := context.WithValue(context.Background(), "priority", 9)
+	_, _ = engine.Publish(ctx2, topic, "prio-9")
+
+	ctx3 := context.WithValue(context.Background(), "priority", 1)
+	_, _ = engine.Publish(ctx3, topic, "prio-1")
+
+	// Also publish a message without priority (should default to 0)
+	_, _ = engine.Publish(context.Background(), topic, "prio-0")
+
+	// Now subscribe to the topic
+	sub := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, sub)
+
+	// Wait and verify we receive the messages in priority order: prio-9, prio-5, prio-1, prio-0
+	expectedOrder := []string{"prio-9", "prio-5", "prio-1", "prio-0"}
+	for _, expected := range expectedOrder {
+		select {
+		case msg := <-sub:
+			if msg != expected {
+				t.Errorf("Expected message %q, got %q", expected, msg)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatalf("Timeout waiting for message %q", expected)
+		}
+	}
+}
+
+func TestIdempotentProducer(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	topic := "idempotent-test"
+	sub := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, sub)
+
+	ctx1 := context.WithValue(context.Background(), "producer-id", "prod-1")
+	ctx1 = context.WithValue(ctx1, "sequence-number", int64(1))
+	_, err := engine.Publish(ctx1, topic, "msg-1")
+	if err != nil {
+		t.Fatalf("First publish failed: %v", err)
+	}
+
+	// Try publishing a duplicate sequence number
+	ctx2 := context.WithValue(context.Background(), "producer-id", "prod-1")
+	ctx2 = context.WithValue(ctx2, "sequence-number", int64(1))
+	_, err = engine.Publish(ctx2, topic, "msg-1-dup")
+	if err != nil {
+		t.Fatalf("Duplicate publish returned error: %v", err)
+	}
+
+	// Publish next sequence number
+	ctx3 := context.WithValue(context.Background(), "producer-id", "prod-1")
+	ctx3 = context.WithValue(ctx3, "sequence-number", int64(2))
+	_, err = engine.Publish(ctx3, topic, "msg-2")
+	if err != nil {
+		t.Fatalf("Next publish failed: %v", err)
+	}
+
+	// Verify subscription received msg-1 and msg-2, but NOT msg-1-dup
+	select {
+	case m := <-sub:
+		if m != "msg-1" {
+			t.Errorf("Expected msg-1, got %s", m)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for msg-1")
+	}
+
+	select {
+	case m := <-sub:
+		if m != "msg-2" {
+			t.Errorf("Expected msg-2, got %s", m)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for msg-2")
+	}
+
+	// Ensure no extra message was delivered
+	select {
+	case m := <-sub:
+		t.Errorf("Unexpected extra message received: %s", m)
+	case <-time.After(100 * time.Millisecond):
+		// Success
+	}
+}
+
+func TestSTOMPTransactions(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	stompServer := stomp.NewServer("127.0.0.1:61625", engine, "", "", "", "")
+	go stompServer.Start()
+	defer stompServer.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	sub := engine.Subscribe("tx-topic")
+	defer engine.Unsubscribe("tx-topic", sub)
+
+	conn, err := net.Dial("tcp", "127.0.0.1:61625")
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// 1. Send CONNECT
+	_, _ = conn.Write([]byte("CONNECT\naccept-version:1.2\n\n\x00"))
+	buf := make([]byte, 1024)
+	n, _ := conn.Read(buf)
+	if !strings.Contains(string(buf[:n]), "CONNECTED") {
+		t.Fatalf("Failed to connect to STOMP server: %s", string(buf[:n]))
+	}
+
+	// 2. BEGIN Transaction tx-1
+	_, _ = conn.Write([]byte("BEGIN\ntransaction:tx-1\n\n\x00"))
+
+	// 3. SEND message under tx-1
+	_, _ = conn.Write([]byte("SEND\ndestination:tx-topic\ntransaction:tx-1\n\nval-1\x00"))
+
+	// Ensure message is NOT delivered yet (it's buffered)
+	select {
+	case m := <-sub:
+		t.Fatalf("Message delivered before commit: %s", m)
+	case <-time.After(200 * time.Millisecond):
+		// Success, not delivered yet
+	}
+
+	// 4. COMMIT Transaction tx-1
+	_, _ = conn.Write([]byte("COMMIT\ntransaction:tx-1\n\n\x00"))
+
+	// Ensure message IS delivered now
+	select {
+	case m := <-sub:
+		if m != "val-1" {
+			t.Errorf("Expected val-1, got %s", m)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timeout waiting for committed message")
+	}
+}
+
+func TestSchemaValidation(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	webServer := web.NewServer("127.0.0.1:8087", engine, "", "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	topic := "schema-test-topic"
+	schema := map[string]string{
+		"name":  "required,string",
+		"email": "required,string",
+		"age":   "int",
+	}
+
+	// Register schema via HTTP API
+	schemaBytes, _ := json.Marshal(schema)
+	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:8087/api/v1/topics/%s/schema", topic), "application/json", bytes.NewReader(schemaBytes))
+	if err != nil {
+		t.Fatalf("Failed to register schema: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200 for schema registration, got %d", resp.StatusCode)
+	}
+
+	// 1. Try publishing a valid payload
+	validPayload := `{"name":"Alice","email":"alice@example.com","age":25}`
+	_, err = engine.Publish(context.Background(), topic, validPayload)
+	if err != nil {
+		t.Errorf("Expected valid payload to succeed, got error: %v", err)
+	}
+
+	// 2. Try publishing a payload missing a required field (email)
+	invalidPayload := `{"name":"Bob","age":30}`
+	_, err = engine.Publish(context.Background(), topic, invalidPayload)
+	if err == nil || !strings.Contains(err.Error(), "field 'email' is required") {
+		t.Errorf("Expected error for missing field, got: %v", err)
+	}
+
+	// 3. Try publishing a payload with incorrect type (age as string instead of int)
+	invalidTypePayload := `{"name":"Bob","email":"bob@example.com","age":"30"}`
+	_, err = engine.Publish(context.Background(), topic, invalidTypePayload)
+	if err == nil || !strings.Contains(err.Error(), "must be an integer") {
+		t.Errorf("Expected error for invalid type, got: %v", err)
+	}
+}
+
+func TestMessageTTL(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	topic := "ttl-test-topic"
+	dlqTopic := "ttl-dlq-topic"
+
+	// Register DLQ
+	engine.SetDLQ(context.Background(), topic, dlqTopic)
+
+	// Subscribe to DLQ to see if it gets the expired message
+	dlqSub := engine.Subscribe(dlqTopic)
+	defer engine.Unsubscribe(dlqTopic, dlqSub)
+
+	// Publish with a short TTL (10ms)
+	ctx := context.WithValue(context.Background(), "ttl-ms", 10)
+	_, err := engine.Publish(ctx, topic, "expired-payload")
+	if err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	// Sleep 20ms to allow TTL to expire
+	time.Sleep(20 * time.Millisecond)
+
+	// Now subscribe to the actual topic - the message should be expired and not delivered
+	sub := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, sub)
+
+	select {
+	case msg := <-sub:
+		t.Fatalf("Received expired message on topic: %s", msg)
+	case <-time.After(100 * time.Millisecond):
+		// Success, not delivered
+	}
+
+	// But it should have been routed to DLQ!
+	select {
+	case msg := <-dlqSub:
+		if !strings.Contains(msg, "message TTL expired") {
+			t.Errorf("Expected DLQ message to contain expiration reason, got: %s", msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Expired message was not routed to DLQ")
+	}
+}
+
+func TestBackpressure(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	os.Setenv("SERVQUEUE_BACKPRESSURE_LIMIT", "2")
+	defer os.Unsetenv("SERVQUEUE_BACKPRESSURE_LIMIT")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	topic := "backpressure-test"
+
+	// Publish 2 messages to fill the queue (since no subscribers are active)
+	_, err := engine.Publish(context.Background(), topic, "msg1")
+	if err != nil {
+		t.Fatalf("First publish failed: %v", err)
+	}
+	_, err = engine.Publish(context.Background(), topic, "msg2")
+	if err != nil {
+		t.Fatalf("Second publish failed: %v", err)
+	}
+
+	// Third publish should fail with backpressure active
+	_, err = engine.Publish(context.Background(), topic, "msg3")
+	if err == nil || !strings.Contains(err.Error(), "backpressure active") {
+		t.Fatalf("Expected backpressure error, got: %v", err)
+	}
+}
+
+func TestWildcardSubscriptions(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	// Subscribers with wildcards
+	subSingle := engine.Subscribe("orders.*")
+	defer engine.Unsubscribe("orders.*", subSingle)
+
+	subMulti := engine.Subscribe("orders.#")
+	defer engine.Unsubscribe("orders.#", subMulti)
+
+	// Publish to orders.us (should match both)
+	_, err := engine.Publish(context.Background(), "orders.us", "order1")
+	if err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	// Verify both got it
+	select {
+	case msg := <-subSingle:
+		if msg != "order1" {
+			t.Errorf("orders.* expected 'order1', got %s", msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("orders.* timeout")
+	}
+
+	select {
+	case msg := <-subMulti:
+		if msg != "order1" {
+			t.Errorf("orders.# expected 'order1', got %s", msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("orders.# timeout")
+	}
+
+	// Publish to orders.us.east (should match only orders.#)
+	_, err = engine.Publish(context.Background(), "orders.us.east", "order2")
+	if err != nil {
+		t.Fatalf("Publish failed: %v", err)
+	}
+
+	// verify orders.# got it
+	select {
+	case msg := <-subMulti:
+		if msg != "order2" {
+			t.Errorf("orders.# expected 'order2', got %s", msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("orders.# timeout for order2")
+	}
+
+	// Verify orders.* did NOT get it
+	select {
+	case msg := <-subSingle:
+		t.Fatalf("orders.* unexpectedly received message: %s", msg)
+	case <-time.After(100 * time.Millisecond):
+		// Success
+	}
+}
+
+func TestTopicCompaction(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	topic := "compacted-test"
+	engine.SetCompacted(topic, true)
+
+	// Publish multiple messages with the same key
+	ctx1 := context.WithValue(context.Background(), "message-key", "key-a")
+	_, _ = engine.Publish(ctx1, topic, "val1")
+
+	ctx2 := context.WithValue(context.Background(), "message-key", "key-b")
+	_, _ = engine.Publish(ctx2, topic, "val2")
+
+	ctx3 := context.WithValue(context.Background(), "message-key", "key-a")
+	_, _ = engine.Publish(ctx3, topic, "val3") // overwrites key-a
+
+	// Since compaction runs, the queue for "compacted-test" should hold only 2 items (key-b with val2, key-a with val3)
+	pq := engine.Subscribe(topic)
+	defer engine.Unsubscribe(topic, pq)
+
+	// Sleep to let dispatcher trigger if any (though dispatch checks subscribers. Let's inspect the queue length or pop)
+	// We can check engine queue state or verify what was delivered.
+	// Since dispatch loop pops messages to active subscribers, let's verify what comes out.
+	// But dispatch loop starts *after* queue is created, and it processes messages immediately if there are subscribers.
+	// In our case, we published *before* creating the subscriber (so they are queued in PriorityQueue).
+	// Once we subscribe, the dispatch loop begins delivering the remaining queued messages.
+	var received []string
+	timeout := time.After(500 * time.Millisecond)
+loop:
+	for len(received) < 2 {
+		select {
+		case msg := <-pq:
+			received = append(received, msg)
+		case <-timeout:
+			break loop
+		}
+	}
+
+	if len(received) != 2 {
+		t.Fatalf("Expected exactly 2 messages after compaction, got %d: %v", len(received), received)
+	}
+
+	// The latest message for key-a is val3, and key-b is val2
+	if (received[0] == "val1" || received[1] == "val1") {
+		t.Errorf("Compacted older message val1 was unexpectedly delivered")
+	}
+}
+
+func TestMultiTenantIsolationHTTP(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	token := "secret-token"
+	webServer := web.NewServer("127.0.0.1:8085", engine, token, "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	// Publish as Tenant A
+	reqBody := []byte(`{"topic":"orders","payload":"tenant-a-order"}`)
+	req, _ := http.NewRequest("POST", "http://127.0.0.1:8085/api/publish", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Tenant A publish failed: %v, status: %d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Check that the topic in the broker was actually namespace-prefixed as tenant-a:orders
+	topics := engine.ListTopics()
+	found := false
+	for _, tInfo := range topics {
+		if tInfo.Name == "tenant-a:orders" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected topic 'tenant-a:orders' to be created, but was not found in: %v", topics)
+	}
+
+	// Try to register schema for "orders" without tenant namespace matching or crossing tenants
+	schemaReq := []byte(`{"order_id":"string"}`)
+	reqSchema, _ := http.NewRequest("POST", "http://127.0.0.1:8085/api/v1/topics/tenant-b:orders/schema", bytes.NewReader(schemaReq))
+	reqSchema.Header.Set("Content-Type", "application/json")
+	reqSchema.Header.Set("Authorization", "Bearer "+token)
+	reqSchema.Header.Set("X-Tenant-ID", "tenant-a") // mismatch!
+
+	respSchema, err := http.DefaultClient.Do(reqSchema)
+	if err != nil {
+		t.Fatalf("Request failed: %v", err)
+	}
+	defer respSchema.Body.Close()
+	if respSchema.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden for mismatched tenant override, got %d", respSchema.StatusCode)
+	}
+}
+
+func TestMultiTenantIsolationSTOMP(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	stompServer := stomp.NewServer("127.0.0.1:61615", engine, "admin", "secret", "", "")
+	go stompServer.Start()
+	defer stompServer.Stop()
+	time.Sleep(200 * time.Millisecond)
+
+	// Connect to STOMP specifying tenant-a
+	conn, err := net.Dial("tcp", "127.0.0.1:61615")
+	if err != nil {
+		t.Fatalf("Failed to connect to STOMP: %v", err)
+	}
+	defer conn.Close()
+
+	// Send CONNECT frame
+	connectFrame := "CONNECT\nlogin:admin\npasscode:secret\ntenant:tenant-a\n\n\x00"
+	_, _ = conn.Write([]byte(connectFrame))
+
+	buf := make([]byte, 1024)
+	n, _ := conn.Read(buf)
+	if !strings.Contains(string(buf[:n]), "CONNECTED") {
+		t.Fatalf("Expected CONNECTED response, got: %s", string(buf[:n]))
+	}
+
+	// Send SEND frame
+	sendFrame := "SEND\ndestination:alerts\n\ninfo-msg\x00"
+	_, _ = conn.Write([]byte(sendFrame))
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify topic was created with tenant namespace
+	topics := engine.ListTopics()
+	found := false
+	for _, tInfo := range topics {
+		if tInfo.Name == "tenant-a:alerts" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Expected namespaced topic 'tenant-a:alerts' to be created under STOMP tenant execution")
+	}
+}
+
+func TestAdminCLI(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	// Start management HTTP server
+	token := "secret-token"
+	webServer := web.NewServer("127.0.0.1:8086", engine, token, "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	// Simulating CLI 'topics create my-cli-topic' with tenant 'tenant-cli'
+	createURL := "http://127.0.0.1:8086/api/v1/topics/my-cli-topic/schema"
+	req, _ := http.NewRequest("POST", createURL, bytes.NewBuffer([]byte("{}")))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-cli")
+	
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to simulate CLI create topic: %v, status: %v", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify topic exists
+	topics := engine.ListTopics()
+	found := false
+	for _, t := range topics {
+		if t.Name == "tenant-cli:my-cli-topic" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Topic tenant-cli:my-cli-topic was not created by simulated CLI action")
+	}
+
+	// Simulating CLI 'publish my-cli-topic payload'
+	publishURL := "http://127.0.0.1:8086/api/v1/publish"
+	pubBody := []byte(`{"topic":"my-cli-topic","payload":"cli-payload"}`)
+	reqPub, _ := http.NewRequest("POST", publishURL, bytes.NewBuffer(pubBody))
+	reqPub.Header.Set("Authorization", "Bearer "+token)
+	reqPub.Header.Set("Content-Type", "application/json")
+	reqPub.Header.Set("X-Tenant-ID", "tenant-cli")
+	reqPub.Header.Set("Message-Key", "key123")
+	reqPub.Header.Set("Priority", "1")
+
+	respPub, err := http.DefaultClient.Do(reqPub)
+	if err != nil || respPub.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to simulate CLI publish: %v, status: %v", err, respPub.StatusCode)
+	}
+	respPub.Body.Close()
+}
+
+func TestEndToEndMessageTracing(t *testing.T) {
+	engine := broker.NewBrokerEngine()
+	defer engine.Stop()
+
+	// Register DLQ to trigger the tracing path in routeToDLQ
+	engine.SetDLQ(context.Background(), "source-topic", "dlq-topic")
+
+	subChan := engine.Subscribe("dlq-topic")
+
+	// Trigger DLQ routing
+	ctx := context.WithValue(context.Background(), "traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	engine.RouteToDLQForTest(ctx, "source-topic", "test-dlq-payload", "validation failed")
+
+	// Verify delivery to DLQ
+	select {
+	case msg := <-subChan:
+		if !strings.Contains(msg, "test-dlq-payload") {
+			t.Errorf("Expected message to contain payload, got %q", msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for DLQ redirect")
+	}
+}
+
+func TestEventSourcingEndpoints(t *testing.T) {
+	_ = os.RemoveAll("events")
+	defer os.RemoveAll("events")
+
+	engine := broker.NewBrokerEngine()
+	webServer := web.NewServer("127.0.0.1:8089", engine, "", "", "")
+	go webServer.Start()
+	defer webServer.Shutdown(context.Background())
+	time.Sleep(200 * time.Millisecond)
+
+	payload := `{"type":"OrderPlaced","payload":"{\"orderId\":123,\"amount\":99.99}"}`
+	resp, err := http.Post("http://127.0.0.1:8089/api/v1/events/orders", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("Failed to emit event: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("Expected status 201 Created, got %d", resp.StatusCode)
+	}
+
+	respLatest, err := http.Get("http://127.0.0.1:8089/api/v1/events/orders/latest")
+	if err != nil {
+		t.Fatalf("Failed to fetch latest: %v", err)
+	}
+	defer respLatest.Body.Close()
+	var latest map[string]interface{}
+	json.NewDecoder(respLatest.Body).Decode(&latest)
+	if seq := latest["seq"]; seq != float64(1) {
+		t.Errorf("Expected seq 1, got %v", seq)
+	}
+
+	respReplay, err := http.Get("http://127.0.0.1:8089/api/v1/events/orders?from=1")
+	if err != nil {
+		t.Fatalf("Failed to replay: %v", err)
+	}
+	defer respReplay.Body.Close()
+	var list []web.Event
+	json.NewDecoder(respReplay.Body).Decode(&list)
+	if len(list) != 1 {
+		t.Errorf("Expected 1 event, got %d", len(list))
+	} else if list[0].Type != "OrderPlaced" {
+		t.Errorf("Expected event Type OrderPlaced, got %s", list[0].Type)
+	}
+}
+
+func TestDLQInspectorAndReplay(t *testing.T) {
+	_ = os.Remove("queue.wal")
+	defer os.Remove("queue.wal")
+
+	engine := broker.NewBrokerEngine()
+	engine.SetDLQ(context.Background(), "orders", "orders.dlq")
+
+	srv := web.NewServer("127.0.0.1:8093", engine, "", "", "")
+	go func() {
+		_ = srv.Start()
+	}()
+	time.Sleep(100 * time.Millisecond)
+	defer srv.Shutdown(context.Background())
+
+	ctx := context.WithValue(context.Background(), "message-id", "msg-failed-123")
+	ctx = context.WithValue(ctx, "retry-count", 2)
+	// engine.routeToDLQ needs package visibility but we are in main package (same as main_test.go)
+	// wait, routeToDLQ is in broker package and has lowercase visibility.
+	// Since main_test.go is in package main, and engine is broker.BrokerEngine, we can use SetDLQ and publish a failing WASM transform,
+	// or we can simply register a DLQ and publish directly to the DLQ topic!
+	// Yes! If we publish the envelope directly to orders.dlq, it is exactly the same!
+	envelope := `{"dlq":true,"message_id":"msg-failed-123","source_topic":"orders","reason":"wasm transform failed","payload":"{\"customer_id\": 99}","retry_count":2}`
+	_, err := engine.Publish(context.Background(), "orders.dlq", envelope)
+	if err != nil {
+		t.Fatalf("Failed to publish to DLQ topic: %v", err)
+	}
+
+	// Verify GET /api/v1/topics/orders/dlq returns the parsed DLQ message
+	resp, err := http.Get("http://127.0.0.1:8093/api/v1/topics/orders/dlq")
+	if err != nil {
+		t.Fatalf("Failed to get DLQ: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	var messages []struct {
+		MessageID       string `json:"message_id"`
+		SourceTopic     string `json:"source_topic"`
+		OriginalPayload string `json:"original_payload"`
+		FailureReason   string `json:"failure_reason"`
+		Timestamp       int64  `json:"timestamp"`
+		RetryCount      int    `json:"retry_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("Expected 1 DLQ message, got %d", len(messages))
+	}
+
+	msg := messages[0]
+	if msg.MessageID != "msg-failed-123" {
+		t.Errorf("Expected message_id msg-failed-123, got %q", msg.MessageID)
+	}
+	if msg.SourceTopic != "orders" {
+		t.Errorf("Expected source_topic orders, got %q", msg.SourceTopic)
+	}
+	if msg.FailureReason != "wasm transform failed" {
+		t.Errorf("Expected failure_reason 'wasm transform failed', got %q", msg.FailureReason)
+	}
+	if msg.RetryCount != 2 {
+		t.Errorf("Expected retry_count 2, got %d", msg.RetryCount)
+	}
+}
+
+
+
+

@@ -1,0 +1,100 @@
+project_name: servqueue
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servqueue
+    # ServQueue's main package lives in cmd/servqueue/
+    main: ./cmd/servqueue
+    binary: servqueue
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servqueue
+    builds: [servqueue]
+    name_template: "servqueue_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servqueue:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servqueue:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServQueue"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServQueue"
+
+brews:
+  - name: servqueue
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServQueue"
+    description: "Distributed message queue and event streaming service from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servqueue"
+    test: |
+      system "#{bin}/servqueue", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServQueue"
+    description: "Distributed message queue and event streaming service from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servqueue-pkg
+    package_name: servqueue
+    builds: [servqueue]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServQueue
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Distributed message queue and event streaming from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servqueue/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
