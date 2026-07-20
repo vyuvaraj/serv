@@ -1,0 +1,29 @@
+name: ServTrace CI
+
+on:
+  push:
+    branches: ["main", "feature/*"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  ci:
+    name: Build · Test · Vet
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build (OSS)
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (OSS)
+        run: go test ./... -timeout 120s
