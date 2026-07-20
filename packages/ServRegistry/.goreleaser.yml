@@ -1,0 +1,99 @@
+project_name: servregistry
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servregistry
+    main: .
+    binary: servregistry
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servregistry
+    builds: [servregistry]
+    name_template: "servregistry_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servregistry:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servregistry:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServRegistry"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServRegistry"
+
+brews:
+  - name: servregistry
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServRegistry"
+    description: "Service discovery and registry from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servregistry"
+    test: |
+      system "#{bin}/servregistry", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServRegistry"
+    description: "Service discovery and registry from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servregistry-pkg
+    package_name: servregistry
+    builds: [servregistry]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServRegistry
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Service registry and health monitoring from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servregistry/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
