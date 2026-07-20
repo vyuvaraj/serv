@@ -1,7 +1,7 @@
 // Verification test for route rate limiting in Serv
 
-extern fn startServer() from "go:serv/runtime:StartServer"
-extern fn sleep(ms) from "go:serv/runtime:Sleep"
+extern fn startServer() from "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime:StartServer"
+extern fn sleep(ms) from "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime:Sleep"
 
 server "3106"
 

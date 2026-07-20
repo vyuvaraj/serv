@@ -135,7 +135,7 @@ func TestParserStatements(t *testing.T) {
 		},
 		{
 			name:  "Extern Function Declaration",
-			input: `extern fn fetch_user(id) from "go:serv/runtime:FetchUser"`,
+			input: `extern fn fetch_user(id) from "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime:FetchUser"`,
 			checkNode: func(t *testing.T, program *Program) {
 				if len(program.Statements) != 1 {
 					t.Fatalf("expected 1 statement, got %d", len(program.Statements))
@@ -144,7 +144,7 @@ func TestParserStatements(t *testing.T) {
 				if !ok {
 					t.Fatalf("expected *ExternFnStmt, got %T", program.Statements[0])
 				}
-				if extStmt.Name != "fetch_user" || extStmt.Source != "go:serv/runtime:FetchUser" {
+				if extStmt.Name != "fetch_user" || extStmt.Source != "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime:FetchUser" {
 					t.Errorf("expected name 'fetch_user', got name=%q source=%q", extStmt.Name, extStmt.Source)
 				}
 			},

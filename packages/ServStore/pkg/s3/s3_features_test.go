@@ -106,7 +106,7 @@ func TestS3Features(t *testing.T) {
 	for _, t := range tagsRes.TagSet {
 		tagsMap[t.Key] = t.Value
 	}
-	if tagsMap["env"] != "prod" || tagsMap["project"] != "github.com/vyuvaraj/serv/packages/Serv-lang" {
+	if tagsMap["env"] != "prod" || tagsMap["project"] != "serv" {
 		t.Errorf("GetObjectTagging: expected tags env=prod and project=serv, got: %v", tagsMap)
 	}
 

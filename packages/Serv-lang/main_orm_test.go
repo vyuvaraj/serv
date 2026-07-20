@@ -69,7 +69,7 @@ migration "20260616_init" {
 	db.query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
 }
 
-extern fn runMigrations() from "go:serv/runtime:RunMigrations"
+extern fn runMigrations() from "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime:RunMigrations"
 
 test "database orm basic execution test" {
 	runMigrations()

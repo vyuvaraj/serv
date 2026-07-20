@@ -16,9 +16,9 @@ func TestPhase35UtilityNamespacesPart7(t *testing.T) {
 	defer os.Remove(tmpFile.Name())
 
 	srvContent := `
-	extern fn new_mock(val) from "go:serv/runtime:NewMockReceiver"
+	extern fn new_mock(val) from "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime:NewMockReceiver"
 
-	extern from "go:serv/runtime" {
+	extern from "go:github.com/vyuvaraj/serv/packages/Serv-lang/runtime" {
 		fn mock_func(str) from "MockFunc"
 		fn mock_meth(obj, str) from "MockReceiver.MockMethod"
 	}
