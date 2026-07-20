@@ -1,0 +1,408 @@
+{
+  "New Service": {
+    "prefix": "service",
+    "body": [
+      "server \"${1:8080}\"",
+      "",
+      "route \"${2:GET}\" \"${3:/api/endpoint}\" (req) {",
+      "\t$0",
+      "\treturn { \"ok\": true }",
+      "}"
+    ],
+    "description": "Scaffold a new Serv service (/health and /ready are auto-registered)"
+  },
+  "Function Declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a function"
+  },
+  "Typed Function": {
+    "prefix": "fnt",
+    "body": [
+      "fn ${1:name}(${2:a}: ${3:int}) -> ${4:int} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a typed function with return type"
+  },
+  "Variable Declaration": {
+    "prefix": "let",
+    "body": [
+      "let ${1:name} = ${2:value}"
+    ],
+    "description": "Declare a variable"
+  },
+  "Typed Variable": {
+    "prefix": "lett",
+    "body": [
+      "let ${1:name}: ${2:int} = ${3:value}"
+    ],
+    "description": "Declare a typed variable"
+  },
+  "HTTP Route Handler": {
+    "prefix": "route",
+    "body": [
+      "route \"${1|GET,POST,PUT,DELETE,PATCH|}\" \"${2:/path}\" (${3:req}) {",
+      "\t$0",
+      "\treturn { \"ok\": true }",
+      "}"
+    ],
+    "description": "Create an HTTP route endpoint"
+  },
+  "Route with Middleware": {
+    "prefix": "routeauth",
+    "body": [
+      "route \"${1|GET,POST,PUT,DELETE|}\" \"${2:/api/protected}\" (req) use [${3:auth}] {",
+      "\t$0",
+      "\treturn { \"data\": \"protected\" }",
+      "}"
+    ],
+    "description": "Route with middleware"
+  },
+  "Route with Rate Limit": {
+    "prefix": "routelimit",
+    "body": [
+      "route \"${1:GET}\" \"${2:/api/endpoint}\" (req) limit ${3:100}/${4|minute,second,hour|} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Rate-limited route"
+  },
+  "Middleware Declaration": {
+    "prefix": "middleware",
+    "body": [
+      "middleware ${1:auth}(req) {",
+      "\tlet token = req.params.authorization",
+      "\tif token == nil {",
+      "\t\treturn { \"error\": \"Unauthorized\", \"status\": 401 }",
+      "\t}",
+      "}"
+    ],
+    "description": "Declare a middleware"
+  },
+  "Struct Declaration": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "\t${2:field}: ${3:string},",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a struct"
+  },
+  "Struct Method": {
+    "prefix": "method",
+    "body": [
+      "fn ${1:TypeName}.${2:methodName}(${3}) -> ${4:string} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a method on a struct"
+  },
+  "Every Interval Block": {
+    "prefix": "every",
+    "body": [
+      "every ${1:5s} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Run code on a fixed interval"
+  },
+  "Cron Scheduler Block": {
+    "prefix": "cron",
+    "body": [
+      "cron \"${1:0 * * * *}\" {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Run code on a cron schedule"
+  },
+  "Subscribe to Topic": {
+    "prefix": "subscribe",
+    "body": [
+      "subscribe \"${1:topic}\" (${2:msg}) {",
+      "\tlog.info(\"Received: \", $2)",
+      "\t$0",
+      "}"
+    ],
+    "description": "Subscribe to a message broker topic"
+  },
+  "Publish Message": {
+    "prefix": "publish",
+    "body": [
+      "publish \"${1:topic}\" ${2:payload}"
+    ],
+    "description": "Publish a message to a topic"
+  },
+  "Spawn Task": {
+    "prefix": "spawn",
+    "body": [
+      "spawn ${1:taskFn}($2)"
+    ],
+    "description": "Spawn a concurrent task"
+  },
+  "Spawn with Worker Pool": {
+    "prefix": "spawnlimit",
+    "body": [
+      "spawn(${1:5}) ${2:taskFn}($3)"
+    ],
+    "description": "Spawn with worker pool limit"
+  },
+  "Database Query": {
+    "prefix": "dbquery",
+    "body": [
+      "let ${1:rows} = db.query(\"${2:SELECT * FROM table}\", ${3})"
+    ],
+    "description": "Execute a database query"
+  },
+  "Database Insert": {
+    "prefix": "dbinsert",
+    "body": [
+      "let result = db.query(\"INSERT INTO ${1:table} (${2:columns}) VALUES (${3:?})\", ${4:values})"
+    ],
+    "description": "Insert into database"
+  },
+  "Cache Set": {
+    "prefix": "cacheset",
+    "body": [
+      "cache.set(\"${1:key}\", ${2:value}, \"${3:5m}\")"
+    ],
+    "description": "Set a cache value with TTL"
+  },
+  "Cache Get": {
+    "prefix": "cacheget",
+    "body": [
+      "let ${1:value} = cache.get(\"${2:key}\")"
+    ],
+    "description": "Get a cache value"
+  },
+  "HTTP GET": {
+    "prefix": "httpget",
+    "body": [
+      "let ${1:resp} = http.get(\"${2:https://api.example.com}\")"
+    ],
+    "description": "Make an HTTP GET request"
+  },
+  "HTTP POST": {
+    "prefix": "httppost",
+    "body": [
+      "let ${1:resp} = http.post(\"${2:https://api.example.com}\", ${3:body})"
+    ],
+    "description": "Make an HTTP POST request"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If statement"
+  },
+  "If-Else": {
+    "prefix": "ife",
+    "body": [
+      "if ${1:condition} {",
+      "\t$2",
+      "} else {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If-else statement"
+  },
+  "For Loop (range)": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:items} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "For-in loop over a collection"
+  },
+  "For Loop (map)": {
+    "prefix": "formap",
+    "body": [
+      "for ${1:key}, ${2:value} in ${3:data} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate over map key-value pairs"
+  },
+  "For Loop (condition)": {
+    "prefix": "forwhile",
+    "body": [
+      "for ${1:condition} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Condition-based loop"
+  },
+  "Match Block": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\t\"${2:case1}\" => {",
+      "\t\t$3",
+      "\t}",
+      "\t_ => {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Pattern matching"
+  },
+  "Try-Catch": {
+    "prefix": "try",
+    "body": [
+      "try {",
+      "\t$1",
+      "} catch (${2:err}) {",
+      "\tlog.error(\"Error: \", $2)",
+      "\t$0",
+      "}"
+    ],
+    "description": "Try-catch error handling"
+  },
+  "Error Propagation": {
+    "prefix": "letq",
+    "body": [
+      "let ${1:data} = ${2:expression}?"
+    ],
+    "description": "Let with ? operator (error propagation)"
+  },
+  "Multi-Return Error": {
+    "prefix": "leterr",
+    "body": [
+      "let ${1:val}, ${2:err} = ${3:expression}",
+      "if $2 != nil {",
+      "\tlog.error($2)",
+      "\treturn nil",
+      "}"
+    ],
+    "description": "Multi-return error handling"
+  },
+  "Test Block": {
+    "prefix": "test",
+    "body": [
+      "test \"${1:description}\" {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a test"
+  },
+  "Test with Timeout": {
+    "prefix": "testtimeout",
+    "body": [
+      "test \"${1:description}\" timeout ${2:5s} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Test with timeout"
+  },
+  "Before Each": {
+    "prefix": "beforeEach",
+    "body": [
+      "beforeEach {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Setup block that runs before each test"
+  },
+  "After Each": {
+    "prefix": "afterEach",
+    "body": [
+      "afterEach {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Teardown block that runs after each test"
+  },
+  "Assert Equals": {
+    "prefix": "assert",
+    "body": [
+      "assert ${1:actual} == ${2:expected}"
+    ],
+    "description": "Assert equality"
+  },
+  "Import Stdlib": {
+    "prefix": "import",
+    "body": [
+      "import { ${1:ok, notFound} } from \"stdlib/${2:response}\""
+    ],
+    "description": "Import from stdlib"
+  },
+  "Import Go Package": {
+    "prefix": "importgo",
+    "body": [
+      "import ${1:alias} from \"${2:github.com/package}\""
+    ],
+    "description": "Import a Go package"
+  },
+  "WebSocket Handler": {
+    "prefix": "ws",
+    "body": [
+      "ws \"${1:/chat}\" (conn) {",
+      "\tfor true {",
+      "\t\tlet msg = conn.receive()",
+      "\t\tif msg == nil { break }",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "WebSocket endpoint"
+  },
+  "Enum Declaration": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "\t${2:Value1},",
+      "\t${3:Value2},",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare an enum"
+  },
+  "Migration": {
+    "prefix": "migration",
+    "body": [
+      "migration \"${1:create_table}\" {",
+      "\tdb.query(\"${2:CREATE TABLE IF NOT EXISTS}\")",
+      "}"
+    ],
+    "description": "Database migration"
+  },
+  "MCP Tool": {
+    "prefix": "tool",
+    "body": [
+      "tool \"${1:name}\" \"${2:description}\" (args) {",
+      "\t$0",
+      "\treturn { \"result\": \"done\" }",
+      "}"
+    ],
+    "description": "MCP tool definition"
+  },
+  "Log Info": {
+    "prefix": "logi",
+    "body": ["log.info(\"${1:message}\")"],
+    "description": "Log info"
+  },
+  "Log Error": {
+    "prefix": "loge",
+    "body": ["log.error(\"${1:message}\", ${2:err})"],
+    "description": "Log error"
+  },
+  "Config Read": {
+    "prefix": "config",
+    "body": ["let ${1:value} = config(\"${2:key}\")"],
+    "description": "Read config value"
+  },
+  "Env Read": {
+    "prefix": "env",
+    "body": ["let ${1:value} = env(\"${2:KEY}\")"],
+    "description": "Read environment variable"
+  }
+}

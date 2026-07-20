@@ -1,0 +1,1835 @@
+package compiler
+
+import (
+	"fmt"
+	"strings"
+)
+
+func (c *Codegen) genExpression(expr Expression) (string, error) {
+	switch e := expr.(type) {
+	case *Identifier:
+		if c.currentActor != nil && c.actorFields[e.Value] && !c.isDeclared(e.Value) {
+			return "self." + e.Value, nil
+		}
+		return e.Value, nil
+
+	case *StringLiteral:
+		return fmt.Sprintf("%q", e.Value), nil
+
+	case *IntegerLiteral:
+		return fmt.Sprintf("%d", e.Value), nil
+
+	case *FloatLiteral:
+		return fmt.Sprintf("%f", e.Value), nil
+
+	case *ArrayLiteral:
+		hasSpread := false
+		for _, el := range e.Elements {
+			if _, ok := el.(*SpreadElement); ok {
+				hasSpread = true
+				break
+			}
+		}
+		if hasSpread {
+			var mergeArgs []string
+			for _, el := range e.Elements {
+				if se, ok := el.(*SpreadElement); ok {
+					valStr, err := c.genExpression(se.Value)
+					if err != nil {
+						return "", err
+					}
+					mergeArgs = append(mergeArgs, valStr)
+				} else {
+					elStr, err := c.genExpression(el)
+					if err != nil {
+						return "", err
+					}
+					mergeArgs = append(mergeArgs, elStr)
+				}
+			}
+			return fmt.Sprintf("runtime.MergeArrays(%s)", strings.Join(mergeArgs, ", ")), nil
+		}
+
+		var elements []string
+		for _, el := range e.Elements {
+			elStr, err := c.genExpression(el)
+			if err != nil {
+				return "", err
+			}
+			elements = append(elements, elStr)
+		}
+		return fmt.Sprintf("[]interface{}{%s}", strings.Join(elements, ", ")), nil
+
+	case *SpreadElement:
+		return c.genExpression(e.Value)
+
+	case *DurationLiteral:
+		return fmt.Sprintf("%q", e.Value), nil
+
+	case *OptionalMemberExpr:
+		objStr, err := c.genExpression(e.Object)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("runtime.MemberAccess(%s, %q)", objStr, e.Field), nil
+
+	case *MemberExpr:
+		objStr, err := c.genExpression(e.Object)
+		if err != nil {
+			return "", err
+		}
+
+		isBuiltinNamespace := (objStr == "db" || strings.HasPrefix(objStr, "db.") || strings.HasPrefix(objStr, "dbClientStruct") || objStr == "channel" || objStr == "log" || objStr == "s3" || objStr == "mail" || objStr == "store" || objStr == "search" || objStr == "wasm" || objStr == "cache" || objStr == "mcp" || objStr == "atomic" || objStr == "registry" || objStr == "schedule" || objStr == "time" || objStr == "metric" || objStr == "http" || objStr == "json" || objStr == "html" || objStr == "exec" || objStr == "file" || objStr == "csv" || objStr == "xml" || objStr == "yaml" || objStr == "path" || objStr == "regex" || objStr == "math" || objStr == "encoding" || objStr == "hash" || objStr == "runtime.EncodingBase64Namespace{}" || objStr == "runtime.EncodingHexNamespace{}" || objStr == "uuid" || objStr == "rand" || objStr == "url" || objStr == "env" || objStr == "jwt" || objStr == "compress" || objStr == "semver" || objStr == "duration" || objStr == "format" || objStr == "ip" || objStr == "dns" || objStr == "multipart" || objStr == "diff" || objStr == "proto")
+		if !isBuiltinNamespace && (e.Field == "send" || e.Field == "Send") {
+			return fmt.Sprintf("func(msg interface{}) { runtime.ActorSend(%s, msg) }", objStr), nil
+		}
+		if !isBuiltinNamespace && (e.Field == "ask" || e.Field == "Ask") {
+			return fmt.Sprintf("func(msg interface{}) interface{} { return runtime.ActorAsk(%s, msg) }", objStr), nil
+		}
+
+		// Self field access: self.field -> self.Field (direct struct access)
+		if _, isSelf := e.Object.(*SelfExpr); isSelf {
+			return fmt.Sprintf("self.%s", capitalizeFirst(e.Field)), nil
+		}
+
+		// Struct instance field access: if the object is a known struct type variable
+		if objType, ok := c.varTypes[objStr]; ok && objType != "interface{}" && objType != "int" && objType != "string" && objType != "float64" && objType != "bool" && objType != "[]interface{}" {
+			return fmt.Sprintf("%s.%s", objStr, capitalizeFirst(e.Field)), nil
+		}
+
+		// Go package alias: uuid.New -> uuid.New (direct Go package call)
+		if goPkg, ok := c.goPackageAliases[objStr]; ok {
+			return fmt.Sprintf("%s.%s", goPkg, e.Field), nil
+		}
+
+		// Builtin conversions
+		if objStr == "time" {
+			switch e.Field {
+			case "now":
+				return "func() interface{} { return time.Now().UTC().Format(time.RFC3339) }", nil
+			case "sleep":
+				return "runtime.Sleep", nil
+			case "unix":
+				c.imports[`"time"`] = true
+				return "func() int { return int(time.Now().Unix()) }", nil
+			case "RFC3339":
+				return "\"2006-01-02T15:04:05Z07:00\"", nil
+			case "DATE":
+				return "\"2006-01-02\"", nil
+			case "DATETIME":
+				return "\"2006-01-02 15:04:05\"", nil
+			case "TIME":
+				return "\"15:04:05\"", nil
+			case "HTTP":
+				return "\"Mon, 02 Jan 2006 15:04:05 MST\"", nil
+			case "parse":
+				return "runtime.TimeParse", nil
+			case "format":
+				return "runtime.TimeFormat", nil
+			case "inZone":
+				return "runtime.TimeInZone", nil
+			case "utc":
+				return "runtime.TimeUTC", nil
+			case "local":
+				return "runtime.TimeLocal", nil
+			case "add":
+				return "runtime.TimeAdd", nil
+			case "sub":
+				return "runtime.TimeSub", nil
+			case "before":
+				return "runtime.TimeBefore", nil
+			case "after":
+				return "runtime.TimeAfter", nil
+			case "fromUnix":
+				return "runtime.TimeFromUnix", nil
+			case "components":
+				return "runtime.TimeComponents", nil
+			}
+		}
+
+		if objStr == "log" {
+			switch e.Field {
+			case "info":
+				return "runtime.LogInfo", nil
+			case "warn":
+				return "runtime.LogWarn", nil
+			case "error":
+				return "runtime.LogError", nil
+			case "debug":
+				return "runtime.LogDebug", nil
+			case "with":
+				return "runtime.LogWith", nil
+			case "fields":
+				return "runtime.LogFields", nil
+			case "setLevel":
+				return "runtime.LogSetLevel", nil
+			case "getLevel":
+				return "runtime.LogGetLevel", nil
+			}
+		}
+		if objStr == "metric" {
+			switch e.Field {
+			case "inc":
+				return "runtime.MetricInc", nil
+			case "gauge":
+				return "runtime.MetricGauge", nil
+			}
+		}
+		if objStr == "http" {
+			switch e.Field {
+			case "get":
+				return "runtime.HTTPGet", nil
+			case "post":
+				return "runtime.HTTPPost", nil
+			}
+		}
+		if objStr == "html" {
+			switch e.Field {
+			case "render":
+				return "runtime.HTMLRender", nil
+			case "template":
+				return "runtime.HTMLTemplate", nil
+			case "static":
+				return "runtime.AddStaticRoute", nil
+			case "redirect":
+				return "runtime.HTMLRedirect", nil
+			}
+		}
+		if objStr == "json" {
+			switch e.Field {
+			case "parse":
+				return "runtime.JSONParse", nil
+			case "stringify":
+				return "runtime.JSONStringify", nil
+			}
+		}
+		if objStr == "exec" {
+			switch e.Field {
+			case "run":
+				return "runtime.ExecRun", nil
+			}
+		}
+		if objStr == "file" {
+			switch e.Field {
+			case "read":
+				return "runtime.FileRead", nil
+			case "write":
+				return "runtime.FileWrite", nil
+			case "exists":
+				return "runtime.FileExists", nil
+			case "list":
+				return "runtime.FileList", nil
+			}
+		}
+		if objStr == "csv" {
+			switch e.Field {
+			case "parse":
+				return "runtime.CSVParse", nil
+			case "stringify":
+				return "runtime.CSVStringify", nil
+			}
+		}
+		if objStr == "xml" {
+			switch e.Field {
+			case "parse":
+				return "runtime.XMLParse", nil
+			case "stringify":
+				return "runtime.XMLStringify", nil
+			}
+		}
+		if objStr == "yaml" {
+			switch e.Field {
+			case "parse":
+				return "runtime.YAMLParse", nil
+			case "stringify":
+				return "runtime.YAMLStringify", nil
+			}
+		}
+		if objStr == "path" {
+			switch e.Field {
+			case "join":
+				return "runtime.PathJoin", nil
+			case "dirname":
+				return "runtime.PathDirname", nil
+			case "basename":
+				return "runtime.PathBasename", nil
+			case "ext":
+				return "runtime.PathExt", nil
+			case "abs":
+				return "runtime.PathAbs", nil
+			}
+		}
+		if objStr == "regex" {
+			switch e.Field {
+			case "match":
+				return "runtime.RegexMatch", nil
+			case "find":
+				return "runtime.RegexFind", nil
+			case "replace":
+				return "runtime.RegexReplace", nil
+			}
+		}
+		if objStr == "math" {
+			switch e.Field {
+			case "floor":
+				return "runtime.MathFloor", nil
+			case "ceil":
+				return "runtime.MathCeil", nil
+			case "round":
+				return "runtime.MathRound", nil
+			case "abs":
+				return "runtime.MathAbs", nil
+			case "pow":
+				return "runtime.MathPow", nil
+			case "sqrt":
+				return "runtime.MathSqrt", nil
+			case "min":
+				return "runtime.MathMin", nil
+			case "max":
+				return "runtime.MathMax", nil
+			}
+		}
+		if objStr == "encoding" {
+			switch e.Field {
+			case "base64":
+				return "runtime.EncodingBase64Namespace{}", nil
+			case "hex":
+				return "runtime.EncodingHexNamespace{}", nil
+			}
+		}
+		if objStr == "runtime.EncodingBase64Namespace{}" {
+			switch e.Field {
+			case "encode":
+				return "runtime.Base64Encode", nil
+			case "decode":
+				return "runtime.Base64Decode", nil
+			}
+		}
+		if objStr == "runtime.EncodingHexNamespace{}" {
+			switch e.Field {
+			case "encode":
+				return "runtime.HexEncode", nil
+			case "decode":
+				return "runtime.HexDecode", nil
+			}
+		}
+		if objStr == "hash" {
+			switch e.Field {
+			case "md5":
+				return "runtime.HashMD5", nil
+			case "sha256":
+				return "runtime.HashSHA256", nil
+			case "sha512":
+				return "runtime.HashSHA512", nil
+			case "hmac":
+				return "runtime.HashHMAC", nil
+			}
+		}
+		if objStr == "uuid" {
+			switch e.Field {
+			case "v4":
+				return "runtime.UUIDv4", nil
+			case "v7":
+				return "runtime.UUIDv7", nil
+			}
+		}
+		if objStr == "rand" {
+			switch e.Field {
+			case "int":
+				return "runtime.RandInt", nil
+			case "float":
+				return "runtime.RandFloat", nil
+			case "string":
+				return "runtime.RandString", nil
+			case "bool":
+				return "runtime.RandBool", nil
+			}
+		}
+		if objStr == "url" {
+			switch e.Field {
+			case "parse":
+				return "runtime.URLParse", nil
+			case "encode":
+				return "runtime.URLEncode", nil
+			case "decode":
+				return "runtime.URLDecode", nil
+			}
+		}
+		if objStr == "env" {
+			switch e.Field {
+			case "get":
+				return "runtime.EnvGet", nil
+			case "require":
+				return "runtime.EnvRequire", nil
+			case "int":
+				return "runtime.EnvInt", nil
+			case "bool":
+				return "runtime.EnvBool", nil
+			}
+		}
+		if objStr == "jwt" {
+			switch e.Field {
+			case "sign":
+				return "runtime.JWTSign", nil
+			case "verify":
+				return "runtime.JWTVerify", nil
+			case "decode":
+				return "runtime.JWTDecode", nil
+			}
+		}
+		if objStr == "compress" {
+			switch e.Field {
+			case "gzip":
+				return "runtime.CompressGzip", nil
+			case "ungzip":
+				return "runtime.CompressUngzip", nil
+			case "deflate":
+				return "runtime.CompressDeflate", nil
+			case "inflate":
+				return "runtime.CompressInflate", nil
+			}
+		}
+		if objStr == "semver" {
+			switch e.Field {
+			case "parse":
+				return "runtime.SemverParse", nil
+			case "compare":
+				return "runtime.SemverCompare", nil
+			case "satisfies":
+				return "runtime.SemverSatisfies", nil
+			}
+		}
+		if objStr == "duration" {
+			switch e.Field {
+			case "parse":
+				return "runtime.DurationParse", nil
+			case "format":
+				return "runtime.DurationFormat", nil
+			case "since":
+				return "runtime.DurationSince", nil
+			}
+		}
+		if objStr == "format" {
+			switch e.Field {
+			case "bytes":
+				return "runtime.FormatBytes", nil
+			case "number":
+				return "runtime.FormatNumber", nil
+			case "percent":
+				return "runtime.FormatPercent", nil
+			case "plural":
+				return "runtime.FormatPlural", nil
+			}
+		}
+		if objStr == "ip" {
+			switch e.Field {
+			case "parse":
+				return "runtime.IPParse", nil
+			case "isPrivate":
+				return "runtime.IPIsPrivate", nil
+			case "inCIDR":
+				return "runtime.IPInCIDR", nil
+			case "version":
+				return "runtime.IPVersion", nil
+			}
+		}
+		if objStr == "dns" {
+			switch e.Field {
+			case "lookup":
+				return "runtime.DNSLookup", nil
+			case "txt":
+				return "runtime.DNSTXT", nil
+			case "srv":
+				return "runtime.DNSSRV", nil
+			}
+		}
+		if objStr == "multipart" {
+			switch e.Field {
+			case "parse":
+				return "runtime.MultipartParse", nil
+			}
+		}
+		if objStr == "diff" {
+			switch e.Field {
+			case "text":
+				return "runtime.DiffText", nil
+			case "json":
+				return "runtime.DiffJSON", nil
+			}
+		}
+		if objStr == "proto" {
+			switch e.Field {
+			case "encode":
+				return "runtime.ProtoEncode", nil
+			case "decode":
+				return "runtime.ProtoDecode", nil
+			}
+		}
+		if objStr == "db" {
+			if _, exists := c.dbTables[e.Field]; exists {
+				return fmt.Sprintf("db.%s", capitalizeFirst(e.Field)), nil
+			}
+			switch e.Field {
+			case "query":
+				return "runtime.DBQuery", nil
+			case "querySafe":
+				return "runtime.DBQuerySafe", nil
+			case "queryPage":
+				return "runtime.DBQueryPage", nil
+			case "findOne":
+				return "runtime.DBFindOne", nil
+			case "count":
+				return "runtime.DBCount", nil
+			case "upsert":
+				return "runtime.DBUpsert", nil
+			case "beforeQuery":
+				return "runtime.AddBeforeQueryHook", nil
+			}
+		}
+
+		if objStr == "ai" {
+			switch e.Field {
+			case "complete":
+				return "runtime.AIComplete", nil
+			case "classify":
+				return "runtime.AIClassify", nil
+			case "embed":
+				return "runtime.AIEmbed", nil
+			case "chat":
+				return "runtime.AIChat", nil
+			case "stream":
+				return "runtime.AIStream", nil
+			case "eval":
+				return "runtime.AIEval", nil
+			}
+		}
+
+		if objStr == "s3" {
+			switch e.Field {
+			case "init":
+				return "runtime.S3Init", nil
+			case "put":
+				return "runtime.S3Put", nil
+			case "get":
+				return "runtime.S3Get", nil
+			case "delete":
+				return "runtime.S3Delete", nil
+			case "list":
+				return "runtime.S3List", nil
+			case "at":
+				return "runtime.S3At", nil
+			case "search":
+				return "runtime.S3Search", nil
+			case "createBucket":
+				return "runtime.S3CreateBucket", nil
+			case "deleteBucket":
+				return "runtime.S3DeleteBucket", nil
+			case "setBucketVersioning":
+				return "runtime.S3SetBucketVersioning", nil
+			case "transform":
+				return "runtime.S3Transform", nil
+			}
+		}
+		if objStr == "mail" {
+			switch e.Field {
+			case "send":
+				return "runtime.MailSend", nil
+			}
+		}
+		if objStr == "store" {
+			switch e.Field {
+			case "put":
+				return "func(k string, v interface{}) interface{} { r, err := runtime.StorePut(k, v); if err != nil { return [2]interface{}{nil, err.Error()} }; return r }", nil
+			case "get":
+				return "func(k string) interface{} { r, err := runtime.StoreGet(k); if err != nil { return [2]interface{}{nil, err.Error()} }; return r }", nil
+			case "transform":
+				return "func(ik, st, ok, str interface{}) interface{} { r, err := runtime.StoreTransform(ik, st, ok, str); if err != nil { return [2]interface{}{nil, err.Error()} }; return r }", nil
+			}
+		}
+		if objStr == "search" {
+			switch e.Field {
+			case "query":
+				return "runtime.SearchQuery", nil
+			case "index":
+				return "runtime.SearchIndex", nil
+			}
+		}
+		if objStr == "wasm" {
+			switch e.Field {
+			case "readInput":
+				return "runtime.WasmReadInput", nil
+			case "writeOutput":
+				return "runtime.WasmWriteOutput", nil
+			}
+		}
+		if objStr == "cache" {
+			switch e.Field {
+			case "set":
+				return "runtime.CacheSet", nil
+			case "get":
+				return "runtime.CacheGet", nil
+			}
+		}
+		if objStr == "mcp" {
+			if e.Field == "call" {
+				return "runtime.InvokeMCPToolForTesting", nil
+			}
+		}
+
+		// Atomic operations
+		if objStr == "atomic" {
+			switch e.Field {
+			case "new":
+				return "runtime.AtomicNew", nil
+			case "inc":
+				return "runtime.AtomicInc", nil
+			case "dec":
+				return "runtime.AtomicDec", nil
+			case "get":
+				return "runtime.AtomicGet", nil
+			case "set":
+				return "runtime.AtomicSet", nil
+			case "cas":
+				return "runtime.AtomicCAS", nil
+			}
+		}
+
+		// Registry — generic named function map
+		if objStr == "registry" {
+			switch e.Field {
+			case "set":
+				return "runtime.RegistrySet", nil
+			case "call":
+				return "runtime.RegistryCall", nil
+			case "list":
+				return "runtime.RegistryList", nil
+			case "has":
+				return "runtime.RegistryHas", nil
+			}
+		}
+
+		// Cron utilities
+		if objStr == "schedule" {
+			switch e.Field {
+			case "next":
+				return "runtime.CronNext", nil
+			case "sleepUntilNext":
+				return "runtime.CronSleepUntilNext", nil
+			}
+		}
+
+		// Channel operations
+		if objStr == "channel" {
+			switch e.Field {
+			case "new":
+				return "runtime.ChannelNew", nil
+			case "send":
+				return "runtime.ChannelSend", nil
+			case "receive":
+				return "runtime.ChannelReceive", nil
+			case "tryReceive":
+				return "runtime.ChannelTryReceive", nil
+			case "trySend":
+				return "runtime.ChannelTrySend", nil
+			case "close":
+				return "runtime.ChannelClose", nil
+			case "len":
+				return "runtime.ChannelLen", nil
+			}
+		}
+
+		// WebSocket connection methods
+		if varType, ok := c.varTypes[objStr]; ok && varType == "*runtime.WSConn" {
+			switch e.Field {
+			case "send":
+				return fmt.Sprintf("%s.Send", objStr), nil
+			case "receive":
+				return fmt.Sprintf("%s.Receive", objStr), nil
+			case "close":
+				return fmt.Sprintf("%s.Close", objStr), nil
+			}
+		}
+
+		// Collection property access (no parentheses needed)
+		if e.Field == "length" {
+			// If the object has a known slice or string type, use native len()
+			if ident, ok := e.Object.(*Identifier); ok {
+				if varType, exists := c.varTypes[ident.Value]; exists {
+					if strings.HasPrefix(varType, "[]") || varType == "string" {
+						return fmt.Sprintf("len(%s)", objStr), nil
+					}
+				}
+			}
+			return fmt.Sprintf("runtime.Length(%s)", objStr), nil
+		}
+
+		// Direct Go member access e.g. req.body
+		// We'll support .Body and .Status fields (or map them casing)
+		field := e.Field
+		switch field {
+		case "body":
+			field = "Body"
+		case "status":
+			field = "Status"
+		}
+		
+		// If object is db.TableName, compile directly as member access
+		if strings.HasPrefix(objStr, "db.") {
+			return fmt.Sprintf("%s.%s", objStr, capitalizeFirst(e.Field)), nil
+		}
+
+		// Since objects might be interface{}, use runtime helper for dynamic field access
+		return fmt.Sprintf("runtime.MemberAccess(%s, %q)", objStr, e.Field), nil
+
+
+	case *MemberAssignExpr:
+		objStr, err := c.genExpression(e.Object)
+		if err != nil {
+			return "", err
+		}
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() interface{} {\n\t\t\t// Safe member assignment\n\t\t\tif sm, ok := interface{}(%s).(*runtime.SafeMap); ok {\n\t\t\t\tsm.Set(%q, %s)\n\t\t\t} else if m, ok := interface{}(%s).(map[string]interface{}); ok {\n\t\t\t\tm[%q] = %s\n\t\t\t}\n\t\t\treturn nil\n\t\t}()", objStr, e.Field, valStr, objStr, e.Field, valStr), nil
+
+	case *CallExpr:
+		var funcStr string
+		var isRegexpCheck bool
+		var isCollectionMethod bool
+		var collectionResult string
+		var isStructMethodCall bool
+		var structMethodResult string
+
+		if memExpr, ok := e.Function.(*MemberExpr); ok {
+			objStr, err := c.genExpression(memExpr.Object)
+			// workflow.start("Name", param) — early intercept before any member resolution
+			if err == nil && objStr == "workflow" && memExpr.Field == "start" {
+				var args []string
+				for _, arg := range e.Arguments {
+					argStr, argErr := c.genExpression(arg)
+					if argErr != nil {
+						return "", argErr
+					}
+					args = append(args, argStr)
+				}
+				if len(args) == 1 {
+					return fmt.Sprintf("runtime.StartWorkflow(%s, nil)", args[0]), nil
+				} else if len(args) >= 2 {
+					return fmt.Sprintf("runtime.StartWorkflow(%s, %s)", args[0], args[1]), nil
+				}
+				return "runtime.StartWorkflow(nil, nil)", nil
+			}
+			if err == nil && objStr == "auth" {
+				var args []string
+				for _, arg := range e.Arguments {
+					argStr, argErr := c.genExpression(arg)
+					if argErr != nil {
+						return "", argErr
+					}
+					args = append(args, argStr)
+				}
+				if memExpr.Field == "register" && len(args) == 3 {
+					return fmt.Sprintf("runtime.AuthRegister(%s, %s, %s)", args[0], args[1], args[2]), nil
+				}
+				if memExpr.Field == "login" && len(args) == 2 {
+					return fmt.Sprintf("runtime.AuthLogin(%s, %s)", args[0], args[1]), nil
+				}
+				if memExpr.Field == "currentUser" && len(args) == 1 {
+					return fmt.Sprintf("runtime.AuthCurrentUser(%s)", args[0]), nil
+				}
+			}
+			if err == nil && objStr == "mail" && memExpr.Field == "send" {
+				var args []string
+				for _, arg := range e.Arguments {
+					argStr, argErr := c.genExpression(arg)
+					if argErr != nil {
+						return "", argErr
+					}
+					args = append(args, argStr)
+				}
+				if len(args) == 3 {
+					return fmt.Sprintf("runtime.MailSend(%s, %s, %s)", args[0], args[1], args[2]), nil
+				}
+			}
+			if err == nil && objStr == "env" && memExpr.Field == "secret" {
+				var args []string
+				for _, arg := range e.Arguments {
+					argStr, err := c.genExpression(arg)
+					if err != nil {
+						return "", err
+					}
+					args = append(args, argStr)
+				}
+				return fmt.Sprintf("runtime.EnvSecret(%s)", strings.Join(args, ", ")), nil
+			}
+
+			// Request body binding shortcuts: req.json(), req.form(), req.param(key)
+			// Detect when the callee object is the current route's request parameter
+			if err == nil && c.currentRoute != nil && objStr == c.currentRoute.Param {
+				switch memExpr.Field {
+				case "json":
+					// req.json() -> runtime.JSONParse(req.Body)
+					return fmt.Sprintf("runtime.JSONParse(%s.Body)", objStr), nil
+				case "form":
+					// req.form() -> runtime.ParseFormBody(req.Body)
+					return fmt.Sprintf("runtime.ParseFormBody(%s.Body)", objStr), nil
+				case "param":
+					// req.param("key") -> runtime.RequestParam(req, "key")
+					if len(e.Arguments) == 1 {
+						argStr, argErr := c.genExpression(e.Arguments[0])
+						if argErr != nil {
+							return "", argErr
+						}
+						return fmt.Sprintf("runtime.RequestParam(%s, %s)", objStr, argStr), nil
+					}
+				}
+			}
+
+			if err == nil && objStr == "regexp" && memExpr.Field == "check" {
+				isRegexpCheck = true
+				funcStr = "regexp.check"
+			}
+
+			// Struct method calls: if the object is a known struct type, generate direct call
+			if err == nil && !isRegexpCheck {
+				objType := ""
+				if ident, ok := memExpr.Object.(*Identifier); ok {
+					if t, exists := c.varTypes[ident.Value]; exists {
+						objType = t
+					}
+				} else if _, ok := memExpr.Object.(*SelfExpr); ok {
+					if t, exists := c.varTypes["self"]; exists {
+						objType = t
+					}
+				}
+				// Check if it's a struct type (not a primitive)
+				if objType != "" && objType != "interface{}" && objType != "int" && objType != "string" && objType != "float64" && objType != "bool" && objType != "[]interface{}" {
+					var args []string
+					for _, arg := range e.Arguments {
+						argStr, err := c.genExpression(arg)
+						if err != nil {
+							break
+						}
+						args = append(args, argStr)
+					}
+					structMethodResult = fmt.Sprintf("%s.%s(%s)", objStr, capitalizeFirst(memExpr.Field), strings.Join(args, ", "))
+					isStructMethodCall = true
+				}
+			}
+
+			// Collection methods: .filter, .map, .find, .reduce, .forEach, .length, .push, .contains
+			if err == nil && !isRegexpCheck && !isStructMethodCall && !strings.HasPrefix(objStr, "db.") && objStr != "db" {
+				switch memExpr.Field {
+				// ContextLogger methods: .info, .warn, .error, .debug, .with on user-declared variables
+				case "info":
+					if !isStructMethodCall {
+						if ident, ok := memExpr.Object.(*Identifier); ok {
+							if c.isDeclared(ident.Value) {
+								var args []string
+								for _, arg := range e.Arguments {
+									argStr, _ := c.genExpression(arg)
+									args = append(args, argStr)
+								}
+								collectionResult = fmt.Sprintf("runtime.ContextLoggerInfo(%s, %s)", objStr, strings.Join(args, ", "))
+								isCollectionMethod = true
+							}
+						}
+					}
+				case "warn":
+					if !isStructMethodCall {
+						if ident, ok := memExpr.Object.(*Identifier); ok {
+							if c.isDeclared(ident.Value) {
+								var args []string
+								for _, arg := range e.Arguments {
+									argStr, _ := c.genExpression(arg)
+									args = append(args, argStr)
+								}
+								collectionResult = fmt.Sprintf("runtime.ContextLoggerWarn(%s, %s)", objStr, strings.Join(args, ", "))
+								isCollectionMethod = true
+							}
+						}
+					}
+				case "error":
+					if !isStructMethodCall {
+						if ident, ok := memExpr.Object.(*Identifier); ok {
+							if c.isDeclared(ident.Value) {
+								var args []string
+								for _, arg := range e.Arguments {
+									argStr, _ := c.genExpression(arg)
+									args = append(args, argStr)
+								}
+								collectionResult = fmt.Sprintf("runtime.ContextLoggerError(%s, %s)", objStr, strings.Join(args, ", "))
+								isCollectionMethod = true
+							}
+						}
+					}
+				case "debug":
+					if !isStructMethodCall {
+						if ident, ok := memExpr.Object.(*Identifier); ok {
+							if c.isDeclared(ident.Value) {
+								var args []string
+								for _, arg := range e.Arguments {
+									argStr, _ := c.genExpression(arg)
+									args = append(args, argStr)
+								}
+								collectionResult = fmt.Sprintf("runtime.ContextLoggerDebug(%s, %s)", objStr, strings.Join(args, ", "))
+								isCollectionMethod = true
+							}
+						}
+					}
+				case "filter":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genCollectionCallback(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.Filter(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "map":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genCollectionCallback(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.Map(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "find":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genCollectionCallback(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.Find(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "reduce":
+					if len(e.Arguments) == 2 {
+						cbStr, _ := c.genReduceCallback(e.Arguments[0])
+						initStr, _ := c.genExpression(e.Arguments[1])
+						collectionResult = fmt.Sprintf("runtime.Reduce(%s, %s, %s)", objStr, cbStr, initStr)
+						isCollectionMethod = true
+					}
+				case "forEach":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genCollectionCallback(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.ForEach(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "length":
+					// Use native len() for known slice/string types
+					if ident, ok := memExpr.Object.(*Identifier); ok {
+						if varType, exists := c.varTypes[ident.Value]; exists {
+							if strings.HasPrefix(varType, "[]") || varType == "string" {
+								collectionResult = fmt.Sprintf("len(%s)", objStr)
+								isCollectionMethod = true
+								break
+							}
+						}
+					}
+					collectionResult = fmt.Sprintf("runtime.Length(%s)", objStr)
+					isCollectionMethod = true
+				case "push":
+					if len(e.Arguments) == 1 {
+						elemStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.Push(%s, %s).([]interface{})", objStr, elemStr)
+						isCollectionMethod = true
+					}
+				case "contains":
+					if len(e.Arguments) == 1 {
+						elemStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.Contains(%s, %s)", objStr, elemStr)
+						isCollectionMethod = true
+					}
+				// String methods
+				case "split":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.StringSplit(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "trim":
+					collectionResult = fmt.Sprintf("runtime.StringTrim(%s)", objStr)
+					isCollectionMethod = true
+				case "replace":
+					if len(e.Arguments) == 2 {
+						oldStr, _ := c.genExpression(e.Arguments[0])
+						newStr, _ := c.genExpression(e.Arguments[1])
+						collectionResult = fmt.Sprintf("runtime.StringReplace(%s, %s, %s)", objStr, oldStr, newStr)
+						isCollectionMethod = true
+					}
+				case "startsWith":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.StringStartsWith(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "endsWith":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.StringEndsWith(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "includes":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.StringIncludes(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "toUpper":
+					collectionResult = fmt.Sprintf("runtime.StringToUpper(%s)", objStr)
+					isCollectionMethod = true
+				case "toLower":
+					collectionResult = fmt.Sprintf("runtime.StringToLower(%s)", objStr)
+					isCollectionMethod = true
+				case "substring":
+					if len(e.Arguments) >= 1 {
+						startStr, _ := c.genExpression(e.Arguments[0])
+						if len(e.Arguments) >= 2 {
+							endStr, _ := c.genExpression(e.Arguments[1])
+							collectionResult = fmt.Sprintf("runtime.StringSubstring(%s, %s, %s)", objStr, startStr, endStr)
+						} else {
+							collectionResult = fmt.Sprintf("runtime.StringSubstring(%s, %s)", objStr, startStr)
+						}
+						isCollectionMethod = true
+					}
+				case "indexOf":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.StringIndexOf(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				case "repeat":
+					if len(e.Arguments) == 1 {
+						argStr, _ := c.genExpression(e.Arguments[0])
+						collectionResult = fmt.Sprintf("runtime.StringRepeat(%s, %s)", objStr, argStr)
+						isCollectionMethod = true
+					}
+				}
+			}
+		}
+
+		if isCollectionMethod {
+			return collectionResult, nil
+		}
+
+		if isStructMethodCall {
+			return structMethodResult, nil
+		}
+
+		if !isRegexpCheck {
+			var err error
+			funcStr, err = c.genExpression(e.Function)
+			if err != nil {
+				return "", err
+			}
+			// Map db table client methods to uppercase Go counterparts
+			if strings.HasPrefix(funcStr, "db.") {
+				parts := strings.Split(funcStr, ".")
+				if len(parts) == 3 {
+					method := parts[2]
+					switch method {
+					case "find":
+						method = "Find"
+					case "findOne":
+						method = "FindOne"
+					case "insert":
+						method = "Insert"
+					case "update":
+						method = "Update"
+					case "delete":
+						method = "Delete"
+					}
+					funcStr = parts[0] + "." + capitalizeFirst(parts[1]) + "." + method
+				}
+			}
+		}
+
+
+
+		var args []string
+		for _, arg := range e.Arguments {
+			argStr, err := c.genExpression(arg)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, argStr)
+		}
+
+		// Stream Processing Builtins
+		if funcStr == "secret" && len(args) == 1 {
+			return fmt.Sprintf("runtime.GetSecret(%s)", args[0]), nil
+		}
+		if funcStr == "stream" && len(args) == 1 {
+			return fmt.Sprintf("runtime.NewStream(%s)", args[0]), nil
+		}
+		if funcStr == "filter" && len(args) == 2 {
+			cbStr, err := c.genCollectionCallback(e.Arguments[1])
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s.Filter(%s)", args[0], cbStr), nil
+		}
+		if funcStr == "window" && len(args) == 2 {
+			return fmt.Sprintf("%s.Window(%s)", args[0], args[1]), nil
+		}
+		if funcStr == "count" && len(args) == 1 {
+			return fmt.Sprintf("%s.Count()", args[0]), nil
+		}
+
+		// Builtin conversions for Env and Config
+		if funcStr == "env" {
+			return fmt.Sprintf("runtime.Env(%s)", strings.Join(args, ", ")), nil
+		}
+		if funcStr == "config" {
+			return fmt.Sprintf("runtime.Config(%s)", strings.Join(args, ", ")), nil
+		}
+		if funcStr == "validate" {
+			return fmt.Sprintf("runtime.ValidateBody(%s)", strings.Join(args, ", ")), nil
+		}
+		if funcStr == "send" && len(args) == 2 {
+			return fmt.Sprintf("runtime.ActorSend(%s, %s)", args[0], args[1]), nil
+		}
+		if funcStr == "ask" && len(args) == 2 {
+			return fmt.Sprintf("runtime.ActorAsk(%s, %s)", args[0], args[1]), nil
+		}
+		if funcStr == "workflow.start" && len(args) >= 1 {
+			if len(args) == 1 {
+				return fmt.Sprintf("runtime.StartWorkflow(%s, nil)", args[0]), nil
+			}
+			return fmt.Sprintf("runtime.StartWorkflow(%s, %s)", args[0], args[1]), nil
+		}
+		if funcStr == "auth.register" && len(args) == 3 {
+			return fmt.Sprintf("runtime.AuthRegister(%s, %s, %s)", args[0], args[1], args[2]), nil
+		}
+		if funcStr == "auth.login" && len(args) == 2 {
+			return fmt.Sprintf("runtime.AuthLogin(%s, %s)", args[0], args[1]), nil
+		}
+		if funcStr == "auth.currentUser" && len(args) == 1 {
+			return fmt.Sprintf("runtime.AuthCurrentUser(%s)", args[0]), nil
+		}
+		if funcStr == "mail.send" && len(args) == 3 {
+			return fmt.Sprintf("runtime.MailSend(%s, %s, %s)", args[0], args[1], args[2]), nil
+		}
+		if funcStr == "notify" && len(args) == 3 {
+			return fmt.Sprintf("runtime.Notify(%s, %s, %s)", args[0], args[1], args[2]), nil
+		}
+
+		// Special case: time.now()
+		if funcStr == "time.now" {
+			return "time.Now().Format(time.RFC3339)", nil
+		}
+
+		if funcStr == "regexp.check" && len(e.Arguments) == 2 {
+			c.imports[`"regexp"`] = true
+			textVal, err := c.genExpression(e.Arguments[1])
+			if err != nil {
+				return "", err
+			}
+			c.imports[`"fmt"`] = true
+			if strLit, ok := e.Arguments[0].(*StringLiteral); ok {
+				varName := fmt.Sprintf("regex_%d_%d", e.Token.Line, e.Token.Col)
+				decl := fmt.Sprintf("var %s = regexp.MustCompile(%q)", varName, strLit.Value)
+				c.regexDecls = append(c.regexDecls, decl)
+				return fmt.Sprintf("%s.MatchString(fmt.Sprint(%s))", varName, textVal), nil
+			} else {
+				patternVal, err := c.genExpression(e.Arguments[0])
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("(func() bool { r, err := regexp.Compile(fmt.Sprint(%s)); if err != nil { return false }; return r.MatchString(fmt.Sprint(%s)) }())", patternVal, textVal), nil
+			}
+		}
+
+		// Emit type arguments if present
+		typeArgStr := ""
+		if len(e.TypeArgs) > 0 {
+			typeArgStr = "[" + strings.Join(e.TypeArgs, ", ") + "]"
+		}
+
+		// Detect Go package function calls that return (value, error)
+		// Wrap them to discard error and return first value
+		callStr := fmt.Sprintf("%s%s(%s)", funcStr, typeArgStr, strings.Join(args, ", "))
+		if memExpr, ok := e.Function.(*MemberExpr); ok {
+			if ident, ok := memExpr.Object.(*Identifier); ok {
+				if goPkg, isGoAlias := c.goPackageAliases[ident.Value]; isGoAlias {
+					qualifiedName := goPkg + "." + memExpr.Field
+					if c.goMultiReturnFuncs[qualifiedName] {
+						// Multi-return Go function: wrap to discard error
+						return fmt.Sprintf("func() interface{} { v, _ := %s; return v }()", callStr), nil
+					}
+				}
+			}
+			// Map db table client method calls
+			if objName, ok := memExpr.Object.(*Identifier); ok && objName.Value == "db" {
+				if _, exists := c.dbTables[memExpr.Field]; exists {
+					// Method on db.TableName: e.g. find, findOne, insert, update, delete
+					// All these return (value, error) or error. If we are in a multi-return context (let a, b = ...),
+					// Go expects two values. Since GoCodeGen already maps to Go methods returning two values, we just return the Go callStr directly!
+					return callStr, nil
+				}
+			}
+		}
+		return callStr, nil
+
+
+	case *FStringLiteral:
+		return c.genFString(e.Value)
+
+	case *MapLiteral:
+		// If there are spread entries, generate a runtime.MergeMaps call
+		if len(e.Spreads) > 0 {
+			var mergeArgs []string
+			// Build a combined sequence: spreads and inline map fragments
+			// Strategy: generate inline map for explicit keys, spread exprs merged in order
+			if len(e.KeyOrder) > 0 {
+				var pairs []string
+				for _, k := range e.KeyOrder {
+					v := e.Pairs[k]
+					vStr, err := c.genExpression(v)
+					if err != nil {
+						return "", err
+					}
+					pairs = append(pairs, fmt.Sprintf("%q: %s", k, vStr))
+				}
+				mergeArgs = append(mergeArgs, fmt.Sprintf("map[string]interface{}{\n\t\t%s,\n\t}", strings.Join(pairs, ",\n\t\t")))
+			}
+			for _, spread := range e.Spreads {
+				spreadStr, err := c.genExpression(spread.Value)
+				if err != nil {
+					return "", err
+				}
+				mergeArgs = append(mergeArgs, spreadStr)
+			}
+			return fmt.Sprintf("runtime.MergeMaps(%s)", strings.Join(mergeArgs, ", ")), nil
+		}
+
+		var pairs []string
+		for _, k := range e.KeyOrder {
+			v := e.Pairs[k]
+			vStr, err := c.genExpression(v)
+			if err != nil {
+				return "", err
+			}
+			pairs = append(pairs, fmt.Sprintf("%q: %s", k, vStr))
+		}
+		if len(pairs) == 0 {
+			if !e.ConcurrentMap {
+				return "map[string]interface{}{}", nil
+			}
+			return "runtime.NewSafeMap()", nil
+		}
+		if !e.ConcurrentMap {
+			return fmt.Sprintf("map[string]interface{}{\n\t\t%s,\n\t}", strings.Join(pairs, ",\n\t\t")), nil
+		}
+		return fmt.Sprintf("runtime.NewSafeMapFromMap(map[string]interface{}{\n\t\t%s,\n\t})", strings.Join(pairs, ",\n\t\t")), nil
+
+	case *IndexExpr:
+		leftStr, err := c.genExpression(e.Left)
+		if err != nil {
+			return "", err
+		}
+		indexStr, err := c.genExpression(e.Index)
+		if err != nil {
+			return "", err
+		}
+
+		// If the left side has a known typed slice type, use direct indexing
+		if ident, ok := e.Left.(*Identifier); ok {
+			if varType, exists := c.varTypes[ident.Value]; exists {
+				if strings.HasPrefix(varType, "[]") && varType != "[]interface{}" {
+					// Typed slice — direct index access
+					return fmt.Sprintf("%s[%s]", leftStr, indexStr), nil
+				}
+			}
+		}
+
+		c.imports[`"serv/runtime"`] = true
+		return fmt.Sprintf("runtime.IndexAccess(%s, %s)", leftStr, indexStr), nil
+
+	case *InfixExpr:
+		leftStr, err := c.genExpression(e.Left)
+		if err != nil {
+			return "", err
+		}
+		rightStr, err := c.genExpression(e.Right)
+		if err != nil {
+			return "", err
+		}
+
+		lt := c.getExpressionType(e.Left)
+		rt := c.getExpressionType(e.Right)
+
+		if lt == rt && (lt == "int" || lt == "float64" || lt == "string" || lt == "bool") {
+			return fmt.Sprintf("(%s %s %s)", leftStr, e.Operator, rightStr), nil
+		}
+
+		// Mixed typed/untyped: if one side is a known primitive type and the other is interface{},
+		// cast the interface{} side to the known type and emit native Go ops.
+		// This avoids runtime dispatch for common patterns like: total + item (where total is int)
+		if lt != rt {
+			knownType := ""
+			if lt != "interface{}" && rt == "interface{}" && (lt == "int" || lt == "float64" || lt == "string") {
+				knownType = lt
+			} else if rt != "interface{}" && lt == "interface{}" && (rt == "int" || rt == "float64" || rt == "string") {
+				knownType = rt
+			}
+			if knownType != "" {
+				// For arithmetic and comparison ops, cast the interface{} side
+				switch e.Operator {
+				case "+", "-", "*", "/", "%":
+					castLeft := leftStr
+					castRight := rightStr
+					if lt == "interface{}" {
+						switch knownType {
+						case "int":
+							castLeft = fmt.Sprintf("toInt(%s)", leftStr)
+						case "float64":
+							castLeft = fmt.Sprintf("toFloat64(%s)", leftStr)
+						case "string":
+							castLeft = fmt.Sprintf("toString(%s)", leftStr)
+						}
+					}
+					if rt == "interface{}" {
+						switch knownType {
+						case "int":
+							castRight = fmt.Sprintf("toInt(%s)", rightStr)
+						case "float64":
+							castRight = fmt.Sprintf("toFloat64(%s)", rightStr)
+						case "string":
+							castRight = fmt.Sprintf("toString(%s)", rightStr)
+						}
+					}
+					return fmt.Sprintf("(%s %s %s)", castLeft, e.Operator, castRight), nil
+				case "==", "!=", "<", ">", "<=", ">=":
+					castLeft := leftStr
+					castRight := rightStr
+					if lt == "interface{}" {
+						switch knownType {
+						case "int":
+							castLeft = fmt.Sprintf("toInt(%s)", leftStr)
+						case "float64":
+							castLeft = fmt.Sprintf("toFloat64(%s)", leftStr)
+						case "string":
+							castLeft = fmt.Sprintf("toString(%s)", leftStr)
+						}
+					}
+					if rt == "interface{}" {
+						switch knownType {
+						case "int":
+							castRight = fmt.Sprintf("toInt(%s)", rightStr)
+						case "float64":
+							castRight = fmt.Sprintf("toFloat64(%s)", rightStr)
+						case "string":
+							castRight = fmt.Sprintf("toString(%s)", rightStr)
+						}
+					}
+					return fmt.Sprintf("(%s %s %s)", castLeft, e.Operator, castRight), nil
+				}
+			}
+		}
+
+		// Mixed numeric: int + float64 = float64 (native Go handles this with cast)
+		if (lt == "int" && rt == "float64") || (lt == "float64" && rt == "int") {
+			if lt == "int" {
+				return fmt.Sprintf("(float64(%s) %s %s)", leftStr, e.Operator, rightStr), nil
+			}
+			return fmt.Sprintf("(%s %s float64(%s))", leftStr, e.Operator, rightStr), nil
+		}
+
+		// Generic type params: if both sides have the same type param (e.g., T),
+		// the Go compiler can handle direct operations since constraints enforce it
+		if lt == rt && lt != "interface{}" && lt != "" && len(lt) <= 2 && lt[0] >= 'A' && lt[0] <= 'Z' {
+			return fmt.Sprintf("(%s %s %s)", leftStr, e.Operator, rightStr), nil
+		}
+
+		// Bitwise and shift operators — use runtime helpers for untyped values
+		switch e.Operator {
+		case "&", "|", "^", "<<", ">>":
+			return fmt.Sprintf("runtime.Bitwise(%s, %s, %q)", leftStr, rightStr, e.Operator), nil
+		}
+
+		// Since operands are interface{} in Serv, we add a utility to add/concatenate/compare if needed.
+		// Comparison operators return bool; arithmetic operators return numeric/string.
+		switch e.Operator {
+		case "==":
+			// Special case: comparison with nil
+			if _, isNil := e.Right.(*NilLiteral); isNil {
+				return fmt.Sprintf("(%s == nil)", leftStr), nil
+			}
+			if _, isNil := e.Left.(*NilLiteral); isNil {
+				return fmt.Sprintf("(%s == nil)", rightStr), nil
+			}
+			return fmt.Sprintf("runtime.Equal(%s, %s)", leftStr, rightStr), nil
+		case "!=":
+			// Special case: comparison with nil
+			if _, isNil := e.Right.(*NilLiteral); isNil {
+				return fmt.Sprintf("(%s != nil)", leftStr), nil
+			}
+			if _, isNil := e.Left.(*NilLiteral); isNil {
+				return fmt.Sprintf("(%s != nil)", rightStr), nil
+			}
+			return fmt.Sprintf("!runtime.Equal(%s, %s)", leftStr, rightStr), nil
+		case "||", "&&":
+			return fmt.Sprintf("(isTruthy(%s) %s isTruthy(%s))", leftStr, e.Operator, rightStr), nil
+		case "<", ">", "<=", ">=":
+			return fmt.Sprintf("runtime.Compare(%s, %s, %q)", leftStr, rightStr, e.Operator), nil
+		default:
+			// Arithmetic operators (including %) — use runtime helper instead of inline closure
+			return fmt.Sprintf("runtime.Arith(%s, %s, %q)", leftStr, rightStr, e.Operator), nil
+		}
+
+
+
+	case *PrefixExpr:
+		rightStr, err := c.genExpression(e.Right)
+		if err != nil {
+			return "", err
+		}
+		rt := c.getExpressionType(e.Right)
+		switch e.Operator {
+		case "-":
+			if rt == "int" || rt == "float64" {
+				return fmt.Sprintf("(-%s)", rightStr), nil
+			}
+			// For interface{}, negate at runtime
+			return fmt.Sprintf("runtime.Negate(%s)", rightStr), nil
+		case "!":
+			if rt == "bool" {
+				return fmt.Sprintf("(!%s)", rightStr), nil
+			}
+			return fmt.Sprintf("(!isTruthy(%s))", rightStr), nil
+		}
+		return fmt.Sprintf("(%s%s)", e.Operator, rightStr), nil
+
+	case *AssignExpr:
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		name := e.Name
+		if c.currentActor != nil && c.actorFields[name] && !c.isDeclared(name) {
+			name = "self." + name
+		}
+		// Type coercion: if target variable has a known type but expression returns interface{}
+		if targetType, ok := c.varTypes[e.Name]; ok {
+			inferred := c.getExpressionType(e.Value)
+			if inferred == "interface{}" && targetType != "interface{}" {
+				switch targetType {
+				case "int":
+					valStr = fmt.Sprintf("toInt(%s)", valStr)
+				case "float64":
+					valStr = fmt.Sprintf("toFloat64(%s)", valStr)
+				case "bool":
+					valStr = fmt.Sprintf("toBool(%s)", valStr)
+				case "string":
+					valStr = fmt.Sprintf("toString(%s)", valStr)
+				}
+			}
+		}
+		return fmt.Sprintf("%s = %s", name, valStr), nil
+
+	case *IndexAssignExpr:
+		leftStr, err := c.genExpression(e.Left.Left)
+		if err != nil {
+			return "", err
+		}
+		idxStr, err := c.genExpression(e.Left.Index)
+		if err != nil {
+			return "", err
+		}
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		// If Left has a known typed slice/map, or is in-memory fallback SafeMap
+		leftType := c.getExpressionType(e.Left.Left)
+		if strings.HasPrefix(leftType, "[]") {
+			// Slice index assign: arr[idx] = val
+			return fmt.Sprintf("%s[%s] = %s", leftStr, idxStr, valStr), nil
+		}
+		// SafeMap or regular map[string]interface{} setting
+		// If it's a map or SafeMap, use runtime.MapSet helper
+		c.imports[`"serv/runtime"`] = true
+		return fmt.Sprintf("runtime.MapSet(%s, %s, %s)", leftStr, idxStr, valStr), nil
+
+	case *CompoundAssignExpr:
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		name := e.Name
+		if c.currentActor != nil && c.actorFields[name] && !c.isDeclared(name) {
+			name = "self." + name
+		}
+		// If variable has a known numeric type, emit direct Go compound assignment
+		if varType, ok := c.varTypes[e.Name]; ok && (varType == "int" || varType == "float64") {
+			// If the value is interface{}, cast it to match the variable type
+			valType := c.getExpressionType(e.Value)
+			if valType == "interface{}" {
+				switch varType {
+				case "int":
+					valStr = fmt.Sprintf("toInt(%s)", valStr)
+				case "float64":
+					valStr = fmt.Sprintf("toFloat64(%s)", valStr)
+				}
+			}
+			return fmt.Sprintf("%s %s %s", name, e.Operator, valStr), nil
+		}
+		// String concatenation: if variable is known string type
+		if varType, ok := c.varTypes[e.Name]; ok && varType == "string" && e.Operator == "+=" {
+			valType := c.getExpressionType(e.Value)
+			if valType == "interface{}" {
+				valStr = fmt.Sprintf("toString(%s)", valStr)
+			}
+			return fmt.Sprintf("%s += %s", name, valStr), nil
+		}
+		// For interface{} variables, compute and reassign
+		op := string(e.Operator[0]) // extract arithmetic op from +=, -=, etc.
+		return fmt.Sprintf("%s = runtime.Arith(%s, %s, %q)", name, name, valStr, op), nil
+
+	case *SliceExpr:
+		leftStr, err := c.genExpression(e.Left)
+		if err != nil {
+			return "", err
+		}
+		startStr := ""
+		if e.Start != nil {
+			s, err := c.genExpression(e.Start)
+			if err != nil {
+				return "", err
+			}
+			startStr = s
+		}
+		endStr := ""
+		if e.End != nil {
+			s, err := c.genExpression(e.End)
+			if err != nil {
+				return "", err
+			}
+			endStr = s
+		}
+		// If the left side has a known typed slice, use direct Go slicing
+		if ident, ok := e.Left.(*Identifier); ok {
+			if varType, exists := c.varTypes[ident.Value]; exists {
+				if strings.HasPrefix(varType, "[]") {
+					if e.Start == nil && e.End != nil {
+						return fmt.Sprintf("%s[:%s]", leftStr, endStr), nil
+					} else if e.Start != nil && e.End == nil {
+						return fmt.Sprintf("%s[%s:]", leftStr, startStr), nil
+					} else if e.Start != nil && e.End != nil {
+						return fmt.Sprintf("%s[%s:%s]", leftStr, startStr, endStr), nil
+					}
+					return fmt.Sprintf("%s[:]", leftStr), nil
+				}
+			}
+		}
+		// Dynamic slicing for interface{} values
+		return fmt.Sprintf("runtime.Slice(%s, %s, %s)", leftStr,
+			func() string { if startStr == "" { return "nil" }; return startStr }(),
+			func() string { if endStr == "" { return "nil" }; return endStr }()), nil
+
+	case *BooleanLiteral:
+		if e.Value {
+			return "true", nil
+		}
+		return "false", nil
+
+	case *NilLiteral:
+		return "nil", nil
+
+	case *AwaitExpr:
+		// Check if it's await all([...]) pattern
+		if callExpr, ok := e.Value.(*CallExpr); ok {
+			if ident, ok := callExpr.Function.(*Identifier); ok && ident.Value == "all" {
+				// await all([expr1, expr2, ...]) — parallel execution
+				if len(callExpr.Arguments) == 1 {
+					if arr, ok := callExpr.Arguments[0].(*ArrayLiteral); ok {
+						var taskExprs []string
+						for _, elem := range arr.Elements {
+							elemStr, err := c.genExpression(elem)
+							if err != nil {
+								return "", err
+							}
+							taskExprs = append(taskExprs, fmt.Sprintf("func() interface{} { return %s }", elemStr))
+						}
+						return fmt.Sprintf("runtime.AwaitAll([]func() interface{}{%s})", strings.Join(taskExprs, ", ")), nil
+					}
+				}
+			}
+		}
+		// Single await: await expr — run in goroutine, wait for result.
+		// Inside a workflow, wrap in _wfCtx.Step() for replay-safe persistence.
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		if c.currentWorkflow != nil {
+			return fmt.Sprintf("_wfCtx.Step(func() interface{} { return %s })", valStr), nil
+		}
+		return fmt.Sprintf("runtime.Await(func() interface{} { return %s })", valStr), nil
+
+	case *ErrorPropExpr:
+		// expr? — call expression, if it returns an error (via tuple), return the error early
+		valStr, err := c.genExpression(e.Value)
+		if err != nil {
+			return "", err
+		}
+		// Generate: func() interface{} { _v, _e := tryCall(fn); if _e != nil { return _e }; return _v }()
+		// But since we need to return from the enclosing function, we use a pattern that
+		// assigns to local vars and checks — the let statement handles the actual early return
+		return fmt.Sprintf("runtime.TryCall(func() interface{} { return %s })", valStr), nil
+
+	case *SelfExpr:
+		return "self", nil
+
+	case *FnLiteral:
+		if e.IsArrow {
+			// Arrow function: x => expr -> func(x interface{}) interface{} { return expr }
+			var params []string
+			for _, p := range e.Params {
+				params = append(params, p+" interface{}")
+			}
+			bodyStr, err := c.genExpression(e.ArrowExpr)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("func(%s) interface{} { return %s }", strings.Join(params, ", "), bodyStr), nil
+		}
+		// Full function literal: fn(x, y) { body }
+		var params []string
+		for i, p := range e.Params {
+			pt := "interface{}"
+			if i < len(e.ParamTypes) && e.ParamTypes[i] != "" {
+				pt = toGoType(e.ParamTypes[i])
+			}
+			params = append(params, p+" "+pt)
+		}
+		bodyStr, err := c.genBlockStatement(e.Body)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func(%s) interface{} %s", strings.Join(params, ", "), bodyStr), nil
+
+	case *StructLiteral:
+		var fields []string
+		for _, k := range e.KeyOrder {
+			v := e.Fields[k]
+			vStr, err := c.genExpression(v)
+			if err != nil {
+				return "", err
+			}
+			fields = append(fields, fmt.Sprintf("%s: %s", capitalizeFirst(k), vStr))
+		}
+		typeArgStr := ""
+		if len(e.TypeArgs) > 0 {
+			typeArgStr = "[" + strings.Join(e.TypeArgs, ", ") + "]"
+		}
+		return fmt.Sprintf("&%s%s{\n\t\t%s,\n\t}", e.TypeName, typeArgStr, strings.Join(fields, ",\n\t\t")), nil
+
+
+	case *AssertExpr:
+		// Generate structured assertion messages based on the condition type
+		if infix, ok := e.Cond.(*InfixExpr); ok {
+			leftStr, err := c.genExpression(infix.Left)
+			if err != nil {
+				return "", err
+			}
+			rightStr, err := c.genExpression(infix.Right)
+			if err != nil {
+				return "", err
+			}
+			switch infix.Operator {
+			case "==":
+				return fmt.Sprintf("func() {\n\t\tgot := interface{}(%s)\n\t\twant := interface{}(%s)\n\t\tif !runtime.Equal(got, want) {\n\t\t\tt.Fatalf(\"assertion failed: got %%v, want %%v\", got, want)\n\t\t}\n\t}()", leftStr, rightStr), nil
+			case "!=":
+				return fmt.Sprintf("func() {\n\t\tgot := interface{}(%s)\n\t\tunwanted := interface{}(%s)\n\t\tif runtime.Equal(got, unwanted) {\n\t\t\tt.Fatalf(\"assertion failed: expected value to not equal %%v\", unwanted)\n\t\t}\n\t}()", leftStr, rightStr), nil
+			case "<":
+				return fmt.Sprintf("func() {\n\t\tleft := interface{}(%s)\n\t\tright := interface{}(%s)\n\t\tif !runtime.Compare(left, right, \"<\") {\n\t\t\tt.Fatalf(\"assertion failed: %%v is not < %%v\", left, right)\n\t\t}\n\t}()", leftStr, rightStr), nil
+			case ">":
+				return fmt.Sprintf("func() {\n\t\tleft := interface{}(%s)\n\t\tright := interface{}(%s)\n\t\tif !runtime.Compare(left, right, \">\") {\n\t\t\tt.Fatalf(\"assertion failed: %%v is not > %%v\", left, right)\n\t\t}\n\t}()", leftStr, rightStr), nil
+			case "<=":
+				return fmt.Sprintf("func() {\n\t\tleft := interface{}(%s)\n\t\tright := interface{}(%s)\n\t\tif !runtime.Compare(left, right, \"<=\") {\n\t\t\tt.Fatalf(\"assertion failed: %%v is not <= %%v\", left, right)\n\t\t}\n\t}()", leftStr, rightStr), nil
+			case ">=":
+				return fmt.Sprintf("func() {\n\t\tleft := interface{}(%s)\n\t\tright := interface{}(%s)\n\t\tif !runtime.Compare(left, right, \">=\") {\n\t\t\tt.Fatalf(\"assertion failed: %%v is not >= %%v\", left, right)\n\t\t}\n\t}()", leftStr, rightStr), nil
+			}
+		}
+		// Fallback for non-comparison assertions (truthiness check)
+		condStr, err := c.genExpression(e.Cond)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func() {\n\t\tvar v interface{} = %s\n\t\tif v == nil || v == false {\n\t\t\tt.Fatalf(\"assertion failed: expected truthy value, got %%v\", v)\n\t\t}\n\t}()", condStr), nil
+
+	case *SpawnExpr:
+		return c.genSpawnExpr(e)
+
+	default:
+		return "", fmt.Errorf("unknown expression type: %T", expr)
+	}
+}
+
+
+
+
+
+
+
+
+
+
+// genCollectionCallback generates a Go function literal for collection method callbacks.
+// Handles identifiers (function references), fn literals, and arrow functions.
+func (c *Codegen) genCollectionCallback(expr Expression) (string, error) {
+	// If it's a FnLiteral (fn(x) { ... } or x => expr), generate directly
+	if fnLit, ok := expr.(*FnLiteral); ok {
+		if fnLit.IsArrow {
+			bodyStr, err := c.genExpression(fnLit.ArrowExpr)
+			if err != nil {
+				return "", err
+			}
+			param := "item"
+			if len(fnLit.Params) > 0 {
+				param = fnLit.Params[0]
+			}
+			return fmt.Sprintf("func(%s interface{}) interface{} { return %s }", param, bodyStr), nil
+		}
+		// Full fn literal
+		param := "item"
+		if len(fnLit.Params) > 0 {
+			param = fnLit.Params[0]
+		}
+		bodyStr, err := c.genBlockStatement(fnLit.Body)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("func(%s interface{}) interface{} %s", param, bodyStr), nil
+	}
+	// If it's a simple identifier (function name), wrap it
+	if ident, ok := expr.(*Identifier); ok {
+		return fmt.Sprintf("func(item interface{}) interface{} { return %s(item) }", ident.Value), nil
+	}
+	// Fallback: generate the expression and wrap it as a callable
+	exprStr, err := c.genExpression(expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func(item interface{}) interface{} { return %s(item) }", exprStr), nil
+}
+
+// genReduceCallback generates a Go function literal for reduce callbacks (2 params).
+func (c *Codegen) genReduceCallback(expr Expression) (string, error) {
+	if ident, ok := expr.(*Identifier); ok {
+		return fmt.Sprintf("func(acc interface{}, item interface{}) interface{} { return %s(acc, item) }", ident.Value), nil
+	}
+	exprStr, err := c.genExpression(expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func(acc interface{}, item interface{}) interface{} { return %s(acc, item) }", exprStr), nil
+}
+
+func (c *Codegen) genFString(str string) (string, error) {
+	var formatParts []string
+	var args []string
+
+	runes := []rune(str)
+	i := 0
+	n := len(runes)
+	currentText := ""
+
+	for i < n {
+		if runes[i] == '{' {
+			if i+1 < n && runes[i+1] == '{' {
+				currentText += "{"
+				i += 2
+				continue
+			}
+			if currentText != "" {
+				formatParts = append(formatParts, currentText)
+				currentText = ""
+			}
+			i++
+			exprText := ""
+			for i < n && runes[i] != '}' {
+				exprText += string(runes[i])
+				i++
+			}
+			if i >= n {
+				return "", fmt.Errorf("unterminated brace in f-string")
+			}
+			i++ // skip '}'
+			formatParts = append(formatParts, "%v")
+
+			// Parse and codegen the interpolated expression
+			exprCode, err := c.compileInlineExpr(exprText)
+			if err != nil {
+				// Fallback to raw text if parsing fails
+				args = append(args, exprText)
+			} else {
+				args = append(args, exprCode)
+			}
+		} else if runes[i] == '}' {
+			if i+1 < n && runes[i+1] == '}' {
+				currentText += "}"
+				i += 2
+				continue
+			}
+			currentText += "}"
+			i++
+		} else {
+			currentText += string(runes[i])
+			i++
+		}
+	}
+	if currentText != "" {
+		formatParts = append(formatParts, currentText)
+	}
+
+	formatStr := strings.Join(formatParts, "")
+	if len(args) == 0 {
+		return fmt.Sprintf("%q", formatStr), nil
+	}
+	c.imports[`"fmt"`] = true
+	return fmt.Sprintf("fmt.Sprintf(%q, %s)", formatStr, strings.Join(args, ", ")), nil
+}
+
+// compileInlineExpr parses and generates Go code for a single expression string.
+// Used by f-string interpolation to properly handle self.field -> self.Field etc.
+func (c *Codegen) compileInlineExpr(exprText string) (string, error) {
+	lexer := NewLexer(exprText)
+	parser := NewParser(lexer)
+	// Parse as a single expression
+	expr := parser.parseExpression(LOWEST)
+	if expr == nil || len(parser.Errors()) > 0 {
+		return "", fmt.Errorf("failed to parse inline expression")
+	}
+	return c.genExpression(expr)
+}
+
+func (c *Codegen) genSpawnExpr(e *SpawnExpr) (string, error) {
+	if callExpr, ok := e.Call.(*CallExpr); ok {
+		if ident, ok := callExpr.Function.(*Identifier); ok {
+			if _, exists := c.actors[ident.Value]; exists {
+				var args []string
+				for _, arg := range callExpr.Arguments {
+					argStr, err := c.genExpression(arg)
+					if err != nil {
+						return "", err
+					}
+					args = append(args, argStr)
+				}
+				return fmt.Sprintf("Spawn_%s(%s)", ident.Value, strings.Join(args, ", ")), nil
+			}
+		}
+	}
+
+	stmt := &SpawnStmt{
+		Token: e.Token,
+		Call:  e.Call,
+		Limit: e.Limit,
+	}
+	stmtCode, err := c.genSpawnStmt(stmt)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func() interface{} {\n\t%s\n\treturn nil\n}()", stmtCode), nil
+}
+
+
+
+
+

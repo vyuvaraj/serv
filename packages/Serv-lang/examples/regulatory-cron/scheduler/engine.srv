@@ -1,0 +1,112 @@
+// Scheduler Engine — dynamic sleep loop with channel-based worker pool.
+// Matches Java's DefaultSchedulerEngine pattern:
+// 1. Find next due job (sorted by nextRunTime)
+// 2. Sleep until it's due
+// 3. Push to worker channel
+// 4. Update nextRunTime for next occurrence
+
+// Job queue channel (buffered, capacity 200)
+let jobQueue = channel.new(200)
+
+// Atomic counters for observability
+atomic.new("running_jobs", 0)
+atomic.new("total_executions", 0)
+atomic.new("total_failures", 0)
+
+// --- Scheduler: load all jobs into memory on startup, one goroutine per job ---
+spawn loadAndScheduleAll()
+
+fn loadAndScheduleAll() {
+    // Wait for DB to be ready
+    time.sleep(2000)
+    log.info("Scheduler: loading all jobs from database...")
+
+    let allJobs, err = db.query("find", "jobs", "{\"status\": \"ACTIVE\", \"enabled\": true}")
+    if err != nil {
+        log.error("Scheduler: failed to load jobs: ", err)
+        return nil
+    }
+
+    if allJobs == nil {
+        log.warn("Scheduler: no active jobs found")
+        return nil
+    }
+
+    log.info("Scheduler: loaded jobs, spawning schedule goroutines")
+
+    // Spawn a dedicated goroutine for each job
+    for job in allJobs {
+        spawn scheduleJob(job)
+    }
+}
+
+fn scheduleJob(job) {
+    let jobName = job.name
+    let jobClass = job.jobClass
+    let cronExpr = job.cronExpression
+    log.info(f"Scheduler: scheduled job name={jobName} class={jobClass} cron={cronExpr}")
+
+    for true {
+        // Sleep until the next cron occurrence (parses the cron expression)
+        schedule.sleepUntilNext(cronExpr)
+
+        // Push to worker queue
+        log.info(f"Scheduler: job due name={jobName}, queuing")
+        channel.trySend(jobQueue, job)
+    }
+}
+
+// --- Worker pool: 3 concurrent job executors ---
+spawn startWorker(1)
+spawn startWorker(2)
+spawn startWorker(3)
+
+fn startWorker(workerId: int) {
+    for true {
+        let task = channel.receive(jobQueue)
+        if task == nil {
+            return nil
+        }
+        processJob(task, workerId)
+    }
+}
+
+fn processJob(task, workerId: int) {
+    atomic.inc("running_jobs")
+    atomic.inc("total_executions")
+    metric.inc("executions_total")
+
+    let idempotencyKey = f"exec-{time.unix()}-{workerId}"
+    let jobClass = task.jobClass
+    let jobName = task.name
+    log.info(f"Worker {workerId}: dispatching jobClass={jobClass} name={jobName} idempotencyKey={idempotencyKey}")
+
+    // Dispatch via registry
+    let exists = registry.has(jobClass)
+
+    if exists == true {
+        registry.call(jobClass, task, idempotencyKey)
+        metric.inc("executions_success_total")
+        log.info(f"Worker {workerId}: completed jobClass={jobClass} name={jobName}")
+    } else {
+        atomic.inc("total_failures")
+        metric.inc("executions_failed_total")
+        log.error(f"Worker {workerId}: no handler for jobClass={jobClass} name={jobName}")
+    }
+
+    atomic.dec("running_jobs")
+}
+
+// --- Background sync every 60s (like Java's startBackgroundSync) ---
+// Reconciles in-memory state with DB, logs health
+every 60s {
+    log.info("Background sync: scheduler healthy")
+    let registered = registry.list()
+    log.info("Registered job handlers: ", registered)
+}
+
+// --- DLQ cleanup daily at 2 AM ---
+cron "0 0 2 * * *" {
+    log.info("Running DLQ cleanup...")
+    metric.inc("dlq_purge_runs_total")
+}

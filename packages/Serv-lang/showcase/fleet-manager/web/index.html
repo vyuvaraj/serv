@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Servverse IoT Fleet Management & Telemetry Hub</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/dashboard/style.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+
+    <header class="app-header">
+        <div class="brand">
+            <div class="logo-glow"></div>
+            <span class="logo-text">SERVVERSE</span>
+            <span class="badge-premium">IoT FLEET MANAGER</span>
+        </div>
+        <div class="status-indicator">
+            <span class="pulse-green"></span>
+            <span class="status-label">All Nodes Connected</span>
+        </div>
+    </header>
+
+    <main class="dashboard-container">
+        <!-- TOP: Real-time Stats Cards -->
+        <section class="stats-grid">
+            <div class="card stat-card">
+                <div class="stat-icon fleet-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Total Devices</span>
+                    <h2 class="stat-value" id="stat-total-devices">0</h2>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon online-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Online Devices</span>
+                    <h2 class="stat-value" id="stat-online-devices">0</h2>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon telemetry-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Telemetry Ingests</span>
+                    <h2 class="stat-value" id="stat-telemetry-points">0</h2>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon orchestrator-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Orchestrator Node</span>
+                    <h2 class="stat-value">ServCloud Active</h2>
+                </div>
+            </div>
+        </section>
+
+        <!-- MIDDLE: Controls & Event Flow Visualization -->
+        <section class="main-split">
+            <!-- Left: Device Registration & Commands -->
+            <div class="control-column">
+                <div class="card form-card">
+                    <h3 class="card-title">Register IoT Device</h3>
+                    <form id="device-form">
+                        <div class="form-group">
+                            <label for="device-id">Device Unique ID</label>
+                            <input type="text" id="device-id" placeholder="e.g. iot-node-01" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="device-name">Device Display Name</label>
+                            <input type="text" id="device-name" placeholder="e.g. Boiler controller" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="device-type">Device Type</label>
+                            <select id="device-type" required>
+                                <option value="sensor">Telemetry Sensor</option>
+                                <option value="controller">Actuator Controller</option>
+                                <option value="gateway">Core Gateway</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn-primary">
+                            <span>Register Node</span>
+                            <div class="btn-glow"></div>
+                        </button>
+                    </form>
+                </div>
+
+                <div class="card form-card" style="margin-top: 1.5rem;">
+                    <h3 class="card-title">Trigger Firmware Rollout</h3>
+                    <form id="firmware-form">
+                        <div class="form-group">
+                            <label for="firmware-version">Target Version</label>
+                            <input type="text" id="firmware-version" placeholder="e.g. 2.0.0" value="2.0.0" required>
+                        </div>
+                        <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);">
+                            <span>Publish to OCI & Rollout</span>
+                            <div class="btn-glow"></div>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Right: Event Pipeline Map -->
+            <div class="card flow-card">
+                <h3 class="card-title">Fleet Mesh & Event Routing</h3>
+                <div class="pipeline-container">
+                    <svg class="pipeline-svg" viewBox="0 0 800 240">
+                        <!-- Connector Paths -->
+                        <path id="line-device-mesh" d="M 100 120 L 320 60" class="connector-line"></path>
+                        <path id="line-mesh-broker" d="M 400 60 L 620 120" class="connector-line"></path>
+                        <path id="line-broker-worker" d="M 680 160 L 400 180" class="connector-line"></path>
+                        <path id="line-worker-store" d="M 320 180 L 100 120" class="connector-line"></path>
+
+                        <!-- Nodes -->
+                        <!-- Edge Devices -->
+                        <g class="node-group" id="node-device">
+                            <circle cx="100" cy="120" r="35" class="node-circle"></circle>
+                            <text x="100" y="125" class="node-text">Edge Node</text>
+                        </g>
+
+                        <!-- ServMesh Router -->
+                        <g class="node-group" id="node-mesh">
+                            <circle cx="360" cy="60" r="40" class="node-circle mesh-circle"></circle>
+                            <text x="360" y="65" class="node-text">ServMesh</text>
+                            <text x="360" y="80" class="node-subtext">Routing / SD</text>
+                        </g>
+
+                        <!-- Event Broker -->
+                        <g class="node-group" id="node-broker">
+                            <circle cx="680" cy="120" r="40" class="node-circle broker-circle"></circle>
+                            <text x="680" y="125" class="node-text">ServQueue</text>
+                            <text x="680" y="140" class="node-subtext">telemetry.ingest</text>
+                        </g>
+
+                        <!-- Telemetry Worker -->
+                        <g class="node-group" id="node-worker">
+                            <circle cx="360" cy="180" r="38" class="node-circle"></circle>
+                            <text x="360" y="185" class="node-text">Workers</text>
+                        </g>
+                    </svg>
+                    <!-- Floating status badge -->
+                    <div id="flow-event-label" class="flow-event-badge">Pipeline Monitoring Active</div>
+                </div>
+
+                <!-- Simulation Telemetry Ingest Trigger -->
+                <div class="ingest-simulate-box">
+                    <h4 style="margin-bottom: 0.5rem; font-size: 0.9rem;">Simulate Device Ingestion Event</h4>
+                    <div class="simulate-controls">
+                        <select id="simulate-device-select" style="padding: 0.4rem; font-size: 0.85rem; width: auto; flex: 1;">
+                            <option value="">-- No Devices Online --</option>
+                        </select>
+                        <button class="btn-secondary" id="btn-simulate-ingest">Send Telemetry</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- BOTTOM: Devices & Telemetry Log Grid -->
+        <section class="bottom-grids">
+            <!-- Active Devices -->
+            <div class="card table-card">
+                <h3 class="card-title">Registered IoT Nodes</h3>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Device ID</th>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Firmware</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devices-tbody">
+                            <tr>
+                                <td colspan="5" class="loading-placeholder">No active nodes registered.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <span>IoT Showcase Hub powered by Servverse Platform Architecture</span>
+    </footer>
+
+    <script src="/dashboard/app.js"></script>
+</body>
+</html>

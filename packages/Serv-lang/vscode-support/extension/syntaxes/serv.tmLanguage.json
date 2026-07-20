@@ -1,0 +1,132 @@
+{
+  "name": "Serv",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#builtins" },
+    { "include": "#constants" },
+    { "include": "#operators" },
+    { "include": "#numbers" },
+    { "include": "#function-declarations" },
+    { "include": "#struct-declarations" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.srv", "match": "//.*$" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.interpolated.srv",
+          "begin": "f\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.srv", "match": "\\\\." },
+            {
+              "name": "meta.interpolation.srv",
+              "begin": "\\{",
+              "end": "\\}",
+              "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.srv" } },
+              "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.srv" } },
+              "patterns": [ { "include": "$self" } ]
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.srv",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.srv", "match": "\\\\." }
+          ]
+        },
+        { "name": "string.quoted.backtick.srv", "begin": "`", "end": "`" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.srv",
+          "match": "\\b(if|else|for|in|match|try|catch|return|break|continue|await|spawn)\\b"
+        },
+        {
+          "name": "keyword.declaration.srv",
+          "match": "\\b(fn|let|server|broker|database|cache|struct|interface|enum|middleware|type|export|import|from|extern|declare|module)\\b"
+        },
+        {
+          "name": "keyword.other.srv",
+          "match": "\\b(route|every|cron|subscribe|publish|test|assert|tool|migration|ws|use|limit|validate|beforeEach|afterEach|timeout)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "support.type.primitive.srv", "match": "\\b(int|float|string|bool)\\b" },
+        { "name": "storage.type.srv", "match": "\\b[A-Z][a-zA-Z0-9]*\\b" }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        { "name": "support.function.srv", "match": "\\b(log|metric|db|cache|json|http|time|atomic|channel|registry|env|config|validate)\\b" }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        { "name": "constant.language.boolean.srv", "match": "\\b(true|false)\\b" },
+        { "name": "constant.language.nil.srv", "match": "\\bnil\\b" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.comparison.srv", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.assignment.srv", "match": "\\+=|-=|\\*=|/=|%=|=>|->|=" },
+        { "name": "keyword.operator.arithmetic.srv", "match": "\\+|-|\\*|/|%" },
+        { "name": "keyword.operator.bitwise.srv", "match": "<<|>>|&|\\||\\^" },
+        { "name": "keyword.operator.spread.srv", "match": "\\.\\.\\." },
+        { "name": "keyword.operator.optional-chain.srv", "match": "\\?\\." }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.duration.srv", "match": "\\b\\d+[smh]\\b" },
+        { "name": "constant.numeric.float.srv", "match": "\\b\\d+\\.\\d+\\b" },
+        { "name": "constant.numeric.integer.srv", "match": "\\b\\d+\\b" }
+      ]
+    },
+    "function-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\.\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.srv" },
+            "2": { "name": "entity.name.type.srv" },
+            "3": { "name": "entity.name.function.srv" }
+          }
+        },
+        {
+          "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.srv" },
+            "2": { "name": "entity.name.function.srv" }
+          }
+        }
+      ]
+    },
+    "struct-declarations": {
+      "patterns": [
+        {
+          "match": "\\b(struct|interface|enum)\\s+([A-Z][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.srv" },
+            "2": { "name": "entity.name.type.srv" }
+          }
+        }
+      ]
+    }
+  },
+  "scopeName": "source.srv"
+}

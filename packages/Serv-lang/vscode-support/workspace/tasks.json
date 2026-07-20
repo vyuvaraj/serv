@@ -1,0 +1,87 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Serv: Build Current File",
+      "type": "shell",
+      "command": "${workspaceFolder}/serv.exe",
+      "args": [
+        "build",
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}.exe"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      }
+    },
+    {
+      "label": "Serv: Run Current File",
+      "type": "shell",
+      "command": "${workspaceFolder}/serv.exe",
+      "args": [
+        "run",
+        "${file}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      }
+    },
+    {
+      "label": "Serv: Run Current File in Watch Mode",
+      "type": "shell",
+      "command": "${workspaceFolder}/serv.exe",
+      "args": [
+        "run",
+        "${file}",
+        "--watch"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      }
+    },
+    {
+      "label": "Serv: Test Current File",
+      "type": "shell",
+      "command": "${workspaceFolder}/serv.exe",
+      "args": [
+        "test",
+        "${file}"
+      ],
+      "group": "test",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      }
+    },
+    {
+      "label": "Serv: Dockerize Current File",
+      "type": "shell",
+      "command": "${workspaceFolder}/serv.exe",
+      "args": [
+        "dockerize",
+        "${file}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

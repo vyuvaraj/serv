@@ -1,0 +1,48 @@
+// Verification test for Phase 1 syntax & optimization features in Serv
+
+test "floating-point operations" {
+    let pi: float = 3.14159
+    let radius: float = 10.0
+    let area: float = pi * radius * radius
+    assert area == 314.159
+}
+
+test "list slice DSL verification" {
+    let items = [1, 2, 3, 4]
+    assert items[0] == 1
+    assert items[2] == 3
+}
+
+test "compile-time string optimizations" {
+    let msg1 = f"Static string check"
+    assert msg1 == "Static string check"
+
+    let name = "Serv"
+    let msg2 = f"Name: {name}"
+    assert msg2 == "Name: Serv"
+}
+
+test "regexp pre-compilation verification" {
+    let match1 = regexp.check("^hello.*", "hello world")
+    assert match1 == true
+
+    let match2 = regexp.check("^hello.*", "bye world")
+    assert match2 == false
+}
+
+test "zero-lock map literal verification" {
+    let details = {
+        "title": "Zero-Lock",
+        "speed": "Fast"
+    }
+    assert details.title == "Zero-Lock"
+    assert details.speed == "Fast"
+}
+
+extern fn cleanAndFormatText(inputVal) from "python:./examples/helpers.py:clean_text"
+
+test "python daemon interop verification" {
+    let rawText = "    Hello!!! World!!!   "
+    let cleaned = cleanAndFormatText(rawText)
+    assert cleaned == "[Python formatter] Result: 'HELLO WORLD'"
+}

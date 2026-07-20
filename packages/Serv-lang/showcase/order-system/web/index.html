@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Servverse Order System Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/dashboard/style.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+
+    <header class="app-header">
+        <div class="brand">
+            <div class="logo-glow"></div>
+            <span class="logo-text">SERVVERSE</span>
+            <span class="badge-premium">SHOWCASE</span>
+        </div>
+        <div class="status-indicator">
+            <span class="pulse-green"></span>
+            <span class="status-label">System Active</span>
+        </div>
+    </header>
+
+    <main class="dashboard-container">
+        <!-- TOP: Real-time Stats Cards -->
+        <section class="stats-grid">
+            <div class="card stat-card">
+                <div class="stat-icon revenue-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Total Revenue</span>
+                    <h2 class="stat-value" id="stat-revenue">$0.00</h2>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon orders-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Total Orders</span>
+                    <h2 class="stat-value" id="stat-total">0</h2>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon pending-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Pending Orders</span>
+                    <h2 class="stat-value" id="stat-pending">0</h2>
+                </div>
+            </div>
+            <div class="card stat-card">
+                <div class="stat-icon latency-icon"></div>
+                <div class="stat-info">
+                    <span class="stat-label">Processing Time</span>
+                    <h2 class="stat-value">500ms</h2>
+                </div>
+            </div>
+        </section>
+
+        <!-- MIDDLE: Order Creation & Event Flow Visualization -->
+        <section class="main-split">
+            <!-- Left: Order Creation Form -->
+            <div class="card form-card">
+                <h3 class="card-title">Place Simulation Order</h3>
+                <form id="order-form">
+                    <div class="form-group">
+                        <label for="customer">Customer Name</label>
+                        <input type="text" id="customer" placeholder="e.g. Alice Smith" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="item">Select Item</label>
+                        <select id="item" required>
+                            <option value="Standard Widget">Standard Widget ($15.00)</option>
+                            <option value="Premium Gadget">Premium Gadget ($45.00)</option>
+                            <option value="Enterprise Solution">Enterprise Solution ($250.00)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="quantity">Quantity</label>
+                        <input type="number" id="quantity" min="1" max="100" value="1" required>
+                    </div>
+                    <button type="submit" class="btn-primary">
+                        <span>Submit Order</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right: Real-time Event Pipeline Map -->
+            <div class="card flow-card">
+                <h3 class="card-title">Live Event Pipeline Visualizer</h3>
+                <div class="pipeline-container">
+                    <svg class="pipeline-svg" viewBox="0 0 800 220">
+                        <!-- Connecting Lines -->
+                        <path id="line-api-broker" d="M 120 110 L 360 110" class="connector-line"></path>
+                        <path id="line-broker-worker" d="M 440 110 L 680 110" class="connector-line"></path>
+
+                        <!-- Nodes -->
+                        <!-- API Node -->
+                        <g class="node-group" id="node-api">
+                            <circle cx="120" cy="110" r="40" class="node-circle"></circle>
+                            <text x="120" y="115" class="node-text">HTTP API</text>
+                        </g>
+
+                        <!-- Broker Node -->
+                        <g class="node-group" id="node-broker">
+                            <circle cx="400" cy="110" r="45" class="node-circle broker-circle"></circle>
+                            <text x="400" y="115" class="node-text">Event Broker</text>
+                            <text x="400" y="135" class="node-subtext">orders.new</text>
+                        </g>
+
+                        <!-- Worker Node -->
+                        <g class="node-group" id="node-worker">
+                            <circle cx="680" cy="110" r="40" class="node-circle"></circle>
+                            <text x="680" y="115" class="node-text">Workers</text>
+                        </g>
+                    </svg>
+                    <!-- Floating flow logs -->
+                    <div id="flow-event-label" class="flow-event-badge">Idle</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- BOTTOM: Recent Orders Grid -->
+        <section class="table-section">
+            <div class="card table-card">
+                <div class="table-header-row">
+                    <h3 class="card-title">Recent Event Orders</h3>
+                    <button class="btn-secondary" id="btn-refresh">Force Refresh</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Customer</th>
+                                <th>Item</th>
+                                <th>Quantity</th>
+                                <th>Total</th>
+                                <th>Status</th>
+                                <th>Placed At</th>
+                            </tr>
+                        </thead>
+                        <tbody id="orders-tbody">
+                            <tr>
+                                <td colspan="7" class="loading-placeholder">No orders found. Use the form above to place one.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <span>Powered by Servverse DSL Runtime v1.0.0</span>
+    </footer>
+
+    <script src="/dashboard/app.js"></script>
+</body>
+</html>

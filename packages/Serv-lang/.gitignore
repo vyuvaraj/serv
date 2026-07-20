@@ -1,0 +1,34 @@
+# Binaries and executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+service_bin
+
+# Serv intermediate build directories
+.build/
+
+# Local databases
+*.db
+service_data.db
+multi_db_test.db
+yaml_test_db.db
+
+# VS Code local folder (optional to ignore, but we recommend keeping .vscode/tasks.json and extensions.json)
+# If you want to keep workspace settings but ignore workspace state:
+.vscode/project.json
+.vscode/.suo
+.vscode/*.code-workspace
+
+# Operating system files
+Thumbs.db
+db.db
+Desktop.ini
+.DS_Store
+
+# Log files
+*.log
+
+# Release distribution builds
+dist/

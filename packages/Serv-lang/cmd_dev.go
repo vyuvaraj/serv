@@ -1,0 +1,487 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
+)
+
+// servDevServices defines the default services to start in dev mode.
+var servDevServices = []struct {
+	Name    string
+	Port    string
+	Binary  string
+	Args    []string
+	EnvVars []string
+}{
+	{"ServStore", "8081", "servstore", []string{"--port", "8081", "--data-dir", ".servdev/store-data"}, nil},
+	{"ServQueue", "8082", "servqueue", nil, nil},
+	{"ServCache", "8086", "servcache", nil, nil},
+	{"ServCron", "8087", "servcron", nil, []string{"PORT=8087"}},
+	{"ServGate", "8080", "servgate", nil, nil},
+	{"ServTrace", "8090", "servtrace", nil, nil},
+	{"ServAuth", "8091", "servauth", nil, nil},
+	{"ServDB", "8092", "servdb", nil, nil},
+	{"ServMail", "8093", "servmail", nil, nil},
+	{"ServFlow", "8094", "servflow", nil, nil},
+}
+
+func runDevCmd() {
+	devCmd := flag.NewFlagSet("dev", flag.ExitOnError)
+	servicesFlag := devCmd.String("services", "store,queue,cache,gate", "Comma-separated services to start (store,queue,cache,cron,gate,trace,all)")
+	portFlag := devCmd.String("port", "8080", "Port for the user's .srv service")
+	noConsoleFlag := devCmd.Bool("no-console", false, "Skip opening ServConsole dashboard")
+	dashboardFlag := devCmd.Bool("dashboard", false, "Show live terminal TUI dashboard with service health and stats")
+	if err := devCmd.Parse(os.Args[2:]); err != nil {
+		fmt.Printf("Error parsing arguments: %v\n", err)
+		os.Exit(1)
+	}
+
+	args := devCmd.Args()
+	srvFile := "."
+	if len(args) > 0 {
+		srvFile = args[0]
+	}
+
+	fmt.Println()
+	fmt.Println("  ▲ Serv Dev Environment")
+	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println()
+
+	// Create dev data directory
+	os.MkdirAll(".servdev/store-data", 0755)
+
+	// Determine which services to start
+	requestedServices := parseServiceList(*servicesFlag)
+
+	// Auto-detect services referenced in the .srv files
+	for _, s := range detectRequiredServices(srvFile) {
+		switch s {
+		case "auth":
+			requestedServices["ServAuth"] = true
+		case "db":
+			requestedServices["ServDB"] = true
+		case "mail":
+			requestedServices["ServMail"] = true
+		case "flow":
+			requestedServices["ServFlow"] = true
+		}
+	}
+
+	// Start infrastructure services
+	var procs []*devProcess
+	var wg sync.WaitGroup
+
+	for _, svc := range servDevServices {
+		if !requestedServices[svc.Name] {
+			continue
+		}
+
+		// Check if the binary is available on PATH
+		_, err := exec.LookPath(svc.Binary)
+		if err != nil {
+			fmt.Printf("  ⚠  %s binary not found (%s). Skipping.\n", svc.Name, svc.Binary)
+			continue
+		}
+
+		proc := startDevService(svc.Name, svc.Binary, svc.Port, svc.Args, svc.EnvVars)
+		if proc != nil {
+			procs = append(procs, proc)
+			fmt.Printf("  ✓  %s started on :%s\n", svc.Name, svc.Port)
+		}
+	}
+
+	fmt.Println()
+
+	// Wait for services to be healthy
+	fmt.Print("  Waiting for services...")
+	time.Sleep(2 * time.Second)
+	healthyCount := 0
+	for _, proc := range procs {
+		if checkDevHealth(proc.port) {
+			healthyCount++
+		}
+	}
+	fmt.Printf(" %d/%d healthy\n", healthyCount, len(procs))
+	fmt.Println()
+
+	// Start the user's .srv file with hot reload
+	fmt.Printf("  ▶  Starting %s with hot-reload on :%s\n", srvFile, *portFlag)
+	fmt.Println()
+
+	// Set environment for the user service to discover infra
+	os.Setenv("SERV_STORE_ENDPOINT", "http://localhost:8081")
+	os.Setenv("SERV_QUEUE_ENDPOINT", "localhost:8082")
+	os.Setenv("SERV_CACHE_ENDPOINT", "http://localhost:8086")
+	os.Setenv("SERV_GATE_ENDPOINT", "http://localhost:8080")
+	os.Setenv("SERV_TRACE_ENDPOINT", "http://localhost:8090")
+	os.Setenv("SERV_AUTH_ENDPOINT", "http://localhost:8091")
+	os.Setenv("SERV_DB_ENDPOINT", "http://localhost:8092")
+	os.Setenv("SERV_MAIL_ENDPOINT", "http://localhost:8093")
+	os.Setenv("SERV_FLOW_ENDPOINT", "http://localhost:8094")
+
+	if !*noConsoleFlag {
+		fmt.Println("  Dashboard: http://localhost:8083 (start ServConsole separately)")
+	}
+
+	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  Press Ctrl+C to stop all services\n\n")
+
+	// Run the user service with hot reload
+	if *dashboardFlag {
+		go startDevDashboard(procs)
+	}
+	startWorkspaceWatcher(procs)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runServHot(srvFile, "")
+	}()
+
+	// Handle shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	fmt.Println("\n  Shutting down dev environment...")
+	for _, proc := range procs {
+		if proc.cmd != nil && proc.cmd.Process != nil {
+			proc.cmd.Process.Kill()
+		}
+	}
+	fmt.Println("  ✓ All services stopped.")
+}
+
+type devProcess struct {
+	name    string
+	port    string
+	binary  string
+	args    []string
+	envVars []string
+	cmd     *exec.Cmd
+}
+
+func startDevService(name, binary, port string, args, envVars []string) *devProcess {
+	cmd := exec.Command(binary, args...)
+	cmd.Stdout = nil // Suppress output in dev mode
+	cmd.Stderr = nil
+	cmd.Env = append(os.Environ(), envVars...)
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("  ✗  Failed to start %s: %v", name, err)
+		return nil
+	}
+
+	return &devProcess{
+		name:    name,
+		port:    port,
+		binary:  binary,
+		args:    args,
+		envVars: envVars,
+		cmd:     cmd,
+	}
+}
+
+func checkDevHealth(port string) bool {
+	client := http.Client{Timeout: 1 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://localhost:%s/healthz", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
+func parseServiceList(input string) map[string]bool {
+	result := make(map[string]bool)
+	if input == "all" {
+		for _, svc := range servDevServices {
+			result[svc.Name] = true
+		}
+		return result
+	}
+	for _, s := range splitComma(input) {
+		switch s {
+		case "store":
+			result["ServStore"] = true
+		case "queue":
+			result["ServQueue"] = true
+		case "cache":
+			result["ServCache"] = true
+		case "cron":
+			result["ServCron"] = true
+		case "gate":
+			result["ServGate"] = true
+		case "trace":
+			result["ServTrace"] = true
+		case "auth":
+			result["ServAuth"] = true
+		case "db":
+			result["ServDB"] = true
+		case "mail":
+			result["ServMail"] = true
+		case "flow":
+			result["ServFlow"] = true
+		}
+	}
+	return result
+}
+
+func splitComma(s string) []string {
+	var result []string
+	current := ""
+	for _, c := range s {
+		if c == ',' {
+			if current != "" {
+				result = append(result, current)
+			}
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		result = append(result, current)
+	}
+	return result
+}
+
+func startWorkspaceWatcher(procs []*devProcess) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	parentDir := filepath.Dir(wd)
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("[WORKSPACE HOT-RELOAD] Failed to create fsnotify watcher: %v", err)
+		return
+	}
+
+	dirToProc := make(map[string]*devProcess)
+
+	addWatcherDirs := func(root string, proc *devProcess) {
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err == nil && info.IsDir() {
+				base := filepath.Base(path)
+				if base == ".git" || base == ".build" || base == "node_modules" {
+					return filepath.SkipDir
+				}
+				_ = watcher.Add(path)
+				dirToProc[path] = proc
+			}
+			return nil
+		})
+	}
+
+	for _, proc := range procs {
+		svcDir := filepath.Join(parentDir, proc.name)
+		addWatcherDirs(svcDir, proc)
+	}
+
+	go func() {
+		defer watcher.Close()
+		var (
+			mu           sync.Mutex
+			lastTriggers = make(map[string]time.Time)
+			triggerDelay = 500 * time.Millisecond
+		)
+
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+
+				if filepath.Ext(event.Name) == ".go" && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+					// Resolve the directory to the proc
+					dir := filepath.Dir(event.Name)
+					proc, exists := dirToProc[dir]
+					// Fallback: search parent directories if not found
+					if !exists {
+						for pDir, pProc := range dirToProc {
+							if strings.HasPrefix(dir, pDir) {
+								proc = pProc
+								exists = true
+								break
+							}
+						}
+					}
+
+					if exists {
+						mu.Lock()
+						now := time.Now()
+						lastTrigger := lastTriggers[proc.name]
+						if now.Sub(lastTrigger) > triggerDelay {
+							lastTriggers[proc.name] = now
+							mu.Unlock()
+
+							log.Printf("[WORKSPACE HOT-RELOAD] Change detected in %s (%s). Rebuilding service...", proc.name, filepath.Base(event.Name))
+
+							svcDir := filepath.Join(parentDir, proc.name)
+							buildCmd := exec.Command("go", "build", "-o", proc.binary+".exe")
+							buildCmd.Dir = svcDir
+							buildCmd.Env = append(os.Environ(), "GOWORK=off")
+							if err := buildCmd.Run(); err != nil {
+								log.Printf("[WORKSPACE HOT-RELOAD] Build failed for %s: %v", proc.name, err)
+								continue
+							}
+
+							if proc.cmd != nil && proc.cmd.Process != nil {
+								proc.cmd.Process.Kill()
+								proc.cmd.Wait()
+							}
+
+							binaryPath := filepath.Join(svcDir, proc.binary+".exe")
+							newCmd := exec.Command(binaryPath, proc.args...)
+							newCmd.Stdout = nil
+							newCmd.Stderr = nil
+							newCmd.Env = append(os.Environ(), proc.envVars...)
+							if err := newCmd.Start(); err != nil {
+								log.Printf("[WORKSPACE HOT-RELOAD] Restart failed for %s: %v", proc.name, err)
+							} else {
+								proc.cmd = newCmd
+								log.Printf("[WORKSPACE HOT-RELOAD] Successfully restarted %s", proc.name)
+							}
+						} else {
+							mu.Unlock()
+						}
+					}
+				}
+
+				if event.Has(fsnotify.Create) {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						// Find which process this directory belongs to
+						for pDir, pProc := range dirToProc {
+							if strings.HasPrefix(event.Name, pDir) {
+								addWatcherDirs(event.Name, pProc)
+								break
+							}
+						}
+					}
+				}
+
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Printf("[WORKSPACE HOT-RELOAD] Watcher error: %v", err)
+			}
+		}
+	}()
+}
+
+// startDevDashboard runs a periodic terminal refresh showing live service health,
+// implementing the DX.26 k9s-style terminal dashboard for 'serv dev --dashboard'.
+func startDevDashboard(procs []*devProcess) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	clearLine := "\033[2J\033[H" // ANSI clear screen + move to top
+
+	for range ticker.C {
+		timestamp := time.Now().Format("15:04:05")
+
+		// Build status board
+		var sb strings.Builder
+		sb.WriteString(clearLine)
+		sb.WriteString("┌─────────────────────────────────────────────────────────────┐\n")
+		sb.WriteString(fmt.Sprintf("│  ▲ Serv Dev Dashboard                         %s  │\n", timestamp))
+		sb.WriteString("├──────────────────┬──────────┬──────────┬────────────────────┤\n")
+		sb.WriteString("│ SERVICE          │ PORT     │ STATUS   │ HEALTH             │\n")
+		sb.WriteString("├──────────────────┼──────────┼──────────┼────────────────────┤\n")
+
+		for _, proc := range procs {
+			running := proc.cmd != nil && proc.cmd.Process != nil
+			healthy := false
+			if running {
+				healthy = checkDevHealth(proc.port)
+			}
+
+			status := "  ●  DOWN"
+			if running && healthy {
+				status = "  ●  UP  "
+			} else if running {
+				status = "  ●  STARTING"
+			}
+
+			healthStr := "─"
+			if healthy {
+				healthStr = "OK"
+			}
+
+			sb.WriteString(fmt.Sprintf("│ %-16s │ %-8s │ %-8s │ %-18s │\n",
+				proc.name, ":"+proc.port, status, healthStr))
+		}
+
+		sb.WriteString("└──────────────────┴──────────┴──────────┴────────────────────┘\n")
+		sb.WriteString("  Press Ctrl+C to stop all services\n")
+
+		fmt.Print(sb.String())
+	}
+}
+
+func detectRequiredServices(srvFile string) []string {
+	var detected []string
+	
+	var files []string
+	info, err := os.Stat(srvFile)
+	if err != nil {
+		return nil
+	}
+	if info.IsDir() {
+		filepath.Walk(srvFile, func(path string, fileInfo os.FileInfo, walkErr error) error {
+			if fileInfo != nil && !fileInfo.IsDir() && strings.HasSuffix(path, ".srv") {
+				files = append(files, path)
+			}
+			return nil
+		})
+	} else {
+		files = append(files, srvFile)
+	}
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		if strings.Contains(content, "auth") && !contains(detected, "auth") {
+			detected = append(detected, "auth")
+		}
+		if (strings.Contains(content, "servdb://") || strings.Contains(content, "database")) && !contains(detected, "db") {
+			detected = append(detected, "db")
+		}
+		if strings.Contains(content, "mail") && !contains(detected, "mail") {
+			detected = append(detected, "mail")
+		}
+		if strings.Contains(content, "workflow") && !contains(detected, "flow") {
+			detected = append(detected, "flow")
+		}
+	}
+	return detected
+}
+
+func contains(arr []string, val string) bool {
+	for _, v := range arr {
+		if v == val {
+			return true
+		}
+	}
+	return false
+}
+
+

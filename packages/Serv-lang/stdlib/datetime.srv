@@ -1,0 +1,37 @@
+// Serv Standard Library: Date & Time Helpers
+// Import: import { now, timestamp, isExpired, formatDuration } from "stdlib/datetime.srv"
+
+// Get current ISO timestamp
+export fn now() {
+    return time.now()
+}
+
+// Get Unix timestamp (seconds)
+export fn timestamp() {
+    return time.unix()
+}
+
+// Check if a timestamp is older than maxAge seconds
+export fn isExpired(createdAt, maxAgeSeconds) {
+    let current = time.unix()
+    let diff = current - createdAt
+    return diff > maxAgeSeconds
+}
+
+// Format seconds into human-readable duration
+export fn formatDuration(seconds) {
+    if seconds < 60 {
+        return f"{seconds}s"
+    }
+    if seconds < 3600 {
+        let mins = seconds / 60
+        return f"{mins}m"
+    }
+    let hours = seconds / 3600
+    return f"{hours}h"
+}
+
+// Sleep for given milliseconds
+export fn sleep(ms) {
+    time.sleep(ms)
+}

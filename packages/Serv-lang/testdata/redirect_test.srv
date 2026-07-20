@@ -1,0 +1,9 @@
+server "9000"
+
+export route "GET" "/" (req) {
+    return html.redirect("/login", 302)
+}
+
+export route "GET" "/old-path" (req) {
+    return html.redirect("/new-path", 301)
+}

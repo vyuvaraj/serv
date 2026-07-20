@@ -1,0 +1,39 @@
+{
+  "gateway": {
+    "port": 8080,
+    "ssl": {
+      "enabled": false
+    },
+    "rate_limiting": {
+      "enabled": true,
+      "max_requests_per_min": 100
+    },
+    "authentication": {
+      "provider": "jwt",
+      "secret_env_var": "SERV_JWT_SECRET"
+    },
+    "routes": [
+      {
+        "path": "/api/devices",
+        "methods": ["GET", "POST"],
+        "target": "http://localhost:4500/api/devices",
+        "auth_required": true,
+        "description": "Proxy device registration and listing requests to Fleet API"
+      },
+      {
+        "path": "/api/fleet-stats",
+        "methods": ["GET"],
+        "target": "http://localhost:4500/api/fleet-stats",
+        "auth_required": false,
+        "description": "Proxy public dashboard statistics"
+      },
+      {
+        "path": "/dashboard",
+        "methods": ["GET"],
+        "target": "http://localhost:4500/dashboard",
+        "auth_required": false,
+        "description": "Proxy interactive dashboard static files"
+      }
+    ]
+  }
+}

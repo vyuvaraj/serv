@@ -1,0 +1,377 @@
+// Serv Language Server Protocol (LSP) implementation.
+// Provides real-time diagnostics, autocomplete, hover, go-to-definition,
+// signature help, and document symbols for .srv files.
+//
+// Usage: serv-lsp (communicates via stdin/stdout JSON-RPC)
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+// normalizeURI normalises a file URI so that Windows drive-letter encoding
+// differences (file:///F:/ vs file:///f:/ vs file:///f%3A/) all map to the
+// same key in the documents map.
+func normalizeURI(uri string) string {
+	decoded, err := url.PathUnescape(uri)
+	if err != nil {
+		decoded = uri
+	}
+	return strings.ToLower(decoded)
+}
+
+// --- LSP Protocol Types ---
+
+type Position struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type Range struct {
+	Start Position `json:"start"`
+	End   Position `json:"end"`
+}
+
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
+}
+
+type Diagnostic struct {
+	Range    Range  `json:"range"`
+	Severity int    `json:"severity"` // 1=Error, 2=Warning, 3=Info, 4=Hint
+	Message  string `json:"message"`
+	Source   string `json:"source"`
+}
+
+type TextDocumentIdentifier struct {
+	URI string `json:"uri"`
+}
+
+type TextDocumentItem struct {
+	URI        string `json:"uri"`
+	LanguageID string `json:"languageId"`
+	Version    int    `json:"version"`
+	Text       string `json:"text"`
+}
+
+type VersionedTextDocumentIdentifier struct {
+	URI     string `json:"uri"`
+	Version int    `json:"version"`
+}
+
+type TextDocumentContentChangeEvent struct {
+	Text string `json:"text"`
+}
+
+type CompletionItem struct {
+	Label            string `json:"label"`
+	Kind             int    `json:"kind"`
+	Detail           string `json:"detail,omitempty"`
+	InsertText       string `json:"insertText,omitempty"`
+	InsertTextFormat int    `json:"insertTextFormat,omitempty"`
+	SortText         string `json:"sortText,omitempty"`
+	Documentation    string `json:"documentation,omitempty"`
+}
+
+type CompletionList struct {
+	IsIncomplete bool             `json:"isIncomplete"`
+	Items        []CompletionItem `json:"items"`
+}
+
+// InlayHint represents ghost-text type annotations shown inline in VS Code. DX.10.
+type InlayHint struct {
+	Position     Position `json:"position"`
+	Label        string   `json:"label"`
+	Kind         int      `json:"kind"`
+	Tooltip      string   `json:"tooltip,omitempty"`
+	PaddingLeft  bool     `json:"paddingLeft,omitempty"`
+	PaddingRight bool     `json:"paddingRight,omitempty"`
+}
+
+// SelectionRange represents a nested syntactic range for Shift+Alt+→ expansion. DX.13.
+type SelectionRange struct {
+	Range  Range           `json:"range"`
+	Parent *SelectionRange `json:"parent,omitempty"`
+}
+
+type Hover struct {
+	Contents MarkupContent `json:"contents"`
+	Range    *Range        `json:"range,omitempty"`
+}
+
+type MarkupContent struct {
+	Kind  string `json:"kind"` // "plaintext" or "markdown"
+	Value string `json:"value"`
+}
+
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature"`
+	ActiveParameter int                    `json:"activeParameter"`
+}
+
+type SignatureInformation struct {
+	Label         string                 `json:"label"`
+	Documentation string                 `json:"documentation,omitempty"`
+	Parameters    []ParameterInformation `json:"parameters,omitempty"`
+}
+
+type ParameterInformation struct {
+	Label string `json:"label"`
+}
+
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes"`
+}
+
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
+// --- JSON-RPC Types ---
+
+type JSONRPCMessage struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      interface{}     `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Result  interface{}     `json:"result,omitempty"`
+	Error   interface{}     `json:"error,omitempty"`
+}
+
+// --- Server State ---
+
+type Server struct {
+	documents map[string]string       // uri -> content
+	symbols   map[string][]symbolInfo // uri -> symbols
+	mu        sync.RWMutex
+}
+
+type symbolInfo struct {
+	Name       string
+	Kind       string // "struct", "fn", "method", "let", "route", "middleware", "enum", "interface"
+	Line       int
+	Col        int
+	TypeInfo   string   // return type or struct fields summary
+	Params     []string // function parameter names
+	ParamTypes []string // function parameter types
+}
+
+func NewServer() *Server {
+	return &Server{
+		documents: make(map[string]string),
+		symbols:   make(map[string][]symbolInfo),
+	}
+}
+
+// --- Main Loop ---
+
+func main() {
+	server := NewServer()
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		var contentLength int
+		// Read headers until empty line
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if line == "" {
+				break
+			}
+			if strings.HasPrefix(line, "Content-Length:") {
+				lenStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
+				contentLength, _ = strconv.Atoi(lenStr)
+			}
+		}
+
+		if contentLength <= 0 {
+			continue
+		}
+
+		body := make([]byte, contentLength)
+		// Use io.ReadFull to read the exact number of bytes
+		_, err := io.ReadFull(reader, body)
+		if err != nil {
+			break
+		}
+
+		var msg JSONRPCMessage
+		if err := json.Unmarshal(body, &msg); err != nil {
+			continue
+		}
+
+		server.handleMessage(msg)
+	}
+}
+
+func (s *Server) handleMessage(msg JSONRPCMessage) {
+	switch msg.Method {
+	case "initialize":
+		s.handleInitialize(msg)
+	case "initialized":
+		// No-op
+	case "shutdown":
+		sendResponse(msg.ID, nil)
+	case "exit":
+		os.Exit(0)
+	case "textDocument/didOpen":
+		s.handleDidOpen(msg)
+	case "textDocument/didChange":
+		s.handleDidChange(msg)
+	case "textDocument/didClose":
+		s.handleDidClose(msg)
+	case "textDocument/completion":
+		s.handleCompletion(msg)
+	case "textDocument/hover":
+		s.handleHover(msg)
+	case "textDocument/definition":
+		s.handleDefinition(msg)
+	case "textDocument/references":
+		s.handleReferences(msg)
+	case "textDocument/prepareRename":
+		s.handlePrepareRename(msg)
+	case "textDocument/rename":
+		s.handleRename(msg)
+	case "textDocument/documentSymbol":
+		s.handleDocumentSymbol(msg)
+	case "textDocument/signatureHelp":
+		s.handleSignatureHelp(msg)
+	case "textDocument/formatting":
+		s.handleFormatting(msg)
+	case "textDocument/codeAction":
+		s.handleCodeAction(msg)
+	case "textDocument/codeLens":
+		s.handleCodeLens(msg)
+	case "textDocument/inlayHint":
+		s.handleInlayHint(msg) // DX.10
+	case "textDocument/selectionRange":
+		s.handleSelectionRange(msg) // DX.13
+	}
+}
+
+func (s *Server) handleInitialize(msg JSONRPCMessage) {
+	result := map[string]interface{}{
+		"capabilities": map[string]interface{}{
+			"textDocumentSync": 1, // Full sync
+			"completionProvider": map[string]interface{}{
+				"triggerCharacters": []string{".", "\""},
+			},
+			"hoverProvider":              true,
+			"definitionProvider":         true,
+			"referencesProvider":         true,
+			"renameProvider":             true,
+			"documentSymbolProvider":     true,
+			"documentFormattingProvider": true,
+			"codeActionProvider":         true,
+			"codeLensProvider": map[string]interface{}{
+				"resolveProvider": false,
+			},
+			"inlayHintProvider":      true, // DX.10
+			"selectionRangeProvider": true, // DX.13
+			"signatureHelpProvider": map[string]interface{}{
+				"triggerCharacters":   []string{"(", ","},
+				"retriggerCharacters": []string{","},
+			},
+		},
+		"serverInfo": map[string]interface{}{
+			"name":    "serv-lsp",
+			"version": "3.0.0",
+		},
+	}
+	sendResponse(msg.ID, result)
+}
+
+func (s *Server) handleDidOpen(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument TextDocumentItem `json:"textDocument"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	s.mu.Lock()
+	normURI := normalizeURI(params.TextDocument.URI)
+	s.documents[normURI] = params.TextDocument.Text
+	s.mu.Unlock()
+
+	s.analyzeAndPublishDiagnostics(params.TextDocument.URI, params.TextDocument.Text)
+}
+
+func (s *Server) handleDidChange(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument   VersionedTextDocumentIdentifier  `json:"textDocument"`
+		ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	if len(params.ContentChanges) > 0 {
+		text := params.ContentChanges[len(params.ContentChanges)-1].Text
+		s.mu.Lock()
+		normURI := normalizeURI(params.TextDocument.URI)
+		s.documents[normURI] = text
+		s.mu.Unlock()
+
+		s.analyzeAndPublishDiagnostics(params.TextDocument.URI, text)
+	}
+}
+
+func (s *Server) handleDidClose(msg JSONRPCMessage) {
+	var params struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+	}
+	json.Unmarshal(msg.Params, &params)
+
+	s.mu.Lock()
+	delete(s.documents, params.TextDocument.URI)
+	delete(s.symbols, params.TextDocument.URI)
+	s.mu.Unlock()
+
+	sendNotification("textDocument/publishDiagnostics", map[string]interface{}{
+		"uri":         params.TextDocument.URI,
+		"diagnostics": []Diagnostic{},
+	})
+}
+
+// --- JSON-RPC Helpers ---
+
+func sendResponse(id interface{}, result interface{}) {
+	msg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
+	}
+	data, _ := json.Marshal(msg)
+	content := string(data)
+	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(content), content)
+}
+
+func sendNotification(method string, params interface{}) {
+	msg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  method,
+		"params":  params,
+	}
+	data, _ := json.Marshal(msg)
+	content := string(data)
+	fmt.Fprintf(os.Stdout, "Content-Length: %d\r\n\r\n%s", len(content), content)
+}

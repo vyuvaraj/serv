@@ -1,0 +1,27 @@
+// Example Cleanup/Archival Job
+// Pattern: Remove stale records based on configurable retention.
+// Registers itself in the global registry at startup.
+
+registry.set("cleanup", executeCleanup)
+
+export fn executeCleanup(payload, idempotencyKey) {
+    let retentionDays = 90
+    let collection = "audit_logs"
+
+    log.info(f"Starting cleanup idempotencyKey={idempotencyKey} collection={collection} retentionDays={retentionDays}")
+
+    let cutoffSeconds = retentionDays * 86400
+    let cutoff = time.unix() - cutoffSeconds
+
+    let filter = f"{\"createdAt\": {\"$lt\": {cutoff}}}"
+    let result, err = db.query("delete", collection, filter)
+
+    if err != nil {
+        log.error(f"MongoDB access failed during cleanup: {err}")
+        return "RETRIABLE"
+    }
+
+    log.info(f"Cleanup complete idempotencyKey={idempotencyKey} collection={collection}")
+    metric.inc("cleanup_records_deleted_total")
+    return "ok"
+}

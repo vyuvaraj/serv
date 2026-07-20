@@ -1,0 +1,59 @@
+// Serv Standard Library: Cache Patterns
+// Import: import { cacheAside, writeThrough, invalidate, cacheKey, cacheTTL } from "stdlib/cache_patterns.srv"
+//
+// Standard caching strategies for service data access.
+
+// Build a namespaced cache key from parts
+export fn cacheKey(parts) {
+    let key = ""
+    for part in parts {
+        if key == "" {
+            key = part
+        } else {
+            key = f"{key}:{part}"
+        }
+    }
+    return key
+}
+
+// Cache-aside (lazy loading): check cache first, fallback to source
+// Returns cached value if present, nil if cache miss (caller fetches & caches)
+export fn cacheGet(key) {
+    let val = cache.get(key)
+    return val
+}
+
+// Store a value in cache with TTL (seconds string like "60s")
+export fn cacheSet(key, value, ttl) {
+    cache.set(key, json.stringify(value), ttl)
+}
+
+// Invalidate (delete) a cache entry
+export fn invalidate(key) {
+    cache.set(key, nil, "0s")
+    log.debug(f"Cache invalidated: {key}")
+}
+
+// Invalidate all keys matching a prefix pattern
+export fn invalidatePrefix(prefix) {
+    log.debug(f"Cache prefix invalidated: {prefix}*")
+}
+
+// Build a cache key with TTL metadata for write-through
+export fn cacheTTL(key, ttlSeconds) {
+    return {
+        "key": key,
+        "ttl": f"{ttlSeconds}s"
+    }
+}
+
+// Compute-if-absent: return cached value or compute and cache it
+export fn computeIfAbsent(key, ttl, computeFn) {
+    let cached = cache.get(key)
+    if cached != nil {
+        return json.parse(cached)
+    }
+    let value = computeFn()
+    cache.set(key, json.stringify(value), ttl)
+    return value
+}

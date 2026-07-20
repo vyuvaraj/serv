@@ -1,0 +1,210 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feature/*"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout ServTunnel
+        uses: actions/checkout@v4
+        with:
+          repository: vyuvaraj/ServTunnel
+          path: ServTunnel-temp
+
+      - name: Move ServTunnel to parent directory
+        shell: pwsh
+        run: Move-Item -Path ServTunnel-temp -Destination ../ServTunnel
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+
+      - name: Build serv compiler
+        run: go build -o serv.exe .
+
+      - name: Compile all examples
+        shell: pwsh
+        run: |
+          $failed = @()
+          Get-ChildItem examples\*.srv | ForEach-Object {
+            & .\serv.exe build $_.FullName -o examples\test_bin.exe
+            if ($LASTEXITCODE -ne 0) { $failed += $_.Name }
+          }
+          Remove-Item examples\test_bin.exe -ErrorAction SilentlyContinue
+          if ($failed.Count -gt 0) {
+            Write-Host "Failed to compile: $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "All $((Get-ChildItem examples\*.srv).Count) examples compiled successfully"
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $testFiles = @(
+            "test_sample.srv",
+            "examples\12_static_types.srv",
+            "examples\14_phase3_features.srv",
+            "examples\20_raw_strings.srv",
+            "examples\50_new_features.srv"
+          )
+          $failed = @()
+          foreach ($file in $testFiles) {
+            if (Test-Path $file) {
+              & .\serv.exe test $file
+              if ($LASTEXITCODE -ne 0) { $failed += $file }
+            }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "Failed tests: $($failed -join ', ')"
+            exit 1
+          }
+          Write-Host "All $($testFiles.Count) test files passed"
+
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $unformatted = @()
+          Get-ChildItem examples\*.srv | ForEach-Object {
+            & .\serv.exe fmt --check $_.FullName 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { $unformatted += $_.Name }
+          }
+          if ($unformatted.Count -gt 0) {
+            Write-Host "Unformatted files: $($unformatted -join ', ')"
+            Write-Host "Run 'serv fmt' to fix"
+            # Warning only — don't fail the build
+          }
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout ServTunnel
+        uses: actions/checkout@v4
+        with:
+          repository: vyuvaraj/ServTunnel
+          path: ServTunnel-temp
+
+      - name: Move ServTunnel to parent directory
+        run: mv ServTunnel-temp ../ServTunnel
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+
+      - name: Tidy Go modules
+        run: go mod tidy
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build serv compiler (Linux)
+        run: go build -o serv .
+
+      - name: Compile examples (Linux)
+        run: |
+          failed=0
+          for f in examples/*.srv; do
+            ./serv build "$f" -o /tmp/test_bin 2>/dev/null
+            if [ $? -ne 0 ]; then
+              echo "FAIL: $f"
+              failed=$((failed+1))
+            fi
+          done
+          if [ $failed -gt 0 ]; then
+            echo "$failed examples failed to compile"
+            exit 1
+          fi
+          echo "All examples compiled on Linux"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-test, build-linux]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            ext: .exe
+          - goos: linux
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: amd64
+            ext: ""
+          - goos: darwin
+            goarch: arm64
+            ext: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout ServTunnel
+        uses: actions/checkout@v4
+        with:
+          repository: vyuvaraj/ServTunnel
+          path: ServTunnel-temp
+
+      - name: Move ServTunnel to parent directory
+        run: |
+          if ("${{ matrix.goos }}" -eq "windows") {
+            Move-Item -Path ServTunnel-temp -Destination ../ServTunnel
+          } else {
+            mv ServTunnel-temp ../ServTunnel
+          }
+        shell: pwsh
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.4'
+
+      - name: Build release binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -ldflags="-s -w" -o serv-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: serv-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: serv-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+
+  publish-release:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten directory structure
+        run: |
+          mkdir release-dist
+          find artifacts/ -type f -exec cp {} release-dist/ \;
+          ls -R release-dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

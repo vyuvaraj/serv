@@ -1,0 +1,636 @@
+//go:build !wasm
+
+package runtime
+
+import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math/rand"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// OpenTelemetry support for Serv services.
+// Enabled by setting OTEL_ENDPOINT or otel.endpoint config.
+// Exports traces and metrics via OTLP/HTTP (JSON).
+
+var (
+	otelEnabled  bool
+	otelEndpoint string
+	otelService  string
+	otelMu       sync.RWMutex
+
+	SrvSourceMap map[string]int
+)
+
+var (
+	// Batch spans for export
+	spanBuffer   []otelSpan
+	spanBufferMu sync.Mutex
+	spanFlushInterval = 5 * time.Second
+	maxBatchSize = 100
+)
+
+// otelSpan represents a single trace span.
+type otelSpan struct {
+	TraceID    string                 `json:"traceId"`
+	SpanID     string                 `json:"spanId"`
+	ParentID   string                 `json:"parentSpanId,omitempty"`
+	Name       string                 `json:"name"`
+	Kind       int                    `json:"kind"` // 1=internal, 2=server, 3=client
+	StartTime  int64                  `json:"startTimeUnixNano"`
+	EndTime    int64                  `json:"endTimeUnixNano"`
+	Attributes map[string]interface{} `json:"attributes,omitempty"`
+	Status     int                    `json:"status"` // 0=unset, 1=ok, 2=error
+}
+
+func initOtel() {
+	endpoint := getOtelEndpoint()
+	if endpoint == "" {
+		return
+	}
+
+	otelEndpoint = strings.TrimSuffix(endpoint, "/")
+	otelEnabled = true
+
+	otelService = os.Getenv("OTEL_SERVICE_NAME")
+	if otelService == "" {
+		otelService = Config("otel.service")
+	}
+	if otelService == "" {
+		otelService = "serv-service"
+	}
+
+	// Start background span flusher
+	go otelFlushLoop()
+
+	LogInfo("OpenTelemetry enabled: endpoint=", otelEndpoint, " service=", otelService)
+}
+
+func getOtelEndpoint() string {
+	if ep := os.Getenv("OTEL_ENDPOINT"); ep != "" {
+		return ep
+	}
+	if ep := Config("otel.endpoint"); ep != "" {
+		return ep
+	}
+	if ep := os.Getenv("SERV_OTLP_ENDPOINT"); ep != "" {
+		return ep
+	}
+	if raw := os.Getenv("SERVVERSE_DISCOVERY"); raw != "" {
+		var manifest struct {
+			OTLPEndpoint string `json:"otlp_endpoint"`
+		}
+		if json.Unmarshal([]byte(raw), &manifest) == nil {
+			if manifest.OTLPEndpoint != "" {
+				return manifest.OTLPEndpoint
+			}
+		} else {
+			if data, err := os.ReadFile(raw); err == nil {
+				if json.Unmarshal(data, &manifest) == nil && manifest.OTLPEndpoint != "" {
+					return manifest.OTLPEndpoint
+				}
+			}
+		}
+	}
+	return ""
+}
+
+var (
+	activeTraces   = make(map[int64]*RequestTrace)
+	activeTracesMu sync.RWMutex
+)
+
+// GetGID parses and returns the current Goroutine ID.
+func GetGID() int64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	header := string(buf[:n])
+	// Parse "goroutine 123 ["
+	spaceIdx := strings.Index(header, " ")
+	if spaceIdx == -1 {
+		return 0
+	}
+	rest := header[spaceIdx+1:]
+	bracketIdx := strings.Index(rest, " ")
+	if bracketIdx == -1 {
+		bracketIdx = strings.Index(rest, "[")
+	}
+	if bracketIdx == -1 {
+		return 0
+	}
+	idField := strings.TrimSpace(rest[:bracketIdx])
+	id, err := strconv.ParseInt(idField, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+// SetActiveTrace stores the active trace for the current goroutine.
+func SetActiveTrace(rt *RequestTrace) {
+	gid := GetGID()
+	activeTracesMu.Lock()
+	activeTraces[gid] = rt
+	activeTracesMu.Unlock()
+}
+
+// GetActiveTrace retrieves the active trace for the current goroutine.
+func GetActiveTrace() *RequestTrace {
+	gid := GetGID()
+	activeTracesMu.RLock()
+	rt := activeTraces[gid]
+	activeTracesMu.RUnlock()
+	return rt
+}
+
+// ClearActiveTrace removes the trace mapping for the current goroutine.
+func ClearActiveTrace() {
+	gid := GetGID()
+	activeTracesMu.Lock()
+	delete(activeTraces, gid)
+	activeTracesMu.Unlock()
+}
+
+// OtelEnabled returns whether OpenTelemetry tracing is active.
+func OtelEnabled() bool {
+	return otelEnabled
+}
+
+func getSrvCallerLine() int {
+	if SrvSourceMap == nil {
+		return 0
+	}
+	for i := 2; i < 15; i++ {
+		_, file, line, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		baseFile := filepath.Base(file)
+		key := fmt.Sprintf("%s:%d", baseFile, line)
+		if srvLine, exists := SrvSourceMap[key]; exists {
+			return srvLine
+		}
+	}
+	return 0
+}
+
+// TraceRequest creates a span for an HTTP request and returns trace context.
+// Called automatically by the HTTP handler for every route.
+func TraceRequest(method, path string, parentTrace string) *RequestTrace {
+	if !otelEnabled {
+		return &RequestTrace{StartTime: time.Now()}
+	}
+
+	traceID := parentTrace
+	parentSpan := ""
+	if traceID == "" {
+		traceID = generateTraceID()
+	} else {
+		// Parse W3C traceparent: 00-traceId-parentSpanId-flags
+		parts := strings.Split(parentTrace, "-")
+		if len(parts) >= 4 {
+			traceID = parts[1]
+			parentSpan = parts[2]
+		}
+	}
+
+	spanID := generateSpanID()
+	srvLine := getSrvCallerLine()
+
+	return &RequestTrace{
+		TraceID:   traceID,
+		SpanID:    spanID,
+		ParentID:  parentSpan,
+		Method:    method,
+		Path:      path,
+		StartTime: time.Now(),
+		SrvLine:   srvLine,
+	}
+}
+
+// EndTrace completes a request trace span and queues it for export.
+func EndTrace(rt *RequestTrace, statusCode int) {
+	if !otelEnabled || rt == nil {
+		return
+	}
+
+	span := otelSpan{
+		TraceID:   rt.TraceID,
+		SpanID:    rt.SpanID,
+		ParentID:  rt.ParentID,
+		Name:      fmt.Sprintf("%s %s", rt.Method, rt.Path),
+		Kind:      2, // SERVER
+		StartTime: rt.StartTime.UnixNano(),
+		EndTime:   time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"http.method":      rt.Method,
+			"http.route":       rt.Path,
+			"http.status_code": statusCode,
+			"service.name":     otelService,
+		},
+		Status: 1, // OK
+	}
+	if rt.SrvLine > 0 {
+		span.Attributes["srv.source_line"] = rt.SrvLine
+	}
+
+	if statusCode >= 400 {
+		span.Status = 2 // ERROR
+	}
+
+	spanBufferMu.Lock()
+	spanBuffer = append(spanBuffer, span)
+	if len(spanBuffer) >= maxBatchSize {
+		batch := spanBuffer
+		spanBuffer = nil
+		spanBufferMu.Unlock()
+		go exportSpans(batch)
+	} else {
+		spanBufferMu.Unlock()
+	}
+}
+
+// Traceparent returns the W3C traceparent header value for propagation.
+func Traceparent(rt *RequestTrace) string {
+	if rt == nil || rt.TraceID == "" {
+		return ""
+	}
+	return fmt.Sprintf("00-%s-%s-01", rt.TraceID, rt.SpanID)
+}
+
+// RequestTrace holds in-flight trace context for a request.
+type RequestTrace struct {
+	TraceID   string
+	SpanID    string
+	ParentID  string
+	Method    string
+	Path      string
+	StartTime time.Time
+	SrvLine   int
+}
+
+// --- Internal helpers ---
+
+func otelFlushLoop() {
+	ticker := time.NewTicker(spanFlushInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		spanBufferMu.Lock()
+		if len(spanBuffer) == 0 {
+			spanBufferMu.Unlock()
+			continue
+		}
+		batch := spanBuffer
+		spanBuffer = nil
+		spanBufferMu.Unlock()
+
+		exportSpans(batch)
+	}
+}
+
+func exportSpans(spans []otelSpan) {
+	if len(spans) == 0 {
+		return
+	}
+
+	// Build OTLP/HTTP JSON payload
+	payload := map[string]interface{}{
+		"resourceSpans": []map[string]interface{}{
+			{
+				"resource": map[string]interface{}{
+					"attributes": []map[string]interface{}{
+						{"key": "service.name", "value": map[string]interface{}{"stringValue": otelService}},
+					},
+				},
+				"scopeSpans": []map[string]interface{}{
+					{
+						"scope": map[string]interface{}{"name": "serv-runtime"},
+						"spans": buildSpanPayload(spans),
+					},
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		LogDebug("OTEL export marshal error: ", err)
+		return
+	}
+
+	url := otelEndpoint + "/v1/traces"
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		LogDebug("OTEL export error: ", err)
+		return
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		LogDebug("OTEL export failed: status=", resp.StatusCode)
+	}
+}
+
+func buildSpanPayload(spans []otelSpan) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(spans))
+	for _, s := range spans {
+		span := map[string]interface{}{
+			"traceId":            s.TraceID,
+			"spanId":             s.SpanID,
+			"name":              s.Name,
+			"kind":              s.Kind,
+			"startTimeUnixNano": fmt.Sprintf("%d", s.StartTime),
+			"endTimeUnixNano":   fmt.Sprintf("%d", s.EndTime),
+			"status":            map[string]interface{}{"code": s.Status},
+		}
+		if s.ParentID != "" {
+			span["parentSpanId"] = s.ParentID
+		}
+		if len(s.Attributes) > 0 {
+			attrs := make([]map[string]interface{}, 0)
+			for k, v := range s.Attributes {
+				attrs = append(attrs, map[string]interface{}{
+					"key":   k,
+					"value": map[string]interface{}{"stringValue": fmt.Sprint(v)},
+				})
+			}
+			span["attributes"] = attrs
+		}
+		result = append(result, span)
+	}
+	return result
+}
+
+func generateTraceID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func generateSpanID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+
+// --- Component tracing helpers ---
+// These create child spans for internal operations (DB, cache, HTTP, pub/sub, etc.)
+
+func getInheritedTraceContext() (string, string) {
+	parent := GetActiveTrace()
+	if parent != nil && parent.TraceID != "" {
+		return parent.TraceID, parent.SpanID
+	}
+	return generateTraceID(), ""
+}
+
+// TraceDB creates a span for a database operation.
+func TraceDB(operation, query string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	srvLine := getSrvCallerLine()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      "DB " + operation,
+		Kind:      3, // CLIENT
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"db.system":    "sql",
+			"db.operation": operation,
+			"db.statement": truncateQuery(query),
+		},
+	}
+	if srvLine > 0 {
+		span.Attributes["srv.source_line"] = srvLine
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// TraceCache creates a span for a cache operation.
+func TraceCache(operation, key string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	srvLine := getSrvCallerLine()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      "Cache " + operation,
+		Kind:      3, // CLIENT
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"cache.operation": operation,
+			"cache.key":       key,
+		},
+	}
+	if srvLine > 0 {
+		span.Attributes["srv.source_line"] = srvLine
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// TraceHTTPClient creates a span for an outgoing HTTP request.
+func TraceHTTPClient(method, url string) func(statusCode int) {
+	if !otelEnabled {
+		return func(int) {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	srvLine := getSrvCallerLine()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      "HTTP " + method,
+		Kind:      3, // CLIENT
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"http.method": method,
+			"http.url":    url,
+		},
+	}
+	if srvLine > 0 {
+		span.Attributes["srv.source_line"] = srvLine
+	}
+	return func(statusCode int) {
+		span.EndTime = time.Now().UnixNano()
+		span.Attributes["http.status_code"] = statusCode
+		span.Status = 1
+		if statusCode >= 400 {
+			span.Status = 2
+		}
+		enqueueSpan(span)
+	}
+}
+
+// TracePubSub creates a span for a publish or subscribe operation.
+func TracePubSub(operation, topic string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      operation + " " + topic,
+		Kind:      3, // CLIENT for publish, 1 for subscribe processing
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"messaging.system":    "broker",
+			"messaging.operation": operation,
+			"messaging.destination": topic,
+		},
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// TraceScheduler creates a span for a scheduled job execution.
+func TraceScheduler(jobType, schedule string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      jobType + " " + schedule,
+		Kind:      1, // INTERNAL
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"scheduler.type":     jobType,
+			"scheduler.schedule": schedule,
+		},
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// TraceSpawn creates a span for a spawned goroutine.
+func TraceSpawn(taskName string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      "Spawn " + taskName,
+		Kind:      1, // INTERNAL
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"spawn.task": taskName,
+		},
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// TraceWebSocket creates a span for WebSocket activity.
+func TraceWebSocket(path, event string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      "WS " + path + " " + event,
+		Kind:      2, // SERVER
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"ws.path":  path,
+			"ws.event": event,
+		},
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// TraceExtern creates a span for an external function call (Python/Go).
+func TraceExtern(source, funcName string) func() {
+	if !otelEnabled {
+		return func() {}
+	}
+	traceID, parentID := getInheritedTraceContext()
+	span := otelSpan{
+		TraceID:   traceID,
+		SpanID:    generateSpanID(),
+		ParentID:  parentID,
+		Name:      "Extern " + funcName,
+		Kind:      3, // CLIENT
+		StartTime: time.Now().UnixNano(),
+		Attributes: map[string]interface{}{
+			"extern.source":   source,
+			"extern.function": funcName,
+		},
+	}
+	return func() {
+		span.EndTime = time.Now().UnixNano()
+		span.Status = 1
+		enqueueSpan(span)
+	}
+}
+
+// enqueueSpan adds a span to the buffer for batch export.
+func enqueueSpan(span otelSpan) {
+	spanBufferMu.Lock()
+	spanBuffer = append(spanBuffer, span)
+	if len(spanBuffer) >= maxBatchSize {
+		batch := spanBuffer
+		spanBuffer = nil
+		spanBufferMu.Unlock()
+		go exportSpans(batch)
+	} else {
+		spanBufferMu.Unlock()
+	}
+}
+
+// truncateQuery shortens a SQL query for span attributes (max 200 chars).
+func truncateQuery(query string) string {
+	if len(query) <= 200 {
+		return query
+	}
+	return query[:200] + "..."
+}
+

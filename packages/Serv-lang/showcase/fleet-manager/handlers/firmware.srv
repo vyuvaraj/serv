@@ -1,0 +1,41 @@
+// Firmware updates and orchestration
+
+// Trigger a firmware update rollout across the fleet
+// POST /api/firmware/rollout  body: {"version": "2.0.0"}
+export route "POST" "/api/firmware/rollout" (req) {
+    let body = json.parse(req.body)
+    let version = body.version
+
+    if version == nil {
+        return { "error": "version is required", "status": 400 }
+    }
+
+    log.info(f"[Firmware System] Initiating rollout of firmware v{version} to all devices...")
+
+    // 1. In a real environment, query OCI/S3 via ServRegistry for package content
+    // Here we simulate the registry download
+    let registryKey = f"firmware/v{version}/package.tar.gz"
+    log.info(f"[Firmware System] Registry lookup for key: {registryKey}")
+
+    // 2. Publish rollout event
+    publish "firmware.rollout" json.stringify({
+        "version": version,
+        "initiated_at": datetime("now")
+    })
+
+    // 3. Update DB
+    db.query("UPDATE devices SET firmware_version = ? WHERE status = 'online'", version)
+
+    return {
+        "success": true,
+        "rollout_version": version,
+        "status": "processing"
+    }
+}
+
+// Subscribe to rollouts to notify edge controllers
+subscribe "firmware.rollout" (msg) {
+    let payload = json.parse(msg)
+    let version = payload.version
+    log.info(f"[Orchestrator Worker] Pushing firmware v{version} update to ServCloud edge runtimes...")
+}

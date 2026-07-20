@@ -1,0 +1,25 @@
+// Example Data Sync Job
+// Pattern: Fetch data from external regulatory API.
+// Registers itself in the global registry at startup.
+
+registry.set("data_sync", executeDataSync)
+
+export fn executeDataSync(payload, idempotencyKey) {
+    let jurisdiction = "IT"
+    log.info(f"Data sync starting idempotencyKey={idempotencyKey} jurisdiction={jurisdiction}")
+
+    let response, err = http.get(f"https://api.regulatory.example.com/records?jurisdiction={jurisdiction}")
+
+    if err != nil {
+        if err.includes("timeout") {
+            log.warn(f"Transient failure, will retry: {err}")
+            return "RETRIABLE"
+        }
+        log.error(f"Permanent API failure: {err}")
+        return "FAILED"
+    }
+
+    log.info(f"Data sync complete idempotencyKey={idempotencyKey}")
+    metric.inc("data_sync_records_total")
+    return "ok"
+}

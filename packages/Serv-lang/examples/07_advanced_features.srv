@@ -1,0 +1,75 @@
+// Serv Example 07: Advanced Features
+// Run this example:
+//   .\serv.exe run examples/07_advanced_features.srv
+
+// 1. Setup SQLite Database & Cache
+
+database "sqlite://service_data.db"
+
+cache "in-memory"
+
+// Setup DB Schema on Startup
+log.info("Initializing database schema...")
+db.query("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, description TEXT)")
+
+// Scheduled task simulating event generation
+
+every 3s {
+    log.info("Timer: Generating events...")
+
+    // Write event to database
+    db.query("INSERT INTO events (type, description) VALUES ('ORDER_NEW', 'User purchased item')")
+    db.query("INSERT INTO events (type, description) VALUES ('USER_LOGOUT', 'User logged out of session')")
+
+    // Read events back
+    let results = db.query("SELECT id, type, description FROM events ORDER BY id DESC LIMIT 2")
+
+    // Loop through results and dispatch them
+    let count = 0
+    // We can simulate iteration by querying the list indexes
+    // In Serv, dynamic list index is handled as list[index] inside Go.
+    // Let's use a simple function to process each event.
+    processEvent(results)
+}
+
+fn processEvent(eventList) {
+    // Basic safety: since lists in Serv transpile to interface{} containing []interface{},
+    // let's print the length or dynamically access them.
+    // For simplicity, let's get events from the DB list:
+    log.info("Fetched recent events. Processing...")
+
+    // Let's demo String Interpolation (f-strings)
+    let serviceName = "ServEngine"
+    let statusMsg = f"System: {serviceName} is operating normally."
+    log.info(statusMsg)
+
+    // Parse and match event type
+    // Let's simulate a pattern match on dynamic fields
+    let testType = "ORDER_NEW"
+
+    match testType {
+        "ORDER_NEW" => {
+            log.info("Match block: Processing a new order...")
+            // Cache the status for 5 seconds
+            cache.set("order_status", "pending", "5s")
+
+            // Retrieve cached status
+            let cached = cache.get("order_status")
+            log.info(f"Cached order status: {cached}")
+
+            // Concurrency: Spawn a rate-limited worker task
+            log.info("Spawning rate-limited worker...")
+            spawn(2) handleOrderProcessing(testType)
+        }
+        "USER_LOGOUT" => {
+            log.info("Match block: Processing a user logout...")
+        }
+        _ => {
+            log.info("Match block: Unknown event type encountered.")
+        }
+    }
+}
+
+fn handleOrderProcessing(evt) {
+    log.info(f"[Worker Pool] Rate-limited worker is handling: {evt}")
+}

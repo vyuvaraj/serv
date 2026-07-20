@@ -1,0 +1,14 @@
+// Verification test for native MCP server support in Serv
+
+tool "format_greetings" "Formats greetings for a specific user" (args) {
+    let name = args.name
+    return f"Hello, {name}! Welcome to native MCP support in Serv."
+}
+
+test "mcp tool registration and invocation" {
+    let args = {
+        "name": "Alice"
+    }
+    let result = mcp.call("format_greetings", args)
+    assert result == "Hello, Alice! Welcome to native MCP support in Serv."
+}

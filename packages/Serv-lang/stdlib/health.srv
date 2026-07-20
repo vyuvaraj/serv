@@ -1,0 +1,33 @@
+// Serv Standard Library: Health Check Helpers
+// Import: import { checkResult, healthy, unhealthy, degraded } from "stdlib/health.srv"
+//
+// Use to build custom health check responses beyond the auto-generated /health.
+
+// Return a healthy check result
+export fn healthy(component) {
+    return { "component": component, "status": "healthy" }
+}
+
+// Return an unhealthy check result with reason
+export fn unhealthy(component, reason) {
+    return { "component": component, "status": "unhealthy", "reason": reason }
+}
+
+// Return a degraded check result
+export fn degraded(component, reason) {
+    return { "component": component, "status": "degraded", "reason": reason }
+}
+
+// Build a combined health response from multiple check results
+export fn buildHealthResponse(checks) {
+    let allHealthy = true
+    for check in checks {
+        if check?.status != "healthy" {
+            allHealthy = false
+        }
+    }
+    if allHealthy {
+        return { "status": "healthy", "checks": checks }
+    }
+    return { "status": "unhealthy", "checks": checks }
+}

@@ -1,0 +1,87 @@
+stages:
+  - build
+  - test
+  - release
+
+variables:
+  GO_VERSION: "1.22"
+
+# --- Build Stage ---
+
+build:compiler:
+  stage: build
+  image: golang:${GO_VERSION}
+  script:
+    - go build -o serv main.go
+  artifacts:
+    paths:
+      - serv
+    expire_in: 1 hour
+
+# --- Test Stage ---
+
+test:compile:
+  stage: test
+  image: golang:${GO_VERSION}
+  needs: [build:compiler]
+  script:
+    - |
+      failed=0
+      for f in examples/*.srv; do
+        ./serv build "$f" -o /tmp/test_bin 2>/dev/null
+        if [ $? -ne 0 ]; then
+          echo "FAIL: $f"
+          failed=$((failed+1))
+        fi
+      done
+      if [ $failed -gt 0 ]; then
+        echo "$failed examples failed"
+        exit 1
+      fi
+      echo "All examples compiled"
+
+test:unit:
+  stage: test
+  image: golang:${GO_VERSION}
+  needs: [build:compiler]
+  script:
+    - ./serv test examples/12_static_types.srv
+    - ./serv test examples/14_phase3_features.srv
+    - ./serv test examples/20_raw_strings.srv
+  allow_failure: false
+
+test:format:
+  stage: test
+  image: golang:${GO_VERSION}
+  needs: [build:compiler]
+  script:
+    - |
+      unformatted=0
+      for f in examples/*.srv; do
+        ./serv fmt --check "$f" 2>/dev/null
+        if [ $? -ne 0 ]; then
+          echo "Needs formatting: $f"
+          unformatted=$((unformatted+1))
+        fi
+      done
+      if [ $unformatted -gt 0 ]; then
+        echo "$unformatted files need formatting"
+      fi
+  allow_failure: true  # warning only
+
+# --- Release Stage ---
+
+release:binaries:
+  stage: release
+  image: golang:${GO_VERSION}
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  script:
+    - GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o serv-linux-amd64 main.go
+    - GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o serv-windows-amd64.exe main.go
+    - GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o serv-darwin-amd64 main.go
+    - GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o serv-darwin-arm64 main.go
+  artifacts:
+    paths:
+      - serv-*
+    expire_in: never

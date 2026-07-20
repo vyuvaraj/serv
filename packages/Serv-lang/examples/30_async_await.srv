@@ -1,0 +1,35 @@
+// Serv Example 30: Async/Await
+// Lint: serv lint examples/30_async_await.srv
+// Build: serv build examples/30_async_await.srv -o test_async.exe
+
+server "8080"
+
+fn fetchUserData(id: int) -> string {
+    return f"User {id}"
+}
+
+fn fetchOrders(id: int) -> string {
+    return f"Orders for {id}"
+}
+
+fn fetchNotifications(id: int) -> string {
+    return f"Notifications for {id}"
+}
+
+// Single await
+
+route "GET" "/user/:id" (req) {
+    let data = await fetchUserData(1)
+    return { "user": data }
+}
+
+// Parallel await — all tasks run concurrently
+
+route "GET" "/dashboard" (req) {
+    let results = await all([
+    fetchUserData(1),
+    fetchOrders(1),
+    fetchNotifications(1)
+])
+return { "dashboard": results }
+}

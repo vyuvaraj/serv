@@ -1,0 +1,48 @@
+# Serv base image for building and running .srv services.
+# Usage:
+#   FROM serv:latest
+#   COPY myservice.srv .
+#   RUN serv build myservice.srv -o service
+#   CMD ["./service"]
+#
+# Build this image:
+#   docker build -t serv:latest -f release-scripts/docker/Dockerfile.base .
+
+FROM golang:1.22-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /serv
+
+# Copy Serv source and build the compiler + LSP
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN go build -ldflags="-s -w" -o /usr/local/bin/serv main.go
+RUN go build -ldflags="-s -w" -o /usr/local/bin/serv-lsp ./lsp/
+
+# Runtime image with Serv compiler + Go toolchain for compilation
+FROM golang:1.22-alpine
+
+RUN apk add --no-cache ca-certificates python3
+
+# Copy Serv compiler
+COPY --from=builder /usr/local/bin/serv /usr/local/bin/serv
+COPY --from=builder /usr/local/bin/serv-lsp /usr/local/bin/serv-lsp
+
+# Copy runtime and stdlib (needed for compilation)
+COPY --from=builder /serv/runtime /serv/runtime
+COPY --from=builder /serv/stdlib /serv/stdlib
+COPY --from=builder /serv/go.mod /serv/go.mod
+COPY --from=builder /serv/go.sum /serv/go.sum
+
+WORKDIR /app
+
+# Ensure go mod is initialized for compiled services
+RUN cd /serv && go mod download
+
+ENV PATH="/usr/local/bin:${PATH}"
+ENV GOPATH="/go"
+
+ENTRYPOINT ["serv"]

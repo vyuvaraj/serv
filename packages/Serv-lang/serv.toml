@@ -1,0 +1,37 @@
+# Serv Project Manifest File
+# Defines metadata, build entrypoints, environment profiles, and dependency configurations.
+
+[project]
+name = "my-serv-service"
+version = "1.0.0"
+authors = ["Developer <developer@example.com>"]
+description = "A high-performance background worker and API service built in Serv"
+entry = "main.srv"
+
+[dependencies]
+# Standard library modules and registry dependencies
+db = "std"
+cache = "std"
+queue = "std"
+store = "std"
+
+[profiles]
+# Environment profiles loaded via `serv run --env <profile>`
+[profiles.development]
+SERV_OTLP_ENDPOINT = "http://localhost:4317"
+SERV_JWT_SECRET = "dev-secret-key-change-me"
+PORT = 8080
+
+[profiles.staging]
+SERV_OTLP_ENDPOINT = "http://otel-collector.staging.local:4317"
+SERV_JWT_SECRET = "staging-secret-key-super-secure"
+PORT = 8080
+
+[profiles.production]
+SERV_OTLP_ENDPOINT = "https://otel.production.internal:4317"
+SERV_JWT_SECRET = "prod-rotating-kms-arn-reference"
+PORT = 9000
+
+[locks]
+# Dependency checksum locking (example structure)
+"github.com/vyuvaraj/serv-auth" = "sha256-d3b07384d113edcc1b16c888991fa92427ae41e4649b934ca495991b7852b855"

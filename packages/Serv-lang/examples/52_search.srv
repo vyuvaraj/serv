@@ -1,0 +1,32 @@
+// Serv Example 52: Search Adapter
+// Demonstrates full-text search with Meilisearch or Elasticsearch backends.
+// Build: serv build examples/52_search.srv -o test_search.exe
+
+server "8080"
+search "meilisearch://localhost:7700"
+
+// Index a new product
+
+route "POST" "/api/products" (req) {
+    let body = json.parse(req.body)
+    let id = body.id
+    search.index(id, body)
+    return { "status": "indexed", "id": id }
+}
+
+// Search products by query string
+
+route "GET" "/api/search" (req) {
+    let q = req.query.q
+    if q == nil {
+        return { "error": "missing ?q= parameter" }
+    }
+    let results = search.query(q, {})
+    return { "query": q, "results": results }
+}
+
+// Health check
+
+route "GET" "/health" (req) {
+    return { "status": "ok", "search": "meilisearch://localhost:7700" }
+}

@@ -1,0 +1,69 @@
+// Serv Example 46: Generic Constraints
+// Build: serv build examples/46_generic_constraints.srv -o generics_demo.exe
+//
+// Syntax: fn name[T: Constraint](params) -> returnType
+// Constraints: Comparable, Numeric, Ordered, Integer, Float, Signed, Unsigned
+
+server "8080"
+
+// Constrained to ordered types (supports <, >, <=, >=)
+
+fn maxOf[T: Ordered](a: T, b: T) -> T {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+fn minOf[T: Ordered](a: T, b: T) -> T {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+// Constrained to numeric types (supports arithmetic)
+
+fn add[T: Numeric](a: T, b: T) -> T {
+    return a + b
+}
+
+fn double[T: Numeric](value: T) -> T {
+    return value + value
+}
+
+// Unconstrained (any) still works
+
+fn identity[T](value: T) -> T {
+    return value
+}
+
+// Multiple constraints
+
+fn clamp[T: Ordered](value: T, lo: T, hi: T) -> T {
+    if value < lo {
+        return lo
+    }
+    if value > hi {
+        return hi
+    }
+    return value
+}
+
+route "GET" "/api/test" (req) {
+    let maxVal = maxOf[int](10, 20)
+    let minVal = minOf[int](5, 3)
+    let sum = add[int](15, 27)
+    let dbl = double[int](21)
+    let clamped = clamp[int](50, 0, 100)
+    let id = identity[string]("hello generics")
+
+    return {
+        "max": maxVal,
+        "min": minVal,
+        "sum": sum,
+        "double": dbl,
+        "clamped": clamped,
+        "identity": id
+    }
+}

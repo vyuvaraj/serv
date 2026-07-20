@@ -1,0 +1,36 @@
+// Serv Example 29: Middleware
+// Lint: serv lint examples/29_middleware.srv
+// Build: serv build examples/29_middleware.srv -o test_middleware.exe
+
+server "8080"
+
+// Define middleware
+
+middleware auth(req) {
+    let token = req.body
+    if token == "" {
+        return { "status": 401, "error": "Unauthorized: missing token" }
+    }
+}
+
+middleware logging(req) {
+    log.info("Request: ", req.method, " ", req.path)
+}
+
+// Public route — no middleware
+
+route "GET" "/health" (req) {
+    return { "status": "ok" }
+}
+
+// Protected route — requires auth
+
+route "GET" "/admin" (req) use [auth, logging] {
+    return { "data": "admin panel", "secret": "42" }
+}
+
+// Route with just logging
+
+route "GET" "/users" (req) use [logging] {
+    return { "users": ["Alice", "Bob"] }
+}

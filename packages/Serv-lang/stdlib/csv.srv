@@ -1,0 +1,66 @@
+// Serv Standard Library: CSV Parsing
+// Import: import { parseCSV, toCSV, parseRow } from "stdlib/csv.srv"
+//
+// Simple CSV helpers for import/export scenarios.
+
+// Parse a single CSV row into an array of fields
+export fn parseRow(line) {
+    return line.split(",")
+}
+
+// Parse a full CSV string into an array of row arrays
+export fn parseCSV(content) {
+    let lines = content.split("\n")
+    let rows = []
+    for line in lines {
+        if line.trim() != "" {
+            let fields = parseRow(line)
+            rows = rows.push(fields)
+        }
+    }
+    return rows
+}
+
+// Convert an array of values to a CSV row string
+export fn toRow(values) {
+    let parts = []
+    for val in values {
+        let s = f"{val}"
+        let needsEscaping = false
+        if s.includes(",") {
+            needsEscaping = true
+        }
+        if s.includes("\"") {
+            needsEscaping = true
+        }
+        // Basic escaping: wrap in quotes if it contains commas or double quotes
+        if needsEscaping {
+            let escaped = s.replace("\"", "\"\"")
+            parts = parts.push(f"\"{escaped}\"")
+        } else {
+            parts = parts.push(s)
+        }
+    }
+    // Join using array index iteration since we don't have join method natively,
+    // or we can construct it manually
+    let result = ""
+    let i = 0
+    for p in parts {
+        if i > 0 {
+            result = result + ","
+        }
+        result = result + p
+        i = i + 1
+    }
+    return result
+}
+
+// Convert an array of row arrays to a CSV string
+export fn toCSV(rows) {
+    let result = ""
+    for r in rows {
+        let rowStr = toRow(r)
+        result = result + rowStr + "\n"
+    }
+    return result
+}
