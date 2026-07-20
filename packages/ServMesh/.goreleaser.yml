@@ -1,0 +1,99 @@
+project_name: servmesh
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servmesh
+    main: .
+    binary: servmesh
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servmesh
+    builds: [servmesh]
+    name_template: "servmesh_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servmesh:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servmesh:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServMesh"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServMesh"
+
+brews:
+  - name: servmesh
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServMesh"
+    description: "Service mesh and sidecar proxy from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servmesh"
+    test: |
+      system "#{bin}/servmesh", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServMesh"
+    description: "Service mesh and sidecar proxy from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servmesh-pkg
+    package_name: servmesh
+    builds: [servmesh]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServMesh
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Service mesh and traffic management from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servmesh/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
