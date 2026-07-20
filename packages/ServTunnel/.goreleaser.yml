@@ -1,0 +1,99 @@
+project_name: servtunnel
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servtunnel
+    main: .
+    binary: servtunnel
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servtunnel
+    builds: [servtunnel]
+    name_template: "servtunnel_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servtunnel:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servtunnel:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServTunnel"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServTunnel"
+
+brews:
+  - name: servtunnel
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServTunnel"
+    description: "Secure tunneling and port-forwarding service from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servtunnel"
+    test: |
+      system "#{bin}/servtunnel", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServTunnel"
+    description: "Secure tunneling and port-forwarding service from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servtunnel-pkg
+    package_name: servtunnel
+    builds: [servtunnel]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServTunnel
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Secure tunnel and proxy service from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servtunnel/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
