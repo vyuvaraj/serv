@@ -4,8 +4,8 @@ github.com/golang-jwt/jwt/v5
 # github.com/gorilla/websocket v1.5.3
 ## explicit; go 1.12
 github.com/gorilla/websocket
-# github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
-## explicit; go 1.26.4
+# github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198 => ../ServShared
+## explicit; go 1.23.0
 github.com/vyuvaraj/ServShared
 github.com/vyuvaraj/ServShared/pkg/middleware
 # golang.org/x/crypto v0.53.0
@@ -24,3 +24,4 @@ golang.org/x/text/unicode/norm
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# github.com/vyuvaraj/ServShared => ../ServShared

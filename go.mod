@@ -1,10 +1,10 @@
 module servtunnel
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
+	github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198
 	golang.org/x/crypto v0.53.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -14,3 +14,5 @@ require (
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )
+
+replace github.com/vyuvaraj/ServShared => ../ServShared
