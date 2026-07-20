@@ -3,10 +3,11 @@ package compiler
 // Symbol represents a declared identifier (variable, parameter, function, struct, etc.)
 // inside the compiler's symbol table.
 type Symbol struct {
-	Name  string
-	Type  string // "variable", "parameter", "function", "struct", etc.
-	Token Token  // Token of the declaration for diagnostic line/col info
-	Used  bool   // Track if the symbol was referenced
+	Name     string
+	Type     string // "variable", "parameter", "function", "struct", etc.
+	DataType string // "int", "string", "User", "error", etc.
+	Token    Token  // Token of the declaration for diagnostic line/col info
+	Used     bool   // Track if the symbol was referenced
 }
 
 // Scope represents a lexical block scope in the program.
@@ -61,6 +62,11 @@ func (s *Scope) LookupLocal(name string) (*Symbol, bool) {
 // declareVar inserts a variable symbol into the current scope level of Codegen.
 func (c *Codegen) declareVar(name string) {
 	c.declaredVars.Insert(&Symbol{Name: name, Type: "variable"})
+}
+
+// declareTypedVar inserts a variable symbol with data type into the current scope level of Codegen.
+func (c *Codegen) declareTypedVar(name string, dataType string) {
+	c.declaredVars.Insert(&Symbol{Name: name, Type: "variable", DataType: dataType})
 }
 
 // isDeclared checks if a variable name is declared in the current lexical scope chain of Codegen.

@@ -1127,7 +1127,6 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 		}
 		return fmt.Sprintf("%s = %s\n%s", s.Name, val, blankStmt), nil
 	}
-	c.declareVar(s.Name)
 	goType := "interface{}"
 	if s.Type != "" {
 		goType = toGoType(s.Type)
@@ -1136,7 +1135,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			goType = "*" + s.Type
 		}
 		c.varTypes[s.Name] = s.Type
- 
+
 		// Apply type coercion if the value is dynamic (interface{})
 		inferred := c.getExpressionType(s.Value)
 		if inferred == "interface{}" {
@@ -1192,6 +1191,7 @@ func (c *Codegen) genLetStmt(s *LetStmt) (string, error) {
 			}
 		}
 	}
+	c.declareTypedVar(s.Name, goType)
 	if c.inFunction {
 		blankStmt := ""
 		if !c.isVarReferenced(s.Name) {

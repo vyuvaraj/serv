@@ -45,8 +45,10 @@ func runREPL(attachHost string) {
 	os.MkdirAll(replDir, 0755)
 
 	// Ensure go.mod exists for compilation
-	if _, err := ensureBuildGoMod(replDir); err != nil {
+	if goModChanged, err := ensureBuildGoMod(replDir); err != nil {
 		fmt.Printf("Warning: could not setup build module for REPL: %v\n", err)
+	} else if goModChanged {
+		_ = runGoModTidy(replDir)
 	}
 
 	// Accumulated state: variable declarations and function definitions
@@ -186,10 +188,7 @@ func compileAndRunREPL(goPath, srvFile, workDir string, printExpr string) (strin
 	mainFile := filepath.Join(workDir, "main.go")
 	os.WriteFile(mainFile, []byte(goCode), 0644)
 
-	// Tidy modules after writing Go code
-	if err := runGoModTidy(workDir); err != nil {
-		return "", fmt.Errorf("failed to tidy REPL module: %w", err)
-	}
+	// Skip tidy in interactive loop since it is already initialized at startup
 
 	// Remove stale binary to force rebuild
 	absWorkDir, _ := filepath.Abs(workDir)

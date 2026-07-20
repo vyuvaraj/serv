@@ -85,12 +85,64 @@ func (s *Server) analyzeAndPublishDiagnostics(uri, text string) {
 	var collectSymbols func(statements []compiler.Statement)
 	collectSymbols = func(statements []compiler.Statement) {
 		for _, stmt := range statements {
+			if stmt == nil {
+				continue
+			}
 			sym := extractSymbol(stmt)
 			if sym.Name != "" {
 				symbols = append(symbols, sym)
 			}
-			if app, ok := stmt.(*compiler.AppStmt); ok && app.Body != nil {
-				collectSymbols(app.Body.Statements)
+			switch s := stmt.(type) {
+			case *compiler.AppStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.FnDecl:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.RouteStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.MiddlewareDecl:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.ToolStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.EveryStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.CronStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.SubscribeStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+			case *compiler.TryCatchStmt:
+				if s.TryBody != nil {
+					collectSymbols(s.TryBody.Statements)
+				}
+				if s.CatchBody != nil {
+					collectSymbols(s.CatchBody.Statements)
+				}
+			case *compiler.IfStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
+				if s.ElseBody != nil {
+					collectSymbols(s.ElseBody.Statements)
+				}
+			case *compiler.ForStmt:
+				if s.Body != nil {
+					collectSymbols(s.Body.Statements)
+				}
 			}
 		}
 	}
