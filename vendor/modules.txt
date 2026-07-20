@@ -53,8 +53,8 @@ github.com/tetratelabs/wazero/internal/wasm/binary
 github.com/tetratelabs/wazero/internal/wasmdebug
 github.com/tetratelabs/wazero/internal/wasmruntime
 github.com/tetratelabs/wazero/sys
-# github.com/vyuvaraj/ServShared v1.0.2-0.20260714131806-8f86487bce70
-## explicit; go 1.26.4
+# github.com/vyuvaraj/ServShared v1.0.2-0.20260719054743-81a270f75198 => ../ServShared
+## explicit; go 1.23.0
 github.com/vyuvaraj/ServShared
 github.com/vyuvaraj/ServShared/pkg/middleware
 github.com/vyuvaraj/ServShared/pkg/policy
@@ -76,3 +76,4 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
+# github.com/vyuvaraj/ServShared => ../ServShared
