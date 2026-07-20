@@ -1,0 +1,99 @@
+project_name: servcron
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servcron
+    main: .
+    binary: servcron
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servcron
+    builds: [servcron]
+    name_template: "servcron_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servcron:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servcron:latest"
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServCron"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServCron"
+
+brews:
+  - name: servcron
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServCron"
+    description: "Distributed cron scheduler and job runner from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servcron"
+    test: |
+      system "#{bin}/servcron", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServCron"
+    description: "Distributed cron scheduler and job runner from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servcron-pkg
+    package_name: servcron
+    builds: [servcron]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServCron
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Distributed cron job scheduler from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servcron/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace
