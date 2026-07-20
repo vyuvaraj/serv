@@ -420,11 +420,9 @@ func BenchmarkCronNextCalculation(b *testing.B) {
 		"30 18 * * 5",    // friday 6:30pm
 	}
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	idx := 0
-	for b.Loop() {
-		expr := exprs[idx%len(exprs)]
+	for i := 0; i < b.N; i++ {
+		expr := exprs[i%len(exprs)]
 		_, _ = cron.CalculateNextCron(expr, from)
-		idx++
 	}
 }
 
