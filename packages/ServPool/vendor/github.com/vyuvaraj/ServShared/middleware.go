@@ -1,0 +1,357 @@
+package ServShared
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math/rand"
+	"net"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/vyuvaraj/ServShared/pkg/middleware"
+)
+
+// ContextKey is the type for context keys to avoid collisions.
+type ContextKey string
+
+const (
+	// ClaimsContextKey is the context key for authenticated claims.
+	ClaimsContextKey ContextKey = ContextKey(middleware.ClaimsContextKey)
+	// TenantContextKey is the context key for the verified tenant ID.
+	TenantContextKey ContextKey = ContextKey(middleware.TenantContextKey)
+)
+
+// GetClaims extracts claims from request context (set by AuthMiddleware).
+func GetClaims(r *http.Request) *Claims {
+	mc := middleware.GetClaims(r)
+	if mc == nil {
+		return nil
+	}
+	// Map middleware.Claims to ServShared.Claims
+	return &Claims{
+		Username: mc.Username,
+		Roles:    mc.Roles,
+		Scopes:   mc.Scopes,
+		TenantID: mc.TenantID,
+	}
+}
+
+// GetTenantID extracts the verified tenant ID from request context (set by TenantMiddleware).
+// Always use this instead of reading X-Tenant-ID directly to ensure it has been verified.
+func GetTenantID(r *http.Request) string {
+	return middleware.GetTenantID(r)
+}
+
+// AuthMiddleware returns an HTTP middleware that enforces JWT auth.
+func AuthMiddleware(next http.Handler) http.Handler {
+	return middleware.AuthMiddleware(next)
+}
+
+// TenantMiddleware enforces that the X-Tenant-ID request header matches the
+// tenant_id claim embedded in the verified JWT.
+func TenantMiddleware(next http.Handler) http.Handler {
+	return middleware.TenantMiddleware(next)
+}
+
+
+
+// HasRole checks if the authenticated claims include a specific role.
+func HasRole(r *http.Request, role string) bool {
+	claims := GetClaims(r)
+	if claims == nil {
+		return false
+	}
+	for _, r := range claims.Roles {
+		if r == role || r == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func writeAuthError(w http.ResponseWriter, status int, msg, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": msg,
+		"code":  code,
+	})
+}
+
+// responseWriterWrapper wraps http.ResponseWriter to capture status code
+type responseWriterWrapper struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *responseWriterWrapper) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// TraceMiddleware intercepts requests to create OTel spans and propagates trace headers
+func TraceMiddleware(serviceName string, next http.Handler) http.Handler {
+	return middleware.TraceMiddleware(serviceName, next)
+}
+
+// LogJSON logs a message in structured JSON format, extracting trace ID from request context if available
+func LogJSON(r *http.Request, level, msg string) {
+	entry := map[string]interface{}{
+		"level": level,
+		"ts":    time.Now().Format(time.RFC3339),
+		"msg":   SanitizeLog(msg),
+	}
+	if r != nil {
+		entry["method"] = r.Method
+		entry["path"] = r.URL.Path
+		tp := r.Header.Get("traceparent")
+		if tp != "" {
+			parts := strings.Split(tp, "-")
+			if len(parts) >= 3 {
+				entry["trace_id"] = parts[1]
+			}
+		}
+	}
+	data, _ := json.Marshal(entry)
+	fmt.Println(string(data))
+}
+
+// Validatable represents a request payload that can validate its own fields.
+type Validatable interface {
+	Validate() error
+}
+
+// DecodeAndValidateJSON decodes JSON from a request body and validates it.
+// It returns true on success, or false if it wrote an HTTP error response.
+func DecodeAndValidateJSON(w http.ResponseWriter, r *http.Request, dest Validatable) bool {
+	if err := json.NewDecoder(r.Body).Decode(dest); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "Invalid JSON payload: "+err.Error(), "ERR_BAD_REQUEST")
+		return false
+	}
+	if err := dest.Validate(); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "Validation failed: "+err.Error(), "ERR_VALIDATION_FAILED")
+		return false
+	}
+	return true
+}
+
+// MaxBytesMiddleware limits the size of the request body.
+func MaxBytesMiddleware(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+var sanitizeRegex = regexp.MustCompile(`(?i)(["']?)(password|secret|token|key|authorization|bearer|passwd)(["']?)\s*[:=]\s*("([^"]+)"|'([^']+)'|([^\s,"'\r\n]+))`)
+
+// SanitizeLog redacts sensitive information from log messages.
+func SanitizeLog(msg string) string {
+	return sanitizeRegex.ReplaceAllStringFunc(msg, func(match string) string {
+		sepIdx := strings.IndexAny(match, ":=")
+		if sepIdx == -1 {
+			return match
+		}
+		keyPart := match[:sepIdx+1]
+		valPart := match[sepIdx+1:]
+		trimmedVal := strings.TrimSpace(valPart)
+		
+		spaceLen := len(valPart) - len(strings.TrimLeft(valPart, " \t"))
+		leadingSpaces := valPart[:spaceLen]
+
+		if strings.HasPrefix(trimmedVal, "\"") && strings.HasSuffix(trimmedVal, "\"") {
+			return keyPart + leadingSpaces + `"[REDACTED]"`
+		}
+		if strings.HasPrefix(trimmedVal, "'") && strings.HasSuffix(trimmedVal, "'") {
+			return keyPart + leadingSpaces + `'[REDACTED]'`
+		}
+		return keyPart + leadingSpaces + "[REDACTED]"
+	})
+}
+
+var (
+	// IsolateTopicHook is dynamically injected by the Enterprise Edition module.
+	IsolateTopicHook func(ctx context.Context, topic string) string
+	// IsolateDBPoolHook is dynamically injected by the Enterprise Edition module.
+	IsolateDBPoolHook func(ctx context.Context, dbName string) string
+	// IsolateBucketHook is dynamically injected by the Enterprise Edition module.
+	IsolateBucketHook func(ctx context.Context, bucket string) string
+)
+
+// IsolateTopic prefixes a topic name with the tenant ID from context.
+// In OSS: returns the topic unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant isolation.
+func IsolateTopic(ctx context.Context, topic string) string {
+	if IsolateTopicHook != nil {
+		return IsolateTopicHook(ctx, topic)
+	}
+	return topic
+}
+
+// IsolateDBPool prefixes database name with the tenant ID from context.
+// In OSS: returns the dbName unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant isolation.
+func IsolateDBPool(ctx context.Context, dbName string) string {
+	if IsolateDBPoolHook != nil {
+		return IsolateDBPoolHook(ctx, dbName)
+	}
+	return dbName
+}
+
+// IsolateBucket prefixes a storage bucket name with the tenant ID from context.
+// In OSS: returns the bucket unchanged (single-tenant mode).
+// In EE: prefixes with tenant ID for multi-tenant S3 storage isolation.
+func IsolateBucket(ctx context.Context, bucket string) string {
+	if IsolateBucketHook != nil {
+		return IsolateBucketHook(ctx, bucket)
+	}
+	return bucket
+}
+
+// VersionHandler returns a JSON version response.
+func VersionHandler(serviceName, version string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"service": serviceName,
+			"version": version,
+			"edition": Edition,
+		})
+	}
+}
+
+// DeprecationMiddleware adds Deprecation and Sunset headers to response.
+func DeprecationMiddleware(sunsetDate string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Deprecation", "true")
+			if sunsetDate != "" {
+				w.Header().Set("Sunset", sunsetDate)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ChaosMiddleware injects random latencies and/or service dropouts for development testing.
+func ChaosMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Check for Latency Chaos
+		latencyMs := 0
+		if latencyEnv := os.Getenv("SERV_CHAOS_LATENCY_MS"); latencyEnv != "" {
+			if val, err := strconv.Atoi(latencyEnv); err == nil {
+				latencyMs = val
+			}
+		}
+		if latencyHeader := r.Header.Get("X-Chaos-Latency"); latencyHeader != "" {
+			if val, err := strconv.Atoi(latencyHeader); err == nil {
+				latencyMs = val
+			}
+		}
+
+		if latencyMs > 0 {
+			time.Sleep(time.Duration(latencyMs) * time.Millisecond)
+		}
+
+		// 2. Check for Drop/Failure Chaos
+		dropRate := 0.0
+		if dropEnv := os.Getenv("SERV_CHAOS_DROP_RATE"); dropEnv != "" {
+			if val, err := strconv.ParseFloat(dropEnv, 64); err == nil {
+				dropRate = val
+			}
+		}
+		if dropHeader := r.Header.Get("X-Chaos-Drop-Rate"); dropHeader != "" {
+			if val, err := strconv.ParseFloat(dropHeader, 64); err == nil {
+				dropRate = val
+			}
+		} else if r.Header.Get("X-Chaos-Drop") == "true" {
+			dropRate = 1.0
+		}
+
+		if dropRate > 0.0 {
+			// Seed random source if needed
+			if rand.Float64() < dropRate {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":"Chaos fault injected: request dropped","code":"ERR_CHAOS_DROPPED"}`))
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// CORSMiddleware adds Access-Control-Allow-Origin and other CORS headers.
+func CORSMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := os.Getenv("SERV_CORS_ORIGIN")
+		if origin == "" {
+			origin = "*"
+		}
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trace-ID, X-Tenant-ID, X-Signature, X-Public-Key, X-Provenance")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type ipRateLimiter struct {
+	mu     sync.Mutex
+	limits map[string][]time.Time
+}
+
+var globalIPLimiter = &ipRateLimiter{
+	limits: make(map[string][]time.Time),
+}
+
+// RateLimitMiddleware enforces a sliding window limit of 100 requests per minute per IP.
+func RateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+		
+		globalIPLimiter.mu.Lock()
+		now := time.Now()
+		cutoff := now.Add(-1 * time.Minute)
+		
+		var active []time.Time
+		for _, t := range globalIPLimiter.limits[ip] {
+			if t.After(cutoff) {
+				active = append(active, t)
+			}
+		}
+		
+		if len(active) >= 100 {
+			globalIPLimiter.mu.Unlock()
+			WriteJSONError(w, r, "Rate limit exceeded. Max 100 requests per minute.", "ERR_RATE_LIMIT_EXCEEDED", http.StatusTooManyRequests)
+			return
+		}
+		
+		active = append(active, now)
+		globalIPLimiter.limits[ip] = active
+		globalIPLimiter.mu.Unlock()
+		
+		next.ServeHTTP(w, r)
+	})
+}
+
+
+
+
+
