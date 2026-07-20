@@ -1,0 +1,104 @@
+project_name: servgate
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: servgate
+    main: .
+    binary: servgate
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  - id: servgate
+    builds: [servgate]
+    name_template: "servgate_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - config.json
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vyuvaraj/servgate:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servgate:latest"
+    # goreleaser builds in a temp dir with only the binary + Dockerfile.
+    # Dockerfile.goreleaser expects a pre-built binary (no source build stage).
+    dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - config.json
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServGate"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServGate"
+
+brews:
+  - name: servgate
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServGate"
+    description: "High-performance API gateway and reverse proxy from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servgate"
+    test: |
+      system "#{bin}/servgate", "--version"
+
+scoops:
+  - repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServGate"
+    description: "High-performance API gateway and reverse proxy from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servgate-pkg
+    package_name: servgate
+    builds: [servgate]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServGate
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: High-performance API gateway and reverse proxy from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servgate/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace

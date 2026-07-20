@@ -1,0 +1,14 @@
+{
+  "addr": ":8080",
+  "auth_token": "gateway-secret-token",
+  "tls_cert": "",
+  "tls_key": "",
+  "routes": [
+    {
+      "prefix": "/api/v1/orders",
+      "target": "http://127.0.0.1:8081",
+      "middleware": "uppercase",
+      "rate_limit_rpm": 60
+    }
+  ]
+}
