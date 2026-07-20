@@ -1,0 +1,95 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: servstorebuckets.storage.servstore.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: storage.servstore.io
+  names:
+    kind: ServStoreBucket
+    listKind: ServStoreBucketList
+    plural: servstorebuckets
+    singular: servstorebucket
+    shortNames: ["ssb"]
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Cluster
+      type: string
+      jsonPath: .spec.clusterRef
+    - name: Versioning
+      type: string
+      jsonPath: .spec.versioning
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required: ["clusterRef"]
+            properties:
+              clusterRef:
+                type: string
+                description: Name of the ServStoreCluster in the same namespace.
+              versioning:
+                type: string
+                enum: [Enabled, Suspended, Disabled]
+                default: Disabled
+                description: S3 object versioning state.
+              contentAddressable:
+                type: boolean
+                default: false
+                description: Enable BLAKE3 content-addressed deduplication.
+              deletionPolicy:
+                type: string
+                enum: [Delete, Retain]
+                default: Delete
+                description: Whether to delete the remote bucket when this resource is removed.
+              lifecycle:
+                type: array
+                description: Automatic object expiration rules.
+                items:
+                  type: object
+                  required: [id, enabled, expirationDays]
+                  properties:
+                    id: { type: string }
+                    enabled: { type: boolean }
+                    prefix: { type: string, default: "" }
+                    expirationDays: { type: integer, minimum: 1 }
+              coldTier:
+                type: object
+                description: Cold storage tiering configuration.
+                properties:
+                  endpoint: { type: string }
+                  remoteBucket: { type: string }
+                  region: { type: string }
+                  secretRef:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      accessKeyField: { type: string, default: access_key }
+                      secretKeyField: { type: string, default: secret_key }
+                  minAgeDays: { type: integer, minimum: 0, default: 30 }
+                  scanIntervalMin: { type: integer, minimum: 1, default: 60 }
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum: [Pending, Ready, Failed]
+              endpoint:
+                type: string
+              message:
+                type: string

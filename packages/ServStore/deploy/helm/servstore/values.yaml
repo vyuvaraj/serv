@@ -1,0 +1,154 @@
+# -- Number of ServStore storage nodes in the StatefulSet
+replicaCount: 3
+
+image:
+  repository: ghcr.io/vyuvaraj/servstore
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# -- Unique node ID prefix; each pod gets <nodeIdPrefix>-<ordinal>
+nodeIdPrefix: "servstore"
+
+# -- Port the ServStore S3 server listens on inside the container
+containerPort: 9000
+
+# -- Data directory inside the container
+dataDir: /data
+
+# Authentication
+auth:
+  # -- Enable AWS Signature V4 authentication
+  enabled: false
+  accessKey: "minioadmin"
+  # -- Reference an existing Secret for the secret key (key: secret-key)
+  existingSecret: ""
+  secretKey: "minioadmin"
+
+# TLS
+tls:
+  # -- Enable TLS 1.3. Requires a Kubernetes TLS Secret.
+  enabled: false
+  # -- Name of a Kubernetes TLS Secret with tls.crt and tls.key
+  secretName: ""
+
+# Encryption at rest
+encryption:
+  # -- Enable AES-256-GCM encryption at rest
+  enabled: false
+  # -- Passphrase (use existingSecret in production)
+  passphrase: ""
+  existingSecret: ""
+  secretKey: "encryption-key"
+
+# Erasure coding (mutually exclusive with replicationFactor > 1)
+erasureCoding:
+  enabled: false
+  dataShards: 2
+  parityShards: 1
+
+# -- Replication factor (ignored when erasureCoding.enabled = true)
+replicationFactor: 2
+
+# Rate limiting
+rateLimit:
+  # -- Max requests per second per tenant namespace (0 = unlimited)
+  requestsPerSecond: 0
+  burst: 0
+
+# Persistent storage per node
+persistence:
+  enabled: true
+  storageClassName: ""
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+# Resource requests/limits
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "2"
+    memory: "2Gi"
+
+# Service
+service:
+  # -- Service type for the S3 API endpoint
+  type: ClusterIP
+  port: 9000
+  # -- Expose as LoadBalancer for external access
+  loadBalancer:
+    enabled: false
+    annotations: {}
+
+# PodDisruptionBudget
+podDisruptionBudget:
+  enabled: true
+  # -- Minimum available replicas during voluntary disruptions
+  minAvailable: 2
+
+# HorizontalPodAutoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ServStore Operator
+operator:
+  # -- Deploy the ServStore Kubernetes Operator alongside the cluster
+  enabled: true
+  image:
+    repository: ghcr.io/vyuvaraj/servstore-operator
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+
+# CSI Driver
+csiDriver:
+  enabled: false
+  image:
+    repository: ghcr.io/vyuvaraj/servstore-csi
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  socketDir: /var/lib/kubelet/plugins/csi.servstore.io
+
+# -- Additional pod annotations
+podAnnotations: {}
+
+# -- Additional pod labels
+podLabels: {}
+
+# -- Node selector for the StatefulSet pods
+nodeSelector: {}
+
+# -- Tolerations for the StatefulSet pods
+tolerations: []
+
+# -- Affinity rules (anti-affinity for HA is auto-applied by the chart)
+affinity: {}
+
+# -- Security context for pods
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+# ServiceAccount
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

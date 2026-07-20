@@ -1,0 +1,131 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: servstoreclusters.storage.servstore.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+spec:
+  group: storage.servstore.io
+  names:
+    kind: ServStoreCluster
+    listKind: ServStoreClusterList
+    plural: servstoreclusters
+    singular: servstorecluster
+    shortNames: ["ssc"]
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Replicas
+      type: integer
+      jsonPath: .spec.replicas
+    - name: Ready
+      type: integer
+      jsonPath: .status.readyNodes
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: Endpoint
+      type: string
+      jsonPath: .status.endpoint
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required: ["replicas", "image"]
+            properties:
+              replicas:
+                type: integer
+                minimum: 1
+                maximum: 32
+                description: Number of ServStore storage nodes.
+              image:
+                type: string
+                description: Container image for the ServStore server (e.g. ghcr.io/vyuvaraj/servstore:latest).
+              dataDir:
+                type: string
+                default: /data
+                description: Mount path inside the container where bucket data is stored.
+              auth:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    default: false
+                  accessKey:
+                    type: string
+                  secretKeySecretRef:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      key: { type: string }
+              tls:
+                type: object
+                properties:
+                  secretName:
+                    type: string
+                    description: Kubernetes TLS Secret containing tls.crt and tls.key.
+              erasureCoding:
+                type: object
+                properties:
+                  enabled: { type: boolean, default: false }
+                  dataShards: { type: integer, default: 2 }
+                  parityShards: { type: integer, default: 1 }
+              replicationFactor:
+                type: integer
+                default: 2
+                minimum: 1
+              rateLimit:
+                type: object
+                properties:
+                  requestsPerSecond: { type: integer, minimum: 1 }
+                  burst: { type: integer, minimum: 1 }
+              resources:
+                type: object
+                properties:
+                  requests:
+                    type: object
+                    properties:
+                      cpu: { type: string }
+                      memory: { type: string }
+                  limits:
+                    type: object
+                    properties:
+                      cpu: { type: string }
+                      memory: { type: string }
+              storage:
+                type: object
+                properties:
+                  storageClassName: { type: string }
+                  size:
+                    type: string
+                    default: 10Gi
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum: [Pending, Initializing, Running, Upgrading, Degraded, Failed]
+              readyNodes:
+                type: integer
+              endpoint:
+                type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type: { type: string }
+                    status: { type: string }
+                    reason: { type: string }
+                    message: { type: string }
+                    lastTransitionTime: { type: string, format: date-time }

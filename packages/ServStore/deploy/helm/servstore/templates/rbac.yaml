@@ -1,0 +1,53 @@
+---
+# ClusterRole — Operator needs full access to ServStore CRDs and core resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "servstore.fullname" . }}-operator
+  labels:
+    {{- include "servstore.labels" . | nindent 4 }}
+rules:
+# ServStore CRDs
+- apiGroups: ["storage.servstore.io"]
+  resources:
+  - servstoreclusters
+  - servstoreclusters/status
+  - servstoreclusters/finalizers
+  - servstorebuckets
+  - servstorebuckets/status
+  - servstorecredentials
+  - servstorecredentials/status
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Core resources the operator manages
+- apiGroups: ["apps"]
+  resources: ["statefulsets", "statefulsets/status"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["services", "configmaps", "secrets", "pods", "pods/status", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Events for status reporting
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+# Leader election
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "servstore.fullname" . }}-operator
+  labels:
+    {{- include "servstore.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "servstore.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "servstore.fullname" . }}-operator
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,23 @@
+apiVersion: v2
+name: servstore
+description: |
+  A cloud-native, distributed, AI-native, S3-compatible object storage engine.
+  Deploys a ServStore cluster as a Kubernetes StatefulSet with optional TLS,
+  authentication, erasure coding, and the ServStore Operator.
+type: application
+version: 1.0.0
+appVersion: "phase5"
+keywords:
+  - storage
+  - s3
+  - object-storage
+  - distributed
+  - ai-native
+home: https://github.com/vyuvaraj/ServStore
+sources:
+  - https://github.com/vyuvaraj/ServStore
+maintainers:
+  - name: ServStore Authors
+    url: https://github.com/vyuvaraj/ServStore
+annotations:
+  category: Storage

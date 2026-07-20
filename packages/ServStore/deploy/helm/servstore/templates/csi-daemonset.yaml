@@ -1,0 +1,84 @@
+{{- if .Values.csiDriver.enabled }}
+# ServStore CSI Driver DaemonSet — runs the CSI node plugin on every Kubernetes node
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "servstore.fullname" . }}-csi
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "servstore.labels" . | nindent 4 }}
+    app.kubernetes.io/component: csi-driver
+spec:
+  selector:
+    matchLabels:
+      {{- include "servstore.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: csi-driver
+  template:
+    metadata:
+      labels:
+        {{- include "servstore.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: csi-driver
+    spec:
+      serviceAccountName: {{ include "servstore.serviceAccountName" . }}
+      hostNetwork: false
+      containers:
+      - name: csi-driver
+        image: "{{ .Values.csiDriver.image.repository }}:{{ .Values.csiDriver.image.tag }}"
+        imagePullPolicy: {{ .Values.csiDriver.image.pullPolicy }}
+        securityContext:
+          privileged: true
+        env:
+        - name: CSI_ENDPOINT
+          value: "unix://{{ .Values.csiDriver.socketDir }}/csi.sock"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: SERVSTORE_ENDPOINT
+          value: "http://{{ include "servstore.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}"
+        volumeMounts:
+        - name: plugin-dir
+          mountPath: {{ .Values.csiDriver.socketDir }}
+        - name: kubelet-dir
+          mountPath: /var/lib/kubelet
+          mountPropagation: Bidirectional
+        - name: dev-dir
+          mountPath: /dev
+      # Kubernetes CSI sidecar: node-driver-registrar
+      - name: node-driver-registrar
+        image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.10.0
+        args:
+        - "--csi-address={{ .Values.csiDriver.socketDir }}/csi.sock"
+        - "--kubelet-registration-path={{ .Values.csiDriver.socketDir }}/csi.sock"
+        volumeMounts:
+        - name: plugin-dir
+          mountPath: {{ .Values.csiDriver.socketDir }}
+        - name: registration-dir
+          mountPath: /registration
+      volumes:
+      - name: plugin-dir
+        hostPath:
+          path: {{ .Values.csiDriver.socketDir }}
+          type: DirectoryOrCreate
+      - name: kubelet-dir
+        hostPath:
+          path: /var/lib/kubelet
+      - name: registration-dir
+        hostPath:
+          path: /var/lib/kubelet/plugins_registry
+      - name: dev-dir
+        hostPath:
+          path: /dev
+---
+# CSIDriver registration object
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.servstore.io
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  volumeLifecycleModes:
+  - Persistent
+  - Ephemeral
+{{- end }}

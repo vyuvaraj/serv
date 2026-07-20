@@ -1,0 +1,45 @@
+---
+# Headless Service — for StatefulSet peer discovery and Raft consensus
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "servstore.fullname" . }}-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "servstore.labels" . | nindent 4 }}
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "servstore.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: s3
+    port: {{ .Values.containerPort }}
+    targetPort: s3
+    protocol: TCP
+---
+# ClusterIP Service — internal S3 API access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "servstore.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "servstore.labels" . | nindent 4 }}
+spec:
+  type: {{ if .Values.service.loadBalancer.enabled }}LoadBalancer{{ else }}{{ .Values.service.type }}{{ end }}
+  {{- if .Values.service.loadBalancer.enabled }}
+  {{- with .Values.service.loadBalancer.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  selector:
+    {{- include "servstore.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: s3
+    port: {{ .Values.service.port }}
+    targetPort: s3
+    protocol: TCP

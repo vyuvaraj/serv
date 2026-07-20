@@ -1,0 +1,159 @@
+project_name: servstore
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # Primary server daemon
+  - id: servstore
+    main: ./cmd/servstore
+    binary: servstore
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+  # CLI tool (installable by end users)
+  - id: servstore-cli
+    main: ./cmd/servstore-cli
+    binary: servstore-cli
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+  # Kubernetes CSI driver — Linux-only (runs as a DaemonSet sidecar)
+  - id: csi-driver
+    main: ./cmd/csi-driver
+    binary: servstore-csi
+    goos: [linux]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+  # Kubernetes operator — Linux-only
+  - id: operator
+    main: ./cmd/operator
+    binary: servstore-operator
+    goos: [linux]
+    goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
+
+archives:
+  # Server binary archive (for operators deploying manually)
+  - id: servstore-server
+    builds: [servstore]
+    name_template: "servstore_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+  # CLI archive (for developers)
+  - id: servstore-cli-archive
+    builds: [servstore-cli]
+    name_template: "servstore-cli_{{.Version}}_{{.Os}}_{{.Arch}}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+dockers:
+  - id: servstore-image
+    image_templates:
+      - "ghcr.io/vyuvaraj/servstore:{{.Tag}}"
+      - "ghcr.io/vyuvaraj/servstore:latest"
+    ids: [servstore]
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title=ServStore"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.source=https://github.com/vyuvaraj/ServStore"
+
+brews:
+  # Publish the CLI to Homebrew (most useful for developers)
+  - name: servstore
+    ids: [servstore-cli-archive]
+    repository:
+      owner: vyuvaraj
+      name: homebrew-serv
+    homepage: "https://github.com/vyuvaraj/ServStore"
+    description: "Distributed object and block storage service from the ServVerse platform"
+    license: "Apache-2.0"
+    install: |
+      bin.install "servstore-cli" => "servstore"
+    test: |
+      system "#{bin}/servstore", "--version"
+
+scoops:
+  - ids: [servstore-cli-archive]
+    repository:
+      owner: vyuvaraj
+      name: scoop-serv
+    homepage: "https://github.com/vyuvaraj/ServStore"
+    description: "Distributed object and block storage service from the ServVerse platform"
+    license: "Apache-2.0"
+
+
+nfpms:
+  - id: servstore-pkg
+    package_name: servstore
+    builds: [servstore]
+    vendor: Yuvaraj
+    homepage: https://github.com/vyuvaraj/ServStore
+    maintainer: Yuvaraj <vyuvaraj@github.com>
+    description: Object storage service from the ServVerse platform
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/servstore/README.md
+    scripts:
+      postinstall: scripts/postinstall.sh
+      preremove: scripts/preremove.sh
+release:
+  mode: replace

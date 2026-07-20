@@ -1,0 +1,14 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: servstore-pod-failure
+  namespace: default
+spec:
+  action: pod-failure
+  mode: one
+  duration: '5m'
+  selector:
+    labelSelectors:
+      'app.kubernetes.io/name': 'servstore'
+  scheduler:
+    cron: '*/10 * * * *'
