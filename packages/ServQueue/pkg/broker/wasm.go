@@ -17,7 +17,7 @@ import (
 
 const (
 	DefaultMemLimitMB = 64
-	DefaultTimeoutSec = 10
+	DefaultTimeoutMs  = 50
 	wasmPageBytes     = 65536 // 64 KiB
 )
 
@@ -72,8 +72,18 @@ func (m *WasmManager) Compile(ctx context.Context, wasmBytes []byte) (wazero.Com
 }
 
 func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.CompiledModule, message string, traceparent string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultTimeoutSec*time.Second)
+	timeout := 50 * time.Millisecond
+	if customTimeout := os.Getenv("SERV_WASM_TIMEOUT_MS"); customTimeout != "" {
+		if d, err := time.ParseDuration(customTimeout + "ms"); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("wasm: execution context error: %w", err)
+	}
 
 	m.mu.Lock()
 	pool, exists := m.pools[compiled]
@@ -121,6 +131,13 @@ func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.Compiled
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		if mod != nil {
+			_ = mod.Close(ctx)
+		}
+		return "", fmt.Errorf("wasm: execution context error: %w", err)
+	}
+
 	if mod != nil {
 		allocFn := mod.ExportedFunction("allocate")
 		if allocFn == nil {
@@ -164,6 +181,10 @@ func (m *WasmManager) RunTransform(ctx context.Context, compiled wazero.Compiled
 		} else {
 			_ = mod.Close(ctx)
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("wasm: execution context error: %w", err)
 	}
 
 	return stdout.String(), nil
