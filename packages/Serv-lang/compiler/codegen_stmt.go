@@ -770,6 +770,14 @@ func (c *Codegen) genTransformStmt(s *TransformStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\truntime.RegisterTransform(fmt.Sprint(%s), func(%s string) string %s)\n}\n\n", topic, s.Param, bodyStr), nil
 }
 
+func (c *Codegen) genPolicyStmt(s *PolicyStmt) (string, error) {
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("func %s(%s map[string]interface{}) bool %s\n\n", s.Name, s.Param, bodyStr), nil
+}
+
 func (c *Codegen) genPublishStmt(s *PublishStmt) (string, error) {
 	topic, err := c.genExpression(s.Topic)
 	if err != nil {

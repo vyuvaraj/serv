@@ -29,6 +29,7 @@ const (
 	TOKEN_CRON       TokenType = "CRON"
 	TOKEN_SUBSCRIBE  TokenType = "SUBSCRIBE"
 	TOKEN_TRANSFORM  TokenType = "TRANSFORM"
+	TOKEN_POLICY     TokenType = "POLICY"
 	TOKEN_PUBLISH    TokenType = "PUBLISH"
 	TOKEN_SPAWN      TokenType = "SPAWN"
 	TOKEN_FN         TokenType = "FN"
@@ -658,6 +659,7 @@ var keywords = map[string]TokenType{
 	"cron":      TOKEN_CRON,
 	"subscribe": TOKEN_SUBSCRIBE,
 	"transform": TOKEN_TRANSFORM,
+	"policy":    TOKEN_POLICY,
 	"publish":   TOKEN_PUBLISH,
 	"spawn":     TOKEN_SPAWN,
 	"fn":        TOKEN_FN,

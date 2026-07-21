@@ -389,6 +389,20 @@ func (t *TransformStmt) String() string {
 	return "transform " + t.Topic.String() + " (" + t.Param + ") " + t.Body.String() + "\n"
 }
 
+// Policy Statement (Logic Configuration Engine)
+type PolicyStmt struct {
+	Token Token
+	Name  string     // Policy identifier name, e.g. "rate_limit_policy"
+	Param string     // Context parameter, e.g. "ctx"
+	Body  *BlockStmt
+}
+
+func (p *PolicyStmt) statementNode()       {}
+func (p *PolicyStmt) TokenLiteral() string { return p.Token.Literal }
+func (p *PolicyStmt) String() string {
+	return "policy " + p.Name + " (" + p.Param + ") " + p.Body.String() + "\n"
+}
+
 // Publish Statement
 type PublishStmt struct {
 	Token Token

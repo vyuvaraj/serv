@@ -3,6 +3,7 @@ package compiler
 import (
 	"bytes"
 	"fmt"
+	"go/format"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -327,6 +328,11 @@ func (c *Codegen) Generate() (string, error) {
 
 	out.WriteString(body.String())
 
+	formatted, err := format.Source(out.Bytes())
+	if err == nil {
+		return string(formatted), nil
+	}
+
 	return out.String(), nil
 }
 
@@ -584,6 +590,8 @@ case *SubscribeStmt:
 return c.genSubscribeStmt(s)
 case *TransformStmt:
 return c.genTransformStmt(s)
+case *PolicyStmt:
+return c.genPolicyStmt(s)
 case *PublishStmt:
 return c.genPublishStmt(s)
 	case *SpawnStmt:

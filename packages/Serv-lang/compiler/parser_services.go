@@ -578,6 +578,35 @@ func (p *Parser) parseTransformStatement() Statement {
 	return stmt
 }
 
+func (p *Parser) parsePolicyStatement() Statement {
+	stmt := &PolicyStmt{Token: p.curToken}
+
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_LPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_IDENT) {
+		return nil
+	}
+	stmt.Param = p.curToken.Literal
+
+	if !p.expectPeek(TOKEN_RPAREN) {
+		return nil
+	}
+
+	if !p.expectPeek(TOKEN_LBRACE) {
+		return nil
+	}
+
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
 // parseWsStatement parses: ws "/path" (conn) { body }
 func (p *Parser) parseWsStatement() Statement {
 	stmt := &WsStmt{Token: p.curToken}
