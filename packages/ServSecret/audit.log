@@ -7,3 +7,6 @@
 {"timestamp":"2026-07-21T14:35:03Z","tenant_id":"default","action":"SET","key":"bk-key","prev_hash":"","hash":"cc9ef77a1a633c2373feb4b7bb6da98012e4dd41f8731a065bd722c2c7256c85"}
 {"timestamp":"2026-07-21T14:35:03Z","tenant_id":"default","action":"ROTATE","key":"","prev_hash":"cc9ef77a1a633c2373feb4b7bb6da98012e4dd41f8731a065bd722c2c7256c85","hash":"13cff5e3dba65d537c35c8e2fbb69357c87c99998266a3e49ca3eceb254994fc"}
 {"timestamp":"2026-07-21T14:35:03Z","tenant_id":"default","action":"GET","key":"bk-key","prev_hash":"13cff5e3dba65d537c35c8e2fbb69357c87c99998266a3e49ca3eceb254994fc","hash":"711af2e0db53228e8e25fb8e4c751cc00d19b8a540e4ff3d6d642cf6cf8e39ec"}
+{"timestamp":"2026-07-21T14:44:26Z","tenant_id":"default","action":"SET","key":"bk-key","prev_hash":"","hash":"f86a3d8f8e170920e7c14bf7a2f64ba2e307eeda1dbf332de3f973def675647b"}
+{"timestamp":"2026-07-21T14:44:26Z","tenant_id":"default","action":"ROTATE","key":"","prev_hash":"f86a3d8f8e170920e7c14bf7a2f64ba2e307eeda1dbf332de3f973def675647b","hash":"fe9b6ad929cb91b8090ab880273e4939f057e64149ceb395b12803c141096c39"}
+{"timestamp":"2026-07-21T14:44:26Z","tenant_id":"default","action":"GET","key":"bk-key","prev_hash":"fe9b6ad929cb91b8090ab880273e4939f057e64149ceb395b12803c141096c39","hash":"e3813ba0d6b6933b368eec1d6e3404dadf2ea43abb731ea2fa5ae1669cec59dc"}

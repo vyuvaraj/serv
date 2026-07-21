@@ -52,6 +52,9 @@ func Analyze(program *Program) []Diagnostic {
 	// Check for SQL injection risks
 	diags = append(diags, analyzeSQLInjection(program)...)
 
+	// Concurrency static safety guardrails
+	diags = append(diags, analyzeConcurrencyGuardrails(program)...)
+
 	// ARCH.8: Bounded context domain boundaries checks
 	diags = append(diags, analyzeDomainBoundaries(program)...)
 

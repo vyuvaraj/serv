@@ -375,6 +375,20 @@ func (s *SubscribeStmt) String() string {
 	return "subscribe " + s.Topic.String() + " (" + s.Param + ") " + s.Body.String() + "\n"
 }
 
+// Transform Statement (Stream DSL WASM Transform)
+type TransformStmt struct {
+	Token Token
+	Topic Expression // Topic name as expression
+	Param string     // parameter name, e.g. "msg"
+	Body  *BlockStmt
+}
+
+func (t *TransformStmt) statementNode()       {}
+func (t *TransformStmt) TokenLiteral() string { return t.Token.Literal }
+func (t *TransformStmt) String() string {
+	return "transform " + t.Topic.String() + " (" + t.Param + ") " + t.Body.String() + "\n"
+}
+
 // Publish Statement
 type PublishStmt struct {
 	Token Token

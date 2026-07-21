@@ -756,6 +756,20 @@ func (c *Codegen) genSubscribeStmt(s *SubscribeStmt) (string, error) {
 	return fmt.Sprintf("func init() {\n\truntime.Subscribe(fmt.Sprint(%s), func(%s string) %s)\n}\n\n", topic, s.Param, bodyStr), nil
 }
 
+func (c *Codegen) genTransformStmt(s *TransformStmt) (string, error) {
+	topic, err := c.genExpression(s.Topic)
+	if err != nil {
+		return "", err
+	}
+
+	bodyStr, err := c.genBlockStatement(s.Body)
+	if err != nil {
+		return "", err
+	}
+	c.imports[`"fmt"`] = true
+	return fmt.Sprintf("func init() {\n\truntime.RegisterTransform(fmt.Sprint(%s), func(%s string) string %s)\n}\n\n", topic, s.Param, bodyStr), nil
+}
+
 func (c *Codegen) genPublishStmt(s *PublishStmt) (string, error) {
 	topic, err := c.genExpression(s.Topic)
 	if err != nil {

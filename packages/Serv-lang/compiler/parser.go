@@ -222,6 +222,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseCronStatement()
 	case TOKEN_SUBSCRIBE:
 		return p.parseSubscribeStatement()
+	case TOKEN_TRANSFORM:
+		return p.parseTransformStatement()
 	case TOKEN_PUBLISH:
 		return p.parsePublishStatement()
 	case TOKEN_SPAWN:

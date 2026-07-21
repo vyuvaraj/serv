@@ -582,6 +582,8 @@ case *CronStmt:
 return c.genCronStmt(s)
 case *SubscribeStmt:
 return c.genSubscribeStmt(s)
+case *TransformStmt:
+return c.genTransformStmt(s)
 case *PublishStmt:
 return c.genPublishStmt(s)
 	case *SpawnStmt:
