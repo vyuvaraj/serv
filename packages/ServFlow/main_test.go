@@ -501,14 +501,19 @@ func TestServFlowHistoryAndReplay(t *testing.T) {
 		t.Errorf("expected new instance ID for replay, got %q", replayInst.ID)
 	}
 
-	// Wait briefly for replay completion
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify replay completed successfully!
-	getResp, _ := http.Get(testServer.URL + "/api/workflows/instances/" + replayInst.ID)
+	// Wait with polling for replay completion
 	var finalReplay storage.WorkflowInstance
-	json.NewDecoder(getResp.Body).Decode(&finalReplay)
-	getResp.Body.Close()
+	for i := 0; i < 20; i++ {
+		time.Sleep(50 * time.Millisecond)
+		getResp, err := http.Get(testServer.URL + "/api/workflows/instances/" + replayInst.ID)
+		if err == nil {
+			json.NewDecoder(getResp.Body).Decode(&finalReplay)
+			getResp.Body.Close()
+			if finalReplay.Status == "completed" {
+				break
+			}
+		}
+	}
 
 	if finalReplay.Status != "completed" {
 		t.Errorf("expected replay workflow to complete, got %q. Logs: %v", finalReplay.Status, finalReplay.Logs)
