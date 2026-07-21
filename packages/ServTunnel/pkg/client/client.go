@@ -47,6 +47,8 @@ type Client struct {
 	tcpConns     map[string]net.Conn  // active downstream TCP connections (session -> net.Conn)
 	throttleBytesPerSec int64         // bandwidth limit in bytes/sec
 	resumptionToken     string        // persistent tunnel session resumption token
+	stopChan            chan struct{} // signal channel for clean shutdown
+	stopped             bool          // tracks if client has been closed
 }
 
 // NewClient creates a new tunnel client.
@@ -65,6 +67,7 @@ func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort,
 		inspector:    insp,
 		shareAuth:    shareAuth,
 		tcpConns:     make(map[string]net.Conn),
+		stopChan:     make(chan struct{}),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -72,6 +75,32 @@ func NewClient(localAddr, relayURL, subdomain, customDomain, token, inspectPort,
 			},
 		},
 	}
+}
+
+// Close stops the client reconnect loop and closes active connections.
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stopped {
+		return nil
+	}
+	c.stopped = true
+	if c.stopChan != nil {
+		close(c.stopChan)
+	}
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	for _, conn := range c.tcpConns {
+		conn.Close()
+	}
+	return nil
+}
+
+func (c *Client) isStopped() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stopped
 }
 
 // WithTCPPort configures the client to request a TCP tunnel.
@@ -160,6 +189,9 @@ func (c *Client) Run() error {
 	maxBackoff := 10 * time.Second
 
 	for {
+		if c.isStopped() {
+			return nil
+		}
 		fmt.Println("  Connecting...")
 		var header http.Header
 		if c.token != "" {
@@ -183,8 +215,13 @@ func (c *Client) Run() error {
 		}
 		conn, _, err := dialer.Dial(u, header)
 		if err != nil {
+			if c.isStopped() {
+				return nil
+			}
 			fmt.Printf("  failed to connect to relay: %v\n", err)
-			c.sleepWithJitter(backoff)
+			if !c.sleepWithJitter(backoff) {
+				return nil
+			}
 			backoff = backoff * 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -209,9 +246,14 @@ func (c *Client) Run() error {
 			},
 		}
 		if err := conn.WriteJSON(regMsg); err != nil {
+			if c.isStopped() {
+				return nil
+			}
 			fmt.Printf("  failed to send registration: %v\n", err)
 			conn.Close()
-			c.sleepWithJitter(backoff)
+			if !c.sleepWithJitter(backoff) {
+				return nil
+			}
 			backoff = backoff * 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -223,9 +265,14 @@ func (c *Client) Run() error {
 		var regResp tunnel.Envelope
 		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 		if err := conn.ReadJSON(&regResp); err != nil {
+			if c.isStopped() {
+				return nil
+			}
 			fmt.Printf("  failed to read registration response: %v\n", err)
 			conn.Close()
-			c.sleepWithJitter(backoff)
+			if !c.sleepWithJitter(backoff) {
+				return nil
+			}
 			backoff = backoff * 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -236,12 +283,17 @@ func (c *Client) Run() error {
 
 		if regResp.Type == tunnel.TypeError {
 			conn.Close()
+			if c.isStopped() {
+				return nil
+			}
 			errMsg := "unknown error"
 			if regResp.Control != nil {
 				errMsg = regResp.Control.Error
 			}
 			fmt.Printf("  registration failed: %s\n", errMsg)
-			c.sleepWithJitter(backoff)
+			if !c.sleepWithJitter(backoff) {
+				return nil
+			}
 			backoff = backoff * 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -251,8 +303,13 @@ func (c *Client) Run() error {
 
 		if regResp.Type != tunnel.TypeRegistered || regResp.Control == nil {
 			conn.Close()
+			if c.isStopped() {
+				return nil
+			}
 			fmt.Printf("  unexpected response type: %s\n", regResp.Type)
-			c.sleepWithJitter(backoff)
+			if !c.sleepWithJitter(backoff) {
+				return nil
+			}
 			backoff = backoff * 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -297,14 +354,23 @@ func (c *Client) Run() error {
 		}
 		c.mu.Unlock()
 
+		if c.isStopped() {
+			return nil
+		}
+
 		fmt.Println("  Connection lost, reconnecting...")
 	}
 }
 
-func (c *Client) sleepWithJitter(d time.Duration) {
+func (c *Client) sleepWithJitter(d time.Duration) bool {
 	// Add up to 20% jitter
 	jitter := time.Duration(rand.Int63n(int64(d) / 5))
-	time.Sleep(d + jitter)
+	select {
+	case <-c.stopChan:
+		return false
+	case <-time.After(d + jitter):
+		return true
+	}
 }
 
 // readLoop reads incoming tunnel requests and dispatches them.

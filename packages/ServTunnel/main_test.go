@@ -561,6 +561,7 @@ func TestClientReconnection(t *testing.T) {
 	// 2. Start the client
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
 	c := client.NewClient("127.0.0.1:9090", relayURL, "recon-test", "", "", "", "")
+	defer c.Close()
 
 	// Run client in background
 	go func() {
@@ -1007,6 +1008,7 @@ func TestBandwidthQuota(t *testing.T) {
 
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
 	c := client.NewClient("127.0.0.1:"+localPort, relayURL, "quotatest", "", "", "0", "")
+	defer c.Close()
 	go c.Run()
 	time.Sleep(150 * time.Millisecond)
 
@@ -1082,6 +1084,7 @@ func TestTunnelSharing(t *testing.T) {
 
 	relayURL := fmt.Sprintf("ws://%s/ws/connect", addr)
 	c := client.NewClient("127.0.0.1:"+localPort, relayURL, "sharetest", "", "", "0", "admin:pass123")
+	defer c.Close()
 	go c.Run()
 	time.Sleep(150 * time.Millisecond)
 
@@ -1175,10 +1178,12 @@ func TestMultipleTunnels(t *testing.T) {
 	
 	// Create client A
 	cA := client.NewClient("127.0.0.1:"+portA, relayURL, "suba", "", "", "0", "")
+	defer cA.Close()
 	go cA.Run()
 
 	// Create client B
 	cB := client.NewClient("127.0.0.1:"+portB, relayURL, "subb", "", "", "0", "")
+	defer cB.Close()
 	go cB.Run()
 
 	time.Sleep(200 * time.Millisecond)
@@ -1232,6 +1237,7 @@ func TestReservedSubdomains(t *testing.T) {
 
 	// Case 1: Connect to reserved subdomain "special" with incorrect token -> should fail to register
 	c1 := client.NewClient("127.0.0.1:8080", relayURL, "special", "", "wrongtoken", "0", "")
+	defer c1.Close()
 	go c1.Run()
 	time.Sleep(150 * time.Millisecond)
 
@@ -1255,6 +1261,7 @@ func TestReservedSubdomains(t *testing.T) {
 
 	// Case 2: Connect to reserved subdomain "special" with correct token -> should succeed
 	c2 := client.NewClient("127.0.0.1:8080", relayURL, "special", "", "secrettoken", "0", "")
+	defer c2.Close()
 	go c2.Run()
 	time.Sleep(150 * time.Millisecond)
 

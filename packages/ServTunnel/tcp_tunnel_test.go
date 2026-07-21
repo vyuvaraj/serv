@@ -69,6 +69,7 @@ func TestTCPTunneling(t *testing.T) {
 	relayWSURL := "ws://" + relayHTTPAddr + "/ws/connect"
 	c := client.NewClient(localAddr, relayWSURL, "my-tcp-tunnel", "", "", "", "")
 	c.WithTCPPort(tcpTunnelPort)
+	defer c.Close()
 
 	go func() {
 		_ = c.Run()
